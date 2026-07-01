@@ -4,6 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "predev": "cd ../engine && wasm-pack build --target web --out-dir ../frontend/src/wasm",
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
@@ -26,6 +27,8 @@
     "prettier": "^3.9.4",
     "prettier-plugin-tailwindcss": "^0.8.0",
     "typescript": "~6.0.2",
-    "vite": "^8.1.1"
+    "vite": "^8.1.2",
+    "vite-plugin-top-level-await": "^1.6.0",
+    "vite-plugin-wasm": "^3.6.0"
   }
 }
