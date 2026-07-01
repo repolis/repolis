@@ -1,0 +1,26 @@
+# general
+.DS_Store
+.env
+.env.local
+
+# frontend
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+frontend/*.local
+
+# backend
+backend/bin/
+backend/tmp/
+backend/*.exe
+backend/repos_cache/ 
+
+# engine
+engine/target/
+engine/Cargo.lock
+engine/pkg/
+
+# ide
+.idea/
+.vscode/
+*.swp
