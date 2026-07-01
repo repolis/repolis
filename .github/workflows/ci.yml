@@ -60,7 +60,7 @@ jobs:
     - name: Rebuild Wasm for Vite
       run: |
         curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
-        cd ../engine && wasm-pack build --target web
+        cd ../engine && wasm-pack build --target web --out-dir ../frontend/src/wasm
         
     - name: install npm dependencies
       run: npm install
