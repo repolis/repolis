@@ -18,6 +18,8 @@ type FileMetrics struct {
 	StructNames    []string  `json:"struct_names"`
 	StringLiterals []string  `json:"string_literals"`
 	Typology       string    `json:"typology"`
+	Summary        string    `json:"summary"`
+	Tags           []string  `json:"tags"`
 }
 
 type CityMap struct {
