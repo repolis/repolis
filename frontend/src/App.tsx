@@ -25,6 +25,7 @@ function App() {
       const res = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ repo_url: url }),
       });
 

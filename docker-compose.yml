@@ -11,6 +11,7 @@ services:
       - ENV=development
     volumes:
       - repo-clones:/tmp/repolis-clones
+      - repolis-db-data:/app/data
 
   frontend:
     build:
@@ -23,3 +24,4 @@ services:
 
 volumes:
   repo-clones:
+  repolis-db-data:
