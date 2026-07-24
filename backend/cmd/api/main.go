@@ -9,9 +9,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/joho/godotenv"
 	"github.com/repolis/repolis/backend/internal/analyzer"
 	"github.com/repolis/repolis/backend/internal/db"
 	"github.com/repolis/repolis/backend/internal/git"
+	"github.com/repolis/repolis/backend/internal/llm"
 	"github.com/repolis/repolis/backend/internal/models"
 )
 
@@ -44,6 +46,8 @@ func CookieMiddleware(next http.Handler) http.Handler {
 }
 
 func main() {
+	_ = godotenv.Load() // Load .env file if present
+
 	if err := db.InitDB(); err != nil {
 		log.Fatalf("[ERROR] Failed to initialize database: %v", err)
 	}
@@ -120,6 +124,15 @@ func handleAnalyze(w http.ResponseWriter, r *http.Request) {
 		sendJSONError(w, "Failed to analyze repository AST", http.StatusInternalServerError)
 		return
 	}
+
+	fmt.Printf("[LOG] Invoking LLM to determine building typologies...\n")
+	llmClient, err := llm.NewClient()
+	if err != nil {
+		sendJSONError(w, "Failed to create LLM client", http.StatusInternalServerError)
+		log.Fatalf("[ERROR] Failed to create LLM client: %v", err)
+		return
+	}
+	llmClient.CategorizeCity(r.Context(), finalClonePath, cityMap)
 
 	resp := models.AnalyzeResponse{
 		Status:   "success",
