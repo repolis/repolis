@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "predev": "cd ../engine && wasm-pack build --target web --out-dir ../frontend/src/wasm",
-    "dev": "vite",
+    "dev": "vite --clearScreen false",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
