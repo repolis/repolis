@@ -5,7 +5,7 @@ type AnalyzeRequest struct {
 }
 
 type AnalyzeResponse struct {
-	Status   string `json:"status"`
-	CityData any    `json:"cityData,omitempty"`
-	Error    string `json:"error,omitempty"`
+	Status   string   `json:"status"`
+	CityData *CityMap `json:"cityData,omitempty"`
+	Error    string   `json:"error,omitempty"`
 }

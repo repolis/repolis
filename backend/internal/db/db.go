@@ -50,12 +50,12 @@ func CreateSession(sessionID, userID, repoURL, clonePath, commitHash string) err
 	return err
 }
 
-func GetSessionByUserAndRepo(userID, repoURL string) (string, string, error) {
-	var sessionID, commitHash string
-	query := `SELECT id, commit_hash FROM sessions WHERE user_id = ? AND repo_url = ? ORDER BY created_at DESC LIMIT 1`
-	err := DB.QueryRow(query, userID, repoURL).Scan(&sessionID, &commitHash)
+func GetSessionByUserAndRepo(userID, repoURL string) (string, string, string, error) {
+	var sessionID, commitHash, clonePath string
+	query := `SELECT id, commit_hash, clone_path FROM sessions WHERE user_id = ? AND repo_url = ? ORDER BY created_at DESC LIMIT 1`
+	err := DB.QueryRow(query, userID, repoURL).Scan(&sessionID, &commitHash, &clonePath)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
-	return sessionID, commitHash, nil
+	return sessionID, commitHash, clonePath, nil
 }

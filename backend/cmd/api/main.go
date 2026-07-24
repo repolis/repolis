@@ -9,12 +9,14 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/repolis/repolis/backend/internal/analyzer"
 	"github.com/repolis/repolis/backend/internal/db"
 	"github.com/repolis/repolis/backend/internal/git"
 	"github.com/repolis/repolis/backend/internal/models"
 )
 
 type contextKey string
+
 const userIDKey contextKey = "userID"
 
 func CookieMiddleware(next http.Handler) http.Handler {
@@ -35,7 +37,7 @@ func CookieMiddleware(next http.Handler) http.Handler {
 		} else {
 			userID = cookie.Value
 		}
-		
+
 		ctx := context.WithValue(r.Context(), userIDKey, userID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
@@ -84,47 +86,44 @@ func handleAnalyze(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if existingSessionID, existingCommit, err := db.GetSessionByUserAndRepo(userID, req.RepoURL); err == nil && existingSessionID != "" {
+	var finalSessionID string
+	var finalClonePath string
+
+	if existingSessionID, existingCommit, existingClonePath, err := db.GetSessionByUserAndRepo(userID, req.RepoURL); err == nil && existingSessionID != "" {
 		if existingCommit == remoteCommit {
 			fmt.Printf("[LOG] Found existing session %s with matching commit %s. Skipping clone.\n", existingSessionID, existingCommit)
-			
-			resp := models.AnalyzeResponse{
-				Status: "success",
-				CityData: map[string]string{
-					"message":    "Repository already cloned in a previous session",
-					"repo":       req.RepoURL,
-					"session_id": existingSessionID,
-				},
-			}
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(resp)
-			return
+			finalSessionID = existingSessionID
+			finalClonePath = existingClonePath
 		} else {
-			fmt.Printf("[LOG] Remote repo has updated (Old: %s, New: %s). Will clone anew.\n", existingCommit, remoteCommit)
+			fmt.Printf("[LOG] Remote repo has updated. Will clone anew.\n")
 		}
 	}
 
-	sessionID := uuid.New().String()
+	if finalClonePath == "" {
+		finalSessionID = uuid.New().String()
+		clonePath, err := git.CloneRepo(req.RepoURL, finalSessionID)
+		if err != nil {
+			sendJSONError(w, "Failed to clone repository", http.StatusInternalServerError)
+			return
+		}
 
-	clonePath, err := git.CloneRepo(req.RepoURL, sessionID)
-	if err != nil {
-		sendJSONError(w, "Failed to clone repository", http.StatusInternalServerError)
-		return
+		if err := db.CreateSession(finalSessionID, userID, req.RepoURL, clonePath, remoteCommit); err != nil {
+			sendJSONError(w, "Failed to save session to database", http.StatusInternalServerError)
+			return
+		}
+		finalClonePath = clonePath
 	}
 
-	if err := db.CreateSession(sessionID, userID, req.RepoURL, clonePath, remoteCommit); err != nil {
-		sendJSONError(w, "Failed to save session to database", http.StatusInternalServerError)
+	fmt.Printf("[LOG] Analyzing AST for: %s\n", finalClonePath)
+	cityMap, err := analyzer.AnalyzeRepository(finalClonePath)
+	if err != nil {
+		sendJSONError(w, "Failed to analyze repository AST", http.StatusInternalServerError)
 		return
 	}
 
 	resp := models.AnalyzeResponse{
-		Status: "success",
-		CityData: map[string]string{
-			"message":    "Repository cloned and session created",
-			"repo":       req.RepoURL,
-			"session_id": sessionID,
-		},
+		Status:   "success",
+		CityData: cityMap,
 	}
 
 	w.Header().Set("Content-Type", "application/json")

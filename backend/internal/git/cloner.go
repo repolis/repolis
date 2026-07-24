@@ -13,7 +13,7 @@ func CloneRepo(repoURL string, sessionID string) (string, error) {
 		return "", err
 	}
 
-	cmd := exec.Command("git", "clone", "--depth", "1", repoURL, clonePath)
+	cmd := exec.Command("git", "clone", repoURL, clonePath)
 	if err := cmd.Run(); err != nil {
 		os.RemoveAll(clonePath)
 		return "", err
@@ -28,7 +28,7 @@ func GetRemoteCommitHash(repoURL string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	
+
 	parts := strings.Fields(string(out))
 	if len(parts) > 0 {
 		return parts[0], nil
