@@ -1,8 +1,8 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 
-import init, { say_hello_from_rust } from "./wasm/engine";
+import init, { load_city_data } from "./wasm/engine";
 
 interface RepoForm {
   repoUrl: string;
@@ -20,6 +20,8 @@ function App() {
     formState: { errors },
   } = useForm<RepoForm>();
 
+  const [wasmReady, setWasmReady] = useState(false);
+
   const analyzeMutation = useMutation({
     mutationFn: async (url: string): Promise<CityMapResponse> => {
       const res = await fetch("/api/analyze", {
@@ -36,13 +38,27 @@ function App() {
     },
     onSuccess: (data) => {
       console.log("Successfully generated city map:", data);
+      if (data.cityData) {
+        load_city_data(data.cityData);
+      }
     },
   });
 
   useEffect(() => {
     async function loadWasm() {
-      await init();
-      say_hello_from_rust();
+      try {
+        await init();
+        setWasmReady(true);
+      } catch (e: any) {
+        if (e.message?.includes("Using exceptions for control flow")) {
+          // Bevy intentionally throws this to hand over the game loop to the browser!
+          setWasmReady(true);
+        } else if (e.message?.includes("already initialized")) {
+          setWasmReady(true);
+        } else {
+          console.error("Wasm engine failed to boot:", e);
+        }
+      }
     }
     loadWasm();
   }, []);
@@ -52,49 +68,62 @@ function App() {
   };
 
   return (
-    <form
-      onSubmit={handleSubmit(onSubmit)}
-      className="flex w-150 flex-col gap-2 p-2"
-    >
-      <div className="flex gap-2">
-        <input
-          type="url"
-          placeholder="https://github.com/username/repo"
-          {...register("repoUrl", {
-            required: "A repository URL is required",
-            pattern: {
-              value: /^https?:\/\/(www\.)?(github|gitlab)\.com\/.+\/.+/,
-              message: "Must be a valid GitHub or GitLab URL",
-            },
-          })}
-          className="flex-1 rounded-md border-2 border-gray-200 px-4 py-2 transition-colors outline-none focus:border-blue-500"
-          disabled={analyzeMutation.isPending}
-        />
-        <button
-          type="submit"
-          disabled={analyzeMutation.isPending}
-          className="cursor-pointer rounded-md bg-blue-600 px-6 py-2 font-medium text-white transition-colors hover:bg-blue-700 disabled:bg-blue-300"
-        >
-          {analyzeMutation.isPending ? "Parsing..." : "Generate"}
-        </button>
-      </div>
+    <>
+      <form
+        onSubmit={handleSubmit(onSubmit)}
+        className="flex w-150 flex-col gap-2 p-2"
+      >
+        <div className="flex gap-2">
+          <input
+            type="url"
+            placeholder="https://github.com/username/repo"
+            {...register("repoUrl", {
+              required: "A repository URL is required",
+              pattern: {
+                value: /^https?:\/\/(www\.)?(github|gitlab)\.com\/.+\/.+/,
+                message: "Must be a valid GitHub or GitLab URL",
+              },
+            })}
+            className="flex-1 rounded-md border-2 border-gray-200 px-4 py-2 transition-colors outline-none focus:border-blue-500"
+            disabled={analyzeMutation.isPending}
+          />
+          <button
+            type="submit"
+            disabled={analyzeMutation.isPending}
+            className="cursor-pointer rounded-md bg-blue-600 px-6 py-2 font-medium text-white transition-colors hover:bg-blue-700 disabled:bg-blue-300"
+          >
+            {analyzeMutation.isPending ? "Parsing..." : "Generate"}
+          </button>
+        </div>
 
-      {errors.repoUrl && (
-        <span className="text-sm font-medium text-red-500">
-          {errors.repoUrl.message}
-        </span>
-      )}
-      {analyzeMutation.isError && (
-        <span className="text-sm font-medium text-red-500">
-          {analyzeMutation.error.message}
-        </span>
-      )}
-      {analyzeMutation.isSuccess && (
-        <span className="text-sm font-medium text-green-600">
-          City data received! Check the console.
-        </span>
-      )}
-    </form>
+        {errors.repoUrl && (
+          <span className="text-sm font-medium text-red-500">
+            {errors.repoUrl.message}
+          </span>
+        )}
+        {analyzeMutation.isError && (
+          <span className="text-sm font-medium text-red-500">
+            {analyzeMutation.error.message}
+          </span>
+        )}
+        {analyzeMutation.isSuccess && (
+          <span className="text-sm font-medium text-green-600">
+            City data received! Check the console.
+          </span>
+        )}
+      </form>
+
+      <div className="relative mt-4 ml-2 h-[600px] w-[800px] bg-black">
+        {!wasmReady && (
+          <div className="absolute p-4 text-white">Booting Wasm...</div>
+        )}
+        <canvas
+          id="bevy-canvas"
+          className="h-full w-full"
+          onContextMenu={(e) => e.preventDefault()}
+        ></canvas>
+      </div>
+    </>
   );
 }
 

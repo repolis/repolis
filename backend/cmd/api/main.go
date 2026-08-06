@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/google/uuid"
@@ -95,9 +96,14 @@ func handleAnalyze(w http.ResponseWriter, r *http.Request) {
 
 	if existingSessionID, existingCommit, existingClonePath, err := db.GetSessionByUserAndRepo(userID, req.RepoURL); err == nil && existingSessionID != "" {
 		if existingCommit == remoteCommit {
-			fmt.Printf("[LOG] Found existing session %s with matching commit %s. Skipping clone.\n", existingSessionID, existingCommit)
-			finalSessionID = existingSessionID
-			finalClonePath = existingClonePath
+			// Verify the clone directory still exists (macOS cleans /tmp)
+			if _, statErr := os.Stat(existingClonePath); statErr == nil {
+				fmt.Printf("[LOG] Found existing session %s with matching commit %s. Skipping clone.\n", existingSessionID, existingCommit)
+				finalSessionID = existingSessionID
+				finalClonePath = existingClonePath
+			} else {
+				fmt.Printf("[LOG] Cached clone path gone (%s). Will re-clone.\n", existingClonePath)
+			}
 		} else {
 			fmt.Printf("[LOG] Remote repo has updated. Will clone anew.\n")
 		}
@@ -118,21 +124,28 @@ func handleAnalyze(w http.ResponseWriter, r *http.Request) {
 		finalClonePath = clonePath
 	}
 
-	fmt.Printf("[LOG] Analyzing AST for: %s\n", finalClonePath)
-	cityMap, err := analyzer.AnalyzeRepository(finalClonePath)
+	fmt.Printf("[LOG] Phase 1: Extracting AST structure from: %s\n", finalClonePath)
+	rawData, err := analyzer.ExtractRepository(finalClonePath)
 	if err != nil {
+		log.Printf("[ERROR] AST extraction failed: %v", err)
 		sendJSONError(w, "Failed to analyze repository AST", http.StatusInternalServerError)
 		return
 	}
 
-	fmt.Printf("[LOG] Invoking LLM to determine building typologies...\n")
+	fmt.Printf("[LOG] Phase 2: Building city via LLM pipeline...\n")
 	llmClient, err := llm.NewClient()
 	if err != nil {
 		sendJSONError(w, "Failed to create LLM client", http.StatusInternalServerError)
-		log.Fatalf("[ERROR] Failed to create LLM client: %v", err)
+		log.Printf("[ERROR] Failed to create LLM client: %v", err)
 		return
 	}
-	llmClient.CategorizeCity(r.Context(), finalClonePath, cityMap)
+
+	cityMap, err := llmClient.BuildCity(r.Context(), finalClonePath, rawData)
+	if err != nil {
+		sendJSONError(w, "Failed to build city map", http.StatusInternalServerError)
+		log.Printf("[ERROR] LLM city build failed: %v", err)
+		return
+	}
 
 	resp := models.AnalyzeResponse{
 		Status:   "success",
