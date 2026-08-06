@@ -26,9 +26,13 @@ use layout::LayoutResult;
 // Bevy Resources
 // ═══════════════════════════════════════════════════════════════════
 
-/// Marker: the city has been spawned, don't re-process.
+/// Marker: the city has been spawned at least once.
 #[derive(Resource, Default)]
 struct CitySpawned(bool);
+
+/// Marker component for any spawned 3D geometry belonging to the current city map.
+#[derive(Component)]
+struct CityElement;
 
 /// Marker component for controlling the camera in the 3D scene.
 #[derive(Component)]
@@ -153,17 +157,19 @@ fn process_city_data(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut spawned: ResMut<CitySpawned>,
     mut camera_query: Query<&mut Transform, With<CityCamera>>,
+    existing_elements: Query<Entity, With<CityElement>>,
 ) {
-    if spawned.0 {
-        return;
-    }
-
     // Try to grab pending data from the JS bridge
     let city_data = PENDING_DATA.with(|cell| cell.borrow_mut().take());
     let city_map = match city_data {
         Some(data) => data,
         None => return,
     };
+
+    // Despawn any existing city geometry before generating the new scene
+    for entity in existing_elements.iter() {
+        commands.entity(entity).despawn_recursive();
+    }
 
     web_sys::console::log_1(&"[engine] Computing layout...".into());
 
@@ -182,27 +188,52 @@ fn process_city_data(
     spawn_city(&mut commands, &mut meshes, &mut materials, &result);
 
     // ── Reposition Camera to frame the entire city automatically ─────
-    let total_width = result
-        .districts
-        .iter()
-        .map(|d| (d.pos_x + d.width) as f32)
-        .fold(0.0_f32, f32::max);
-    let total_depth = result
-        .districts
-        .iter()
-        .map(|d| (d.pos_z + d.depth) as f32)
-        .fold(0.0_f32, f32::max);
-    let max_height = result
+    // Organic layout can have negative coordinates, so compute true bounding box
+    let all_buildings: Vec<&layout::PlacedBuilding> = result
         .districts
         .iter()
         .flat_map(|d| d.buildings.iter())
+        .collect();
+
+    let (mut min_x, mut min_z, mut max_x, mut max_z) = if all_buildings.is_empty() {
+        (-50.0_f64, -50.0_f64, 50.0_f64, 50.0_f64)
+    } else {
+        (f64::MAX, f64::MAX, f64::MIN, f64::MIN)
+    };
+    for b in &all_buildings {
+        if b.pos_x < min_x { min_x = b.pos_x; }
+        if b.pos_z < min_z { min_z = b.pos_z; }
+        if b.pos_x + b.width > max_x { max_x = b.pos_x + b.width; }
+        if b.pos_z + b.depth > max_z { max_z = b.pos_z + b.depth; }
+    }
+    for r in &result.roads {
+        if r.start_x < min_x { min_x = r.start_x; }
+        if r.start_z < min_z { min_z = r.start_z; }
+        if r.end_x > max_x { max_x = r.end_x; }
+        if r.end_z > max_z { max_z = r.end_z; }
+        if r.end_x < min_x { min_x = r.end_x; }
+        if r.end_z < min_z { min_z = r.end_z; }
+        if r.start_x > max_x { max_x = r.start_x; }
+        if r.start_z > max_z { max_z = r.start_z; }
+    }
+    for p in &result.platforms {
+        if p.pos_x < min_x { min_x = p.pos_x; }
+        if p.pos_z < min_z { min_z = p.pos_z; }
+        if p.pos_x + p.width > max_x { max_x = p.pos_x + p.width; }
+        if p.pos_z + p.depth > max_z { max_z = p.pos_z + p.depth; }
+    }
+
+    let extent_x = (max_x - min_x) as f32;
+    let extent_z = (max_z - min_z) as f32;
+    let center_x = (min_x + max_x) as f32 / 2.0;
+    let center_z = (min_z + max_z) as f32 / 2.0;
+    let max_height = all_buildings
+        .iter()
         .map(|b| b.height as f32)
         .fold(10.0_f32, f32::max);
 
-    let center_x = total_width / 2.0;
-    let center_z = total_depth / 2.0;
-    let view_dist = f32::max(total_width, total_depth) * 0.85 + 60.0;
-    let view_height = max_height * 0.8 + f32::max(total_width, total_depth) * 0.45 + 50.0;
+    let view_dist = f32::max(extent_x, extent_z) * 0.85 + 60.0;
+    let view_height = max_height * 0.8 + f32::max(extent_x, extent_z) * 0.45 + 50.0;
 
     for mut cam_tf in camera_query.iter_mut() {
         *cam_tf = Transform::from_xyz(center_x, view_height, center_z + view_dist)
@@ -335,79 +366,147 @@ fn spawn_city(
     materials: &mut ResMut<Assets<StandardMaterial>>,
     result: &LayoutResult,
 ) {
-    let platform_height = 0.4;
+    let road_top: f32 = 0.10;
+    let platform_top: f32 = 0.22;
 
-    for district in &result.districts {
-        // ── District platform ────────────────────────────────
-        let platform_color = typology_color(&district.typology);
-        commands.spawn(PbrBundle {
-            mesh: meshes.add(Cuboid::new(
-                district.width as f32,
-                platform_height,
-                district.depth as f32,
-            )),
+    // ── Compute bounding box for ground plane ────────────────
+    let (mut min_x, mut min_z, mut max_x, mut max_z) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
+    for d in &result.districts {
+        for b in &d.buildings {
+            if b.pos_x < min_x { min_x = b.pos_x; }
+            if b.pos_z < min_z { min_z = b.pos_z; }
+            if b.pos_x + b.width > max_x { max_x = b.pos_x + b.width; }
+            if b.pos_z + b.depth > max_z { max_z = b.pos_z + b.depth; }
+        }
+    }
+    for r in &result.roads {
+        for &x in &[r.start_x, r.end_x] {
+            if x < min_x { min_x = x; }
+            if x > max_x { max_x = x; }
+        }
+        for &z in &[r.start_z, r.end_z] {
+            if z < min_z { min_z = z; }
+            if z > max_z { max_z = z; }
+        }
+    }
+    for p in &result.platforms {
+        if p.pos_x < min_x { min_x = p.pos_x; }
+        if p.pos_z < min_z { min_z = p.pos_z; }
+        if p.pos_x + p.width > max_x { max_x = p.pos_x + p.width; }
+        if p.pos_z + p.depth > max_z { max_z = p.pos_z + p.depth; }
+    }
+    // Fallback for empty scenes
+    if min_x > max_x {
+        min_x = -50.0; max_x = 50.0; min_z = -50.0; max_z = 50.0;
+    }
+    let pad = 40.0;
+    let gw = (max_x - min_x) as f32 + pad * 2.0;
+    let gd = (max_z - min_z) as f32 + pad * 2.0;
+    let gcx = (min_x + max_x) as f32 / 2.0;
+    let gcz = (min_z + max_z) as f32 / 2.0;
+
+    // ── Ground plane (dark urban base) ───────────────────────
+    commands.spawn((
+        PbrBundle {
+            mesh: meshes.add(Cuboid::new(gw, 0.04, gd)),
             material: materials.add(StandardMaterial {
-                base_color: platform_color,
-                perceptual_roughness: 0.9,
+                base_color: Color::srgb(0.08, 0.09, 0.11),
+                perceptual_roughness: 1.0,
                 ..default()
             }),
-            transform: Transform::from_xyz(
-                (district.pos_x + district.width / 2.0) as f32,
-                platform_height / 2.0,
-                (district.pos_z + district.depth / 2.0) as f32,
-            ),
+            transform: Transform::from_xyz(gcx, 0.02, gcz),
+            ..default()
+        },
+        CityElement,
+    ));
+
+    // ── Road segments (urban streets & highways) ─────────────
+    let road_material = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.18, 0.19, 0.22),
+        perceptual_roughness: 0.95,
+        ..default()
+    });
+
+    for road in &result.roads {
+        let dx = road.end_x - road.start_x;
+        let dz = road.end_z - road.start_z;
+        let length = (dx * dx + dz * dz).sqrt() as f32;
+        if length < 0.01 {
+            continue;
+        }
+        let angle = (dx as f32).atan2(dz as f32);
+        let cx = (road.start_x + road.end_x) as f32 / 2.0;
+        let cz = (road.start_z + road.end_z) as f32 / 2.0;
+
+        commands.spawn((
+            PbrBundle {
+                mesh: meshes.add(Cuboid::new(road.width as f32, road_top, length)),
+                material: road_material.clone(),
+                transform: Transform::from_xyz(cx, road_top / 2.0, cz)
+                    .with_rotation(Quat::from_rotation_y(angle)),
+                ..default()
+            },
+            CityElement,
+        ));
+    }
+
+    // ── Raised Sidewalk Platforms (City Blocks) ──────────────
+    for platform in &result.platforms {
+        let plat_color = typology_color(&platform.typology);
+        let plat_material = materials.add(StandardMaterial {
+            base_color: plat_color,
+            perceptual_roughness: 0.8,
             ..default()
         });
 
-        // ── Buildings ────────────────────────────────────────
+        let thickness = platform_top;
+        commands.spawn((
+            PbrBundle {
+                mesh: meshes.add(Cuboid::new(
+                    platform.width as f32,
+                    thickness,
+                    platform.depth as f32,
+                )),
+                material: plat_material,
+                transform: Transform::from_xyz(
+                    (platform.pos_x + platform.width / 2.0) as f32,
+                    thickness / 2.0,
+                    (platform.pos_z + platform.depth / 2.0) as f32,
+                ),
+                ..default()
+            },
+            CityElement,
+        ));
+    }
+
+    // ── Buildings (colored by district typology) ─────────────
+    for district in &result.districts {
         let bldg_color = building_color(&district.typology);
         let bldg_material = materials.add(StandardMaterial {
             base_color: bldg_color,
-            perceptual_roughness: 0.6,
+            perceptual_roughness: 0.55,
             ..default()
         });
 
         for building in &district.buildings {
             let half_h = building.height as f32 / 2.0;
-            commands.spawn(PbrBundle {
-                mesh: meshes.add(Cuboid::new(
-                    building.width as f32,
-                    building.height as f32,
-                    building.depth as f32,
-                )),
-                material: bldg_material.clone(),
-                transform: Transform::from_xyz(
-                    (building.pos_x + building.width / 2.0) as f32,
-                    platform_height + half_h,
-                    (building.pos_z + building.depth / 2.0) as f32,
-                ),
-                ..default()
-            });
+            commands.spawn((
+                PbrBundle {
+                    mesh: meshes.add(Cuboid::new(
+                        building.width as f32,
+                        building.height as f32,
+                        building.depth as f32,
+                    )),
+                    material: bldg_material.clone(),
+                    transform: Transform::from_xyz(
+                        (building.pos_x + building.width / 2.0) as f32,
+                        platform_top + half_h,
+                        (building.pos_z + building.depth / 2.0) as f32,
+                    ),
+                    ..default()
+                },
+                CityElement,
+            ));
         }
     }
-
-    // ── Ground plane (road surface between districts) ────────
-    let total_width = result.districts.iter()
-        .map(|d| (d.pos_x + d.width) as f32)
-        .fold(0.0_f32, f32::max)
-        + 20.0;
-    let total_depth = result.districts.iter()
-        .map(|d| (d.pos_z + d.depth) as f32)
-        .fold(0.0_f32, f32::max)
-        + 20.0;
-
-    commands.spawn(PbrBundle {
-        mesh: meshes.add(Cuboid::new(total_width, 0.05, total_depth)),
-        material: materials.add(StandardMaterial {
-            base_color: Color::srgb(0.12, 0.12, 0.14),
-            perceptual_roughness: 1.0,
-            ..default()
-        }),
-        transform: Transform::from_xyz(
-            total_width / 2.0 - 10.0,
-            0.025,
-            total_depth / 2.0 - 10.0,
-        ),
-        ..default()
-    });
 }

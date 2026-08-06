@@ -791,18 +791,25 @@ func buildRoads(raw *analyzer.RawExtraction, buildings []models.Building) []mode
 
 func cleanJSON(s string) string {
 	s = strings.TrimSpace(s)
-	if after, ok := strings.CutPrefix(s, "```json"); ok {
-		s = strings.TrimSuffix(after, "```")
-		s = strings.TrimSpace(s)
-	} else if after, ok := strings.CutPrefix(s, "```"); ok {
-		s = strings.TrimSuffix(after, "```")
+	if idx := strings.Index(s, "```"); idx != -1 {
+		after := s[idx+3:]
+		if strings.HasPrefix(after, "json") {
+			after = after[4:]
+		} else if strings.HasPrefix(after, "JSON") {
+			after = after[4:]
+		}
+		if endIdx := strings.LastIndex(after, "```"); endIdx != -1 {
+			s = after[:endIdx]
+		} else {
+			s = after
+		}
 		s = strings.TrimSpace(s)
 	}
-	if idx := strings.Index(s, "["); idx != -1 {
+	if idx := findJSONStart(s, '['); idx != -1 {
 		if endIdx := strings.LastIndex(s, "]"); endIdx != -1 && endIdx > idx {
 			s = s[idx : endIdx+1]
 		}
-	} else if idx := strings.Index(s, "{"); idx != -1 {
+	} else if idx := findJSONStart(s, '{'); idx != -1 {
 		if endIdx := strings.LastIndex(s, "}"); endIdx != -1 && endIdx > idx {
 			s = s[idx : endIdx+1]
 		}
@@ -817,6 +824,30 @@ func cleanJSON(s string) string {
 	reTrailingComma := regexp.MustCompile(`,\s*([\]}])`)
 	s = reTrailingComma.ReplaceAllString(s, "$1")
 	return strings.TrimSpace(s)
+}
+
+func findJSONStart(s string, char byte) int {
+	for i := 0; i < len(s); i++ {
+		if s[i] == char {
+			for j := i + 1; j < len(s); j++ {
+				if s[j] == ' ' || s[j] == '\t' || s[j] == '\r' || s[j] == '\n' {
+					continue
+				}
+				if char == '[' {
+					c := s[j]
+					if c == '{' || c == '"' || c == '[' || (c >= '0' && c <= '9') || c == '-' || c == 't' || c == 'f' || c == 'n' || c == ']' {
+						return i
+					}
+				} else if char == '{' {
+					if s[j] == '"' || s[j] == '}' {
+						return i
+					}
+				}
+				break
+			}
+		}
+	}
+	return -1
 }
 
 func validateTypology(t string) string {
