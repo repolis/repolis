@@ -1,7 +1,3 @@
-// ═══════════════════════════════════════════════════════════════════
-// Data Models — mirrors the Go backend JSON schema
-// ═══════════════════════════════════════════════════════════════════
-
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -57,9 +53,21 @@ pub struct Road {
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
+pub struct DependencyEdge {
+    #[serde(default)]
+    pub source: String,
+    #[serde(default)]
+    pub target: String,
+    #[serde(default)]
+    pub weight: u32,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct CityMap {
     #[serde(default)]
     pub districts: Vec<District>,
     #[serde(default)]
     pub roads: Vec<Road>,
+    #[serde(default)]
+    pub dependencies: Vec<DependencyEdge>,
 }

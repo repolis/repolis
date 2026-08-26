@@ -1,42 +1,15 @@
-// ═══════════════════════════════════════════════════════════════════
-// Layout Engine — Exact-Fit Urban Block Subdivision & Street Grids
-// ═══════════════════════════════════════════════════════════════════
-//
-// Combines an organic radial arterial network between neighborhoods with
-// an orthogonal Manhattan-style urban street grid within each neighborhood.
-//
-// Algorithm overview:
-//   1. Compute architecturally proportioned building dimensions.
-//   2. Build a folder tree from buildings' source_file paths.
-//   3. For each neighborhood (folder node):
-//      - Group buildings into Urban Blocks (up to 6 buildings per block).
-//      - Perform exact lot packing inside each block with sidewalk margins.
-//      - Arrange blocks in an orthogonal grid separated by urban streets.
-//   4. Compute subtree weights and radial positions for neighborhoods.
-//   5. Emit raised Sidewalk Platforms under each urban block.
-//   6. Generate internal street grids and connecting arterial highways.
-//
-// References:
-//   - Wettel & Lanza (2007), "Visualizing Software Systems as Cities"
-//   - Reingold & Tilford (1981), "Tidier Drawings of Trees"
-
 use crate::data::CityMap;
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 
-// ─── Tuning constants ────────────────────────────────────────────
+const MIN_FOOTPRINT: f64 = 4.0;
+const MIN_HEIGHT: f64 = 4.0;
+const LOT_MARGIN: f64 = 1.5;
+const LOCAL_STREET_WIDTH: f64 = 8.0;
+const ARTERIAL_STREET_WIDTH: f64 = 16.0;
+const MAX_ROAD_WIDTH: f64 = 8.0;
+const MIN_ROAD_WIDTH: f64 = 1.0;
+const GRID_STEP: f64 = 4.0; 
 
-const MIN_FOOTPRINT: f64 = 3.0;       // minimum building base side
-const MIN_HEIGHT: f64 = 3.0;          // minimum building height
-const BUILDING_GAP: f64 = 1.5;        // alley gap between buildings in a block
-const SIDEWALK_MARGIN: f64 = 2.0;     // curb margin around block perimeter
-const STREET_WIDTH: f64 = 7.0;        // width of urban streets between blocks
-const BLOCK_CAPACITY: usize = 6;      // maximum buildings per city block
-const BASE_ROAD_LENGTH: f64 = 15.0;   // open highway gap between neighborhoods
-const CHILD_CONE_HALF: f64 = 1.0472;  // ±60° spread for non-root children (π/3)
-
-// ─── Output structures ──────────────────────────────────────────
-
-/// A building with computed world-space position and dimensions.
 pub struct PlacedBuilding {
     pub name: String,
     pub pos_x: f64,
@@ -48,7 +21,6 @@ pub struct PlacedBuilding {
     pub num_methods: u32,
 }
 
-/// A district with computed world-space bounding box.
 pub struct PlacedDistrict {
     pub name: String,
     pub typology: String,
@@ -59,16 +31,15 @@ pub struct PlacedDistrict {
     pub buildings: Vec<PlacedBuilding>,
 }
 
-/// A road segment (street or highway) in world space.
 pub struct RoadSegment {
     pub start_x: f64,
     pub start_z: f64,
     pub end_x: f64,
     pub end_z: f64,
     pub width: f64,
+    pub road_type: String,
 }
 
-/// A raised sidewalk platform beneath an urban block.
 pub struct Platform {
     pub pos_x: f64,
     pub pos_z: f64,
@@ -77,14 +48,11 @@ pub struct Platform {
     pub typology: String,
 }
 
-/// The full layout result consumed by the Bevy renderer.
 pub struct LayoutResult {
     pub districts: Vec<PlacedDistrict>,
     pub roads: Vec<RoadSegment>,
     pub platforms: Vec<Platform>,
 }
-
-// ─── Internal structures ─────────────────────────────────────────
 
 struct RawBuilding {
     name: String,
@@ -94,583 +62,407 @@ struct RawBuilding {
     num_fields: u32,
     num_methods: u32,
     district_idx: usize,
+    pos_x: f64,
+    pos_z: f64,
 }
 
-#[derive(Clone)]
-struct UrbanBlock {
-    building_indices: Vec<usize>,
-    width: f64,
-    depth: f64,
-    local_b_pos: Vec<(f64, f64)>, // local (x, z) relative to block corner
-    typology: String,
-}
-
-struct FolderNode {
-    #[allow(dead_code)]
-    path: String,
-    children: Vec<usize>,
-    building_indices: Vec<usize>,
-    parent: Option<usize>,
-
-    weight: f64,
-    count: usize,
-    grid_radius: f64,
+struct BBox {
     x: f64,
     z: f64,
-
-    // Neighborhood grid structure
-    blocks: Vec<UrbanBlock>,
-    nh_width: f64,
-    nh_depth: f64,
-    nh_cols: usize,
-    nh_rows: usize,
-    col_widths: Vec<f64>,
-    row_depths: Vec<f64>,
+    width: f64,
+    depth: f64,
 }
 
-// ─── Public API ──────────────────────────────────────────────────
+struct DepEdge {
+    source_idx: usize,
+    target_idx: usize,
+    weight: f64,
+}
+
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
+struct Seg(i64, i64, i64, i64);
+
+fn hash_str(name: &str, seed: u64) -> f64 {
+    let mut hash: u64 = seed;
+    for byte in name.bytes() {
+        hash = hash.wrapping_mul(33).wrapping_add(byte as u64);
+    }
+    (hash % 1000) as f64 / 1000.0
+}
+
+fn round_to_grid(val: f64, step: f64) -> f64 {
+    (val / step).round() * step
+}
+
+fn normalize_seg(x1: f64, z1: f64, x2: f64, z2: f64) -> Seg {
+    let pts = [
+        (x1 * 100.0).round() as i64, 
+        (z1 * 100.0).round() as i64, 
+        (x2 * 100.0).round() as i64, 
+        (z2 * 100.0).round() as i64
+    ];
+    if pts[0] > pts[2] || (pts[0] == pts[2] && pts[1] > pts[3]) {
+        Seg(pts[2], pts[3], pts[0], pts[1])
+    } else {
+        Seg(pts[0], pts[1], pts[2], pts[3])
+    }
+}
+
+fn add_segment(traffic: &mut HashMap<Seg, f64>, x1: f64, z1: f64, x2: f64, z2: f64, weight: f64) {
+    if (x1 - x2).abs() < 0.01 && (z1 - z2).abs() < 0.01 {
+        return;
+    }
+    let seg = normalize_seg(x1, z1, x2, z2);
+    *traffic.entry(seg).or_insert(0.0) += weight;
+}
 
 pub fn compute_layout(city: &CityMap) -> LayoutResult {
-    // ── Phase 1: Compute building dimensions ─────────────────
-    let mut raw_buildings: Vec<RawBuilding> = Vec::new();
-
-    for (di, district) in city.districts.iter().enumerate() {
-        for b in &district.buildings {
-            let raw_side = MIN_FOOTPRINT + (b.num_fields as f64).powf(0.55) * 2.2;
-            let side = if raw_side > 24.0 {
-                24.0 + (raw_side - 24.0).powf(0.5)
-            } else {
-                raw_side
-            };
-
-            let raw_height = if b.num_methods > 0 {
-                MIN_HEIGHT + (b.num_methods as f64).powf(0.72) * 3.6
-            } else if b.lines_of_code > 0 {
-                MIN_HEIGHT + (b.lines_of_code as f64).powf(0.55) * 0.3
-            } else {
-                MIN_HEIGHT
-            };
-            let height = if raw_height > 55.0 {
-                55.0 + (raw_height - 55.0).powf(0.55)
-            } else {
-                raw_height
-            };
-
-            // Enforce stable architectural base for towers
-            let min_side = height * 0.22 + 2.5;
-            let final_side = if side < min_side { min_side } else { side };
-
-            raw_buildings.push(RawBuilding {
-                name: b.name.clone(),
-                width: final_side,
-                height,
-                depth: final_side,
-                num_fields: b.num_fields,
-                num_methods: b.num_methods,
-                district_idx: di,
-            });
-        }
-    }
+    let mut raw_buildings = compute_dimensions(city);
 
     if raw_buildings.is_empty() {
         return LayoutResult {
-            districts: city
-                .districts
-                .iter()
-                .map(|d| PlacedDistrict {
-                    name: d.name.clone(),
-                    typology: d.typology.clone(),
-                    pos_x: 0.0,
-                    pos_z: 0.0,
-                    width: 0.0,
-                    depth: 0.0,
-                    buildings: Vec::new(),
-                })
-                .collect(),
-            roads: Vec::new(),
-            platforms: Vec::new(),
+            districts: city.districts.iter().map(|district| PlacedDistrict {
+                name: district.name.clone(), 
+                typology: district.typology.clone(),
+                pos_x: 0.0, pos_z: 0.0, width: 0.0, depth: 0.0,
+                buildings: Vec::new(),
+            }).collect(),
+            roads: Vec::new(), platforms: Vec::new(),
         };
     }
 
-    // ── Phase 2: Build folder tree ───────────────────────────
-    let mut nodes = build_folder_tree(&raw_buildings, city);
+    layout_districts(&mut raw_buildings, city);
+    let district_boxes = layout_city(&mut raw_buildings, city);
+    let edges = resolve_dependencies(city, &raw_buildings);
+    let roads = route_dependencies(&raw_buildings, &edges);
+    let platforms = generate_platforms(&raw_buildings, city);
 
-    // ── Phase 3: Compute neighborhood urban block layouts ────
-    compute_neighborhood_layouts(&mut nodes, &raw_buildings, city);
+    package_result(city, &raw_buildings, &district_boxes, roads, platforms)
+}
 
-    // ── Phase 4: Compute subtree weights ─────────────────────
-    compute_weights(&mut nodes, &raw_buildings, 0);
+fn compute_dimensions(city: &CityMap) -> Vec<RawBuilding> {
+    let mut buildings = Vec::new();
 
-    // ── Phase 5: Radial arterial layout ──────────────────────
-    nodes[0].x = 0.0;
-    nodes[0].z = 0.0;
-    radial_layout(&mut nodes, 0, 0.0, std::f64::consts::TAU);
+    for (district_idx, district) in city.districts.iter().enumerate() {
+        for building in &district.buildings {
+            let raw_side = MIN_FOOTPRINT + (building.num_fields as f64).powf(0.55) * 2.2;
+            let side = if raw_side > 24.0 { 24.0 + (raw_side - 24.0).powf(0.5) } else { raw_side };
 
-    // ── Phase 6: Place blocks, sidewalks, and streets ────────
-    let mut placed_positions: Vec<(f64, f64)> = vec![(0.0, 0.0); raw_buildings.len()];
-    let mut platforms: Vec<Platform> = Vec::new();
-    let mut roads: Vec<RoadSegment> = Vec::new();
-    place_neighborhood_elements(&nodes, &mut placed_positions, &mut platforms, &mut roads);
+            let raw_height = if building.num_methods > 0 {
+                MIN_HEIGHT + (building.num_methods as f64).powf(0.72) * 3.6
+            } else if building.lines_of_code > 0 {
+                MIN_HEIGHT + (building.lines_of_code as f64).powf(0.55) * 0.3
+            } else { MIN_HEIGHT };
+            let height = if raw_height > 55.0 { 55.0 + (raw_height - 55.0).powf(0.55) } else { raw_height };
 
-    // ── Phase 7: Generate arterial highways ──────────────────
-    let mut arterial_roads = generate_arterial_roads(&nodes);
-    roads.append(&mut arterial_roads);
+            let min_side = height * 0.22 + 2.5;
+            let final_side = if side < min_side { min_side } else { side };
 
-    // ── Phase 8: Package into districts ──────────────────────
-    let mut district_buildings: Vec<Vec<PlacedBuilding>> =
-        city.districts.iter().map(|_| Vec::new()).collect();
+            let hash = hash_str(&building.name, 10);
+            let aspect = 0.7 + (hash * 0.6);
+            let width = final_side * aspect;
+            let depth = final_side / aspect;
 
-    for (bi, raw) in raw_buildings.iter().enumerate() {
-        let (px, pz) = placed_positions[bi];
-        district_buildings[raw.district_idx].push(PlacedBuilding {
-            name: raw.name.clone(),
-            pos_x: px,
-            pos_z: pz,
-            width: raw.width,
-            height: raw.height,
-            depth: raw.depth,
-            num_fields: raw.num_fields,
-            num_methods: raw.num_methods,
-        });
+            buildings.push(RawBuilding {
+                name: building.name.clone(),
+                width, height, depth,
+                num_fields: building.num_fields,
+                num_methods: building.num_methods,
+                district_idx,
+                pos_x: 0.0, pos_z: 0.0,
+            });
+        }
+    }
+    buildings
+}
+
+fn layout_districts(buildings: &mut [RawBuilding], city: &CityMap) {
+    let mut district_to_buildings: HashMap<usize, Vec<usize>> = HashMap::new();
+    for (idx, building) in buildings.iter().enumerate() {
+        district_to_buildings.entry(building.district_idx).or_default().push(idx);
     }
 
-    let districts: Vec<PlacedDistrict> = city
-        .districts
-        .iter()
-        .enumerate()
-        .map(|(i, d)| {
-            let buildings = &district_buildings[i];
-            let (min_x, min_z, max_x, max_z) = if buildings.is_empty() {
-                (0.0, 0.0, 0.0, 0.0)
-            } else {
-                let mut mnx = f64::MAX;
-                let mut mnz = f64::MAX;
-                let mut mxx = f64::MIN;
-                let mut mxz = f64::MIN;
-                for b in buildings {
-                    if b.pos_x < mnx { mnx = b.pos_x; }
-                    if b.pos_z < mnz { mnz = b.pos_z; }
-                    if b.pos_x + b.width > mxx { mxx = b.pos_x + b.width; }
-                    if b.pos_z + b.depth > mxz { mxz = b.pos_z + b.depth; }
+    for district_idx in 0..city.districts.len() {
+        if let Some(building_indices) = district_to_buildings.get(&district_idx) {
+            let total_area: f64 = building_indices.iter().map(|&idx| {
+                let building = &buildings[idx];
+                (building.width + LOCAL_STREET_WIDTH) * (building.depth + LOCAL_STREET_WIDTH)
+            }).sum();
+
+            let target_width = total_area.sqrt() * 1.5;
+
+            let mut sorted_buildings = building_indices.clone();
+            sorted_buildings.sort_by(|&i, &j| {
+                let hash_i = hash_str(&buildings[i].name, 1);
+                let hash_j = hash_str(&buildings[j].name, 1);
+                hash_i.partial_cmp(&hash_j).unwrap()
+            });
+
+            let mut rows: Vec<Vec<usize>> = Vec::new();
+            let mut current_row = Vec::new();
+            let mut current_x = 0.0;
+
+            for &idx in &sorted_buildings {
+                let building = &buildings[idx];
+                let extra_x = hash_str(&building.name, 2) * 6.0;
+
+                if current_x + building.width + extra_x > target_width && !current_row.is_empty() {
+                    rows.push(current_row);
+                    current_row = Vec::new();
+                    current_x = 0.0;
                 }
-                (mnx, mnz, mxx, mxz)
-            };
-
-            PlacedDistrict {
-                name: d.name.clone(),
-                typology: d.typology.clone(),
-                pos_x: min_x,
-                pos_z: min_z,
-                width: max_x - min_x,
-                depth: max_z - min_z,
-                buildings: std::mem::take(&mut district_buildings[i]),
+                current_row.push(idx);
+                current_x += building.width + LOCAL_STREET_WIDTH + extra_x;
             }
-        })
+            if !current_row.is_empty() { rows.push(current_row); }
+
+            let mut current_z = 0.0;
+            for row in rows {
+                let row_depth = row.iter().map(|&idx| buildings[idx].depth).fold(0.0, f64::max);
+                let mut current_x = 0.0;
+                for &idx in &row {
+                    let building = &mut buildings[idx];
+                    let extra_x = hash_str(&building.name, 2) * 6.0;
+                    current_x += extra_x;
+
+                    let slack_z = row_depth - building.depth;
+                    let z_offset = slack_z * hash_str(&building.name, 3);
+
+                    building.pos_x = current_x;
+                    building.pos_z = current_z + z_offset;
+                    current_x += building.width + LOCAL_STREET_WIDTH;
+                }
+                current_z += row_depth + LOCAL_STREET_WIDTH;
+            }
+        }
+    }
+}
+
+fn layout_city(buildings: &mut [RawBuilding], city: &CityMap) -> Vec<BBox> {
+    let mut district_boxes: Vec<BBox> = (0..city.districts.len())
+        .map(|_| BBox { x: 0.0, z: 0.0, width: 0.0, depth: 0.0 })
         .collect();
-
-    LayoutResult {
-        districts,
-        roads,
-        platforms,
+    
+    let mut total_city_area = 0.0;
+    let mut district_to_buildings: HashMap<usize, Vec<usize>> = HashMap::new();
+    for (idx, building) in buildings.iter().enumerate() {
+        district_to_buildings.entry(building.district_idx).or_default().push(idx);
     }
+    
+    for district_idx in 0..city.districts.len() {
+        if let Some(building_indices) = district_to_buildings.get(&district_idx) {
+            let mut min_x = f64::MAX; 
+            let mut min_z = f64::MAX;
+            let mut max_x = 0.0; 
+            let mut max_z = 0.0;
+            
+            for &idx in building_indices {
+                let building = &buildings[idx];
+                if building.pos_x < min_x { min_x = building.pos_x; }
+                if building.pos_z < min_z { min_z = building.pos_z; }
+                if building.pos_x + building.width > max_x { max_x = building.pos_x + building.width; }
+                if building.pos_z + building.depth > max_z { max_z = building.pos_z + building.depth; }
+            }
+            
+            district_boxes[district_idx].width = max_x - min_x;
+            district_boxes[district_idx].depth = max_z - min_z;
+            
+            for &idx in building_indices {
+                buildings[idx].pos_x -= min_x;
+                buildings[idx].pos_z -= min_z;
+            }
+            total_city_area += (district_boxes[district_idx].width + ARTERIAL_STREET_WIDTH) * (district_boxes[district_idx].depth + ARTERIAL_STREET_WIDTH);
+        }
+    }
+
+    let target_city_width = total_city_area.sqrt() * 1.3;
+    
+    let mut district_indices: Vec<usize> = (0..city.districts.len()).collect();
+    district_indices.sort_by(|&i, &j| {
+        hash_str(&city.districts[i].name, 4).partial_cmp(&hash_str(&city.districts[j].name, 4)).unwrap()
+    });
+
+    let mut rows: Vec<Vec<usize>> = Vec::new();
+    let mut current_row = Vec::new();
+    let mut current_x = 0.0;
+    
+    for &district_idx in &district_indices {
+        let bbox = &district_boxes[district_idx];
+        let extra_x = hash_str(&city.districts[district_idx].name, 5) * 10.0;
+
+        if current_x + bbox.width + extra_x > target_city_width && !current_row.is_empty() {
+            rows.push(current_row);
+            current_row = Vec::new();
+            current_x = 0.0;
+        }
+        current_row.push(district_idx);
+        current_x += bbox.width + ARTERIAL_STREET_WIDTH + extra_x;
+    }
+    if !current_row.is_empty() { rows.push(current_row); }
+
+    let mut current_z = 0.0;
+    for row in rows {
+        let row_depth = row.iter().map(|&idx| district_boxes[idx].depth).fold(0.0, f64::max);
+        let mut current_x = 0.0;
+        for &district_idx in &row {
+            let bbox = &mut district_boxes[district_idx];
+            let extra_x = hash_str(&city.districts[district_idx].name, 5) * 10.0;
+            current_x += extra_x;
+
+            let slack_z = row_depth - bbox.depth;
+            let z_offset = slack_z * hash_str(&city.districts[district_idx].name, 6);
+
+            bbox.x = current_x;
+            bbox.z = current_z + z_offset;
+
+            if let Some(building_indices) = district_to_buildings.get(&district_idx) {
+                for &idx in building_indices {
+                    buildings[idx].pos_x += bbox.x;
+                    buildings[idx].pos_z += bbox.z;
+                }
+            }
+            current_x += bbox.width + ARTERIAL_STREET_WIDTH;
+        }
+        current_z += row_depth + ARTERIAL_STREET_WIDTH;
+    }
+    
+    district_boxes
 }
 
-// ═══════════════════════════════════════════════════════════════════
-// Phase 2: Folder Tree Construction
-// ═══════════════════════════════════════════════════════════════════
-
-fn extract_folder(source_file: &str) -> String {
-    let s = source_file.trim_start_matches("./").trim_start_matches('/');
-    if let Some(pos) = s.rfind('/') {
-        s[..pos].to_string()
-    } else {
-        String::new()
-    }
-}
-
-fn build_folder_tree(buildings: &[RawBuilding], city: &CityMap) -> Vec<FolderNode> {
-    let mut folder_set: BTreeMap<String, Vec<usize>> = BTreeMap::new();
-
+fn resolve_dependencies(city: &CityMap, buildings: &[RawBuilding]) -> Vec<DepEdge> {
+    let mut name_to_idx = HashMap::new();
+    let mut file_to_idx = HashMap::new();
     let mut flat_idx = 0;
+
     for district in &city.districts {
-        for b in &district.buildings {
-            let folder = extract_folder(&b.source_file);
-            folder_set.entry(folder).or_default().push(flat_idx);
+        for building in &district.buildings {
+            name_to_idx.insert(&building.name, flat_idx);
+            if !building.source_file.is_empty() { file_to_idx.insert(&building.source_file, flat_idx); }
             flat_idx += 1;
         }
     }
 
-    let mut nodes: Vec<FolderNode> = Vec::new();
-    nodes.push(FolderNode {
-        path: String::new(),
-        children: Vec::new(),
-        building_indices: Vec::new(),
-        parent: None,
-        weight: 0.0,
-        count: 0,
-        grid_radius: 0.0,
-        x: 0.0,
-        z: 0.0,
-        blocks: Vec::new(),
-        nh_width: 0.0,
-        nh_depth: 0.0,
-        nh_cols: 0,
-        nh_rows: 0,
-        col_widths: Vec::new(),
-        row_depths: Vec::new(),
-    });
+    let mut edges = Vec::new();
+    for dep in &city.dependencies {
+        let src_idx = name_to_idx.get(&dep.source).or_else(|| file_to_idx.get(&dep.source));
+        let tgt_idx = name_to_idx.get(&dep.target).or_else(|| file_to_idx.get(&dep.target));
 
-    let mut path_to_node: BTreeMap<String, usize> = BTreeMap::new();
-    path_to_node.insert(String::new(), 0);
-
-    let folder_paths: Vec<String> = folder_set.keys().cloned().collect();
-    for folder_path in &folder_paths {
-        ensure_path(&mut nodes, &mut path_to_node, folder_path);
-    }
-
-    for (folder_path, b_indices) in &folder_set {
-        if let Some(&node_idx) = path_to_node.get(folder_path) {
-            for &bi in b_indices {
-                nodes[node_idx].building_indices.push(bi);
+        if let (Some(&source_idx), Some(&target_idx)) = (src_idx, tgt_idx) {
+            if source_idx != target_idx { 
+                edges.push(DepEdge { source_idx, target_idx, weight: (dep.weight as f64).max(1.0) }); 
             }
         }
     }
-
-    nodes
+    edges
 }
 
-fn ensure_path(
-    nodes: &mut Vec<FolderNode>,
-    path_to_node: &mut BTreeMap<String, usize>,
-    path: &str,
-) -> usize {
-    if let Some(&idx) = path_to_node.get(path) {
-        return idx;
-    }
-
-    let parent_path = if let Some(pos) = path.rfind('/') {
-        &path[..pos]
-    } else {
-        ""
-    };
-
-    let parent_idx = ensure_path(nodes, path_to_node, parent_path);
-
-    let new_idx = nodes.len();
-    nodes.push(FolderNode {
-        path: path.to_string(),
-        children: Vec::new(),
-        building_indices: Vec::new(),
-        parent: Some(parent_idx),
-        weight: 0.0,
-        count: 0,
-        grid_radius: 0.0,
-        x: 0.0,
-        z: 0.0,
-        blocks: Vec::new(),
-        nh_width: 0.0,
-        nh_depth: 0.0,
-        nh_cols: 0,
-        nh_rows: 0,
-        col_widths: Vec::new(),
-        row_depths: Vec::new(),
-    });
-    nodes[parent_idx].children.push(new_idx);
-    path_to_node.insert(path.to_string(), new_idx);
-
-    new_idx
-}
-
-// ═══════════════════════════════════════════════════════════════════
-// Phase 3: Neighborhood Urban Block Layouts & Lot Packing
-// ═══════════════════════════════════════════════════════════════════
-
-fn compute_neighborhood_layouts(
-    nodes: &mut [FolderNode],
-    buildings: &[RawBuilding],
-    city: &CityMap,
-) {
-    for node in nodes {
-        if node.building_indices.is_empty() {
-            continue;
+fn route_dependencies(buildings: &[RawBuilding], edges: &[DepEdge]) -> Vec<RoadSegment> {
+    let mut traffic = HashMap::new();
+    
+    for (index, edge) in edges.iter().enumerate() {
+        let source = &buildings[edge.source_idx];
+        let target = &buildings[edge.target_idx];
+        
+        let source_x = source.pos_x + source.width / 2.0;
+        let source_z = source.pos_z + source.depth / 2.0;
+        
+        let target_x = target.pos_x + target.width / 2.0;
+        let target_z = target.pos_z + target.depth / 2.0;
+        
+        let grid_source_x = round_to_grid(source_x, GRID_STEP);
+        let grid_source_z = round_to_grid(source_z, GRID_STEP);
+        let grid_target_x = round_to_grid(target_x, GRID_STEP);
+        let grid_target_z = round_to_grid(target_z, GRID_STEP);
+        
+        let weight = edge.weight;
+        
+        add_segment(&mut traffic, source_x, source_z, grid_source_x, source_z, weight);
+        add_segment(&mut traffic, grid_source_x, source_z, grid_source_x, grid_source_z, weight);
+        
+        if index % 2 == 0 {
+            let mut current_x = grid_source_x;
+            while (current_x - grid_target_x).abs() > 0.01 {
+                let next_x = if current_x < grid_target_x { (current_x + GRID_STEP).min(grid_target_x) } else { (current_x - GRID_STEP).max(grid_target_x) };
+                add_segment(&mut traffic, current_x, grid_source_z, next_x, grid_source_z, weight);
+                current_x = next_x;
+            }
+            let mut current_z = grid_source_z;
+            while (current_z - grid_target_z).abs() > 0.01 {
+                let next_z = if current_z < grid_target_z { (current_z + GRID_STEP).min(grid_target_z) } else { (current_z - GRID_STEP).max(grid_target_z) };
+                add_segment(&mut traffic, grid_target_x, current_z, grid_target_x, next_z, weight);
+                current_z = next_z;
+            }
+        } else {
+            let mut current_z = grid_source_z;
+            while (current_z - grid_target_z).abs() > 0.01 {
+                let next_z = if current_z < grid_target_z { (current_z + GRID_STEP).min(grid_target_z) } else { (current_z - GRID_STEP).max(grid_target_z) };
+                add_segment(&mut traffic, grid_source_x, current_z, grid_source_x, next_z, weight);
+                current_z = next_z;
+            }
+            let mut current_x = grid_source_x;
+            while (current_x - grid_target_x).abs() > 0.01 {
+                let next_x = if current_x < grid_target_x { (current_x + GRID_STEP).min(grid_target_x) } else { (current_x - GRID_STEP).max(grid_target_x) };
+                add_segment(&mut traffic, current_x, grid_target_z, next_x, grid_target_z, weight);
+                current_x = next_x;
+            }
         }
+        
+        add_segment(&mut traffic, grid_target_x, grid_target_z, target_x, grid_target_z, weight);
+        add_segment(&mut traffic, target_x, grid_target_z, target_x, target_z, weight);
+    }
+    
+    traffic.into_iter().map(|(Seg(x1, z1, x2, z2), weight)| {
+        let width = (MIN_ROAD_WIDTH + weight.ln().max(0.0) * 1.5).min(MAX_ROAD_WIDTH);
+        RoadSegment {
+            start_x: x1 as f64 / 100.0, start_z: z1 as f64 / 100.0,
+            end_x: x2 as f64 / 100.0, end_z: z2 as f64 / 100.0,
+            width, road_type: "dependency".to_string(),
+        }
+    }).collect()
+}
 
-        // Sort buildings by district index then volume descending for cohesive downtown skyscrapers
-        let mut sorted: Vec<usize> = node.building_indices.clone();
-        sorted.sort_by(|&a, &b| {
-            let raw_a = &buildings[a];
-            let raw_b = &buildings[b];
-            raw_a.district_idx.cmp(&raw_b.district_idx).then_with(|| {
-                let vol_a = (raw_a.width * raw_a.depth * raw_a.height) as i64;
-                let vol_b = (raw_b.width * raw_b.depth * raw_b.height) as i64;
-                vol_b.cmp(&vol_a)
-            })
+fn generate_platforms(buildings: &[RawBuilding], city: &CityMap) -> Vec<Platform> {
+    buildings.iter().map(|building| {
+        Platform {
+            pos_x: building.pos_x - LOT_MARGIN, 
+            pos_z: building.pos_z - LOT_MARGIN,
+            width: building.width + LOT_MARGIN * 2.0, 
+            depth: building.depth + LOT_MARGIN * 2.0,
+            typology: city.districts[building.district_idx].typology.clone(),
+        }
+    }).collect()
+}
+
+fn package_result(
+    city: &CityMap, buildings: &[RawBuilding], district_boxes: &[BBox],
+    roads: Vec<RoadSegment>, platforms: Vec<Platform>,
+) -> LayoutResult {
+    let mut district_buildings: Vec<Vec<PlacedBuilding>> = city.districts.iter().map(|_| Vec::new()).collect();
+    
+    for building in buildings {
+        district_buildings[building.district_idx].push(PlacedBuilding {
+            name: building.name.clone(), 
+            pos_x: building.pos_x, 
+            pos_z: building.pos_z,
+            width: building.width, 
+            height: building.height, 
+            depth: building.depth,
+            num_fields: building.num_fields, 
+            num_methods: building.num_methods,
         });
-
-        // 1. Pack buildings into discrete Urban Blocks
-        let mut blocks = Vec::new();
-        for chunk in sorted.chunks(BLOCK_CAPACITY) {
-            let n = chunk.len();
-            let cols = match n {
-                1 => 1,
-                2 => 2,
-                4 => 2,
-                _ => 3.min(n),
-            };
-            let rows = (n + cols - 1) / cols;
-
-            let mut c_w: Vec<f64> = vec![0.0; cols];
-            let mut c_d: Vec<f64> = vec![0.0; rows];
-
-            for (i, &bi) in chunk.iter().enumerate() {
-                let c = i % cols;
-                let r = i / cols;
-                c_w[c] = c_w[c].max(buildings[bi].width);
-                c_d[r] = c_d[r].max(buildings[bi].depth);
-            }
-
-            let block_w = SIDEWALK_MARGIN * 2.0
-                + c_w.iter().sum::<f64>()
-                + (cols.saturating_sub(1) as f64) * BUILDING_GAP;
-            let block_d = SIDEWALK_MARGIN * 2.0
-                + c_d.iter().sum::<f64>()
-                + (rows.saturating_sub(1) as f64) * BUILDING_GAP;
-
-            let mut local_b_pos = Vec::with_capacity(n);
-            for (i, &bi) in chunk.iter().enumerate() {
-                let c = i % cols;
-                let r = i / cols;
-                let start_x = SIDEWALK_MARGIN
-                    + c_w[0..c].iter().sum::<f64>()
-                    + c as f64 * BUILDING_GAP;
-                let start_z = SIDEWALK_MARGIN
-                    + c_d[0..r].iter().sum::<f64>()
-                    + r as f64 * BUILDING_GAP;
-
-                let offset_x = (c_w[c] - buildings[bi].width) / 2.0;
-                let offset_z = (c_d[r] - buildings[bi].depth) / 2.0;
-
-                local_b_pos.push((start_x + offset_x, start_z + offset_z));
-            }
-
-            let first_district_idx = buildings[chunk[0]].district_idx;
-            let typology = city.districts[first_district_idx].typology.clone();
-
-            blocks.push(UrbanBlock {
-                building_indices: chunk.to_vec(),
-                width: block_w,
-                depth: block_d,
-                local_b_pos,
-                typology,
-            });
-        }
-
-        // 2. Arrange blocks into an orthogonal neighborhood grid
-        let num_blocks = blocks.len();
-        let nh_cols = ((num_blocks as f64).sqrt().ceil() as usize).max(1);
-        let nh_rows = (num_blocks + nh_cols - 1) / nh_cols;
-
-        let mut nh_col_w: Vec<f64> = vec![0.0; nh_cols];
-        let mut nh_row_d: Vec<f64> = vec![0.0; nh_rows];
-
-        for (i, blk) in blocks.iter().enumerate() {
-            let c = i % nh_cols;
-            let r = i / nh_cols;
-            nh_col_w[c] = nh_col_w[c].max(blk.width);
-            nh_row_d[r] = nh_row_d[r].max(blk.depth);
-        }
-
-        let nh_w = nh_col_w.iter().sum::<f64>() + (nh_cols + 1) as f64 * STREET_WIDTH;
-        let nh_d = nh_row_d.iter().sum::<f64>() + (nh_rows + 1) as f64 * STREET_WIDTH;
-
-        node.blocks = blocks;
-        node.nh_width = nh_w;
-        node.nh_depth = nh_d;
-        node.nh_cols = nh_cols;
-        node.nh_rows = nh_rows;
-        node.col_widths = nh_col_w;
-        node.row_depths = nh_row_d;
-        node.grid_radius = (nh_w * nh_w + nh_d * nh_d).sqrt() / 2.0;
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════
-// Phase 4: Subtree Weight Computation
-// ═══════════════════════════════════════════════════════════════════
-
-fn compute_weights(nodes: &mut Vec<FolderNode>, buildings: &[RawBuilding], idx: usize) {
-    let children: Vec<usize> = nodes[idx].children.clone();
-
-    let mut weight: f64 = 0.0;
-    let mut count: usize = 0;
-
-    for &bi in &nodes[idx].building_indices {
-        weight += buildings[bi].width * buildings[bi].depth;
-        count += 1;
     }
 
-    for child_idx in children {
-        compute_weights(nodes, buildings, child_idx);
-        weight += nodes[child_idx].weight;
-        count += nodes[child_idx].count;
-    }
-
-    nodes[idx].weight = weight;
-    nodes[idx].count = count;
-}
-
-// ═══════════════════════════════════════════════════════════════════
-// Phase 5: Recursive Radial Layout
-// ═══════════════════════════════════════════════════════════════════
-
-fn radial_layout(
-    nodes: &mut Vec<FolderNode>,
-    idx: usize,
-    start_angle: f64,
-    sweep: f64,
-) {
-    let children: Vec<usize> = nodes[idx].children.clone();
-    if children.is_empty() {
-        return;
-    }
-
-    let parent_x = nodes[idx].x;
-    let parent_z = nodes[idx].z;
-    let parent_radius = nodes[idx].grid_radius;
-
-    let total_weight: f64 = children
-        .iter()
-        .map(|&ci| nodes[ci].weight.max(1.0))
-        .sum();
-
-    let mut current_angle = start_angle;
-
-    for &child_idx in &children {
-        let child_weight = nodes[child_idx].weight.max(1.0);
-        let fraction = child_weight / total_weight;
-        let child_sweep = sweep * fraction;
-        let mid_angle = current_angle + child_sweep / 2.0;
-
-        let child_radius = nodes[child_idx].grid_radius;
-        let dist = BASE_ROAD_LENGTH + parent_radius + child_radius * 1.15;
-
-        nodes[child_idx].x = parent_x + mid_angle.cos() * dist;
-        nodes[child_idx].z = parent_z + mid_angle.sin() * dist;
-
-        let child_start = mid_angle - CHILD_CONE_HALF;
-        let child_sweep_inner = CHILD_CONE_HALF * 2.0;
-        radial_layout(nodes, child_idx, child_start, child_sweep_inner);
-
-        current_angle += child_sweep;
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════
-// Phase 6: Place Sidewalks, Internal Street Grids, and Buildings
-// ═══════════════════════════════════════════════════════════════════
-
-fn place_neighborhood_elements(
-    nodes: &[FolderNode],
-    positions: &mut [(f64, f64)],
-    platforms: &mut Vec<Platform>,
-    roads: &mut Vec<RoadSegment>,
-) {
-    for node in nodes {
-        if node.blocks.is_empty() {
-            continue;
+    let districts = city.districts.iter().enumerate().map(|(index, district)| {
+        PlacedDistrict {
+            name: district.name.clone(), 
+            typology: district.typology.clone(),
+            pos_x: district_boxes[index].x, 
+            pos_z: district_boxes[index].z,
+            width: district_boxes[index].width, 
+            depth: district_boxes[index].depth,
+            buildings: std::mem::take(&mut district_buildings[index]),
         }
+    }).collect();
 
-        let left_x = -node.nh_width / 2.0;
-        let bottom_z = -node.nh_depth / 2.0;
-
-        // 1. Generate orthogonal internal street grid (Avenues and Streets)
-        // Vertical street avenues along depth
-        let mut curr_x = left_x;
-        for c in 0..=node.nh_cols {
-            let center_x = node.x + curr_x + STREET_WIDTH / 2.0;
-            roads.push(RoadSegment {
-                start_x: center_x,
-                start_z: node.z - node.nh_depth / 2.0,
-                end_x: center_x,
-                end_z: node.z + node.nh_depth / 2.0,
-                width: STREET_WIDTH,
-            });
-            if c < node.nh_cols {
-                curr_x += STREET_WIDTH + node.col_widths[c];
-            }
-        }
-
-        // Horizontal street avenues along width
-        let mut curr_z = bottom_z;
-        for r in 0..=node.nh_rows {
-            let center_z = node.z + curr_z + STREET_WIDTH / 2.0;
-            roads.push(RoadSegment {
-                start_x: node.x - node.nh_width / 2.0,
-                start_z: center_z,
-                end_x: node.x + node.nh_width / 2.0,
-                end_z: center_z,
-                width: STREET_WIDTH,
-            });
-            if r < node.nh_rows {
-                curr_z += STREET_WIDTH + node.row_depths[r];
-            }
-        }
-
-        // 2. Place urban blocks, raised sidewalk platforms, and buildings
-        for (i, blk) in node.blocks.iter().enumerate() {
-            let c = i % node.nh_cols;
-            let r = i / node.nh_cols;
-
-            let lot_start_x = left_x
-                + STREET_WIDTH * (c + 1) as f64
-                + node.col_widths[0..c].iter().sum::<f64>();
-            let lot_start_z = bottom_z
-                + STREET_WIDTH * (r + 1) as f64
-                + node.row_depths[0..r].iter().sum::<f64>();
-
-            let offset_x = (node.col_widths[c] - blk.width) / 2.0;
-            let offset_z = (node.row_depths[r] - blk.depth) / 2.0;
-
-            let blk_world_x = node.x + lot_start_x + offset_x;
-            let blk_world_z = node.z + lot_start_z + offset_z;
-
-            platforms.push(Platform {
-                pos_x: blk_world_x,
-                pos_z: blk_world_z,
-                width: blk.width,
-                depth: blk.depth,
-                typology: blk.typology.clone(),
-            });
-
-            for (bi_idx, &bi) in blk.building_indices.iter().enumerate() {
-                let (lbx, lbz) = blk.local_b_pos[bi_idx];
-                positions[bi] = (blk_world_x + lbx, blk_world_z + lbz);
-            }
-        }
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════
-// Phase 7: Arterial Spine Highways
-// ═══════════════════════════════════════════════════════════════════
-
-fn generate_arterial_roads(nodes: &[FolderNode]) -> Vec<RoadSegment> {
-    let mut roads = Vec::new();
-
-    for node in nodes {
-        if let Some(parent_idx) = node.parent {
-            let parent = &nodes[parent_idx];
-            // Prominent arterial highway sizing
-            let width = 8.0 + (node.count as f64 + 1.0).log2() * 2.0;
-            roads.push(RoadSegment {
-                start_x: parent.x,
-                start_z: parent.z,
-                end_x: node.x,
-                end_z: node.z,
-                width,
-            });
-        }
-    }
-
-    roads
+    LayoutResult { districts, roads, platforms }
 }

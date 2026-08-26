@@ -72,18 +72,21 @@ func (c *Client) BuildCity(ctx context.Context, clonePath string, raw *analyzer.
 	fmt.Println("[LOG] Phase 4: Building roads from filesystem...")
 	roads := buildRoads(raw, buildings)
 
+	fmt.Println("[LOG] Phase 5: Extracting include-graph dependencies...")
+	dependencies := buildDependencies(raw, buildings)
+	fmt.Printf("[LOG]   → %d dependency edges\n", len(dependencies))
+
 	city := &models.CityMap{
-		Districts: districts,
-		Roads:     roads,
+		Districts:    districts,
+		Roads:        roads,
+		Dependencies: dependencies,
 	}
 
-	fmt.Printf("[LOG] City complete: %d districts, %d roads\n", len(districts), len(roads))
+	fmt.Printf("[LOG] City complete: %d districts, %d roads, %d dependencies\n", len(districts), len(roads), len(dependencies))
 	return city, nil
 }
 
-// ──────────────────────────────────────────────────────────
 // Phase 1: Associate functions → structs via LLM
-// ──────────────────────────────────────────────────────────
 
 type methodAssociation struct {
 	StructName string   `json:"struct_name"`
@@ -304,9 +307,7 @@ func promoteOrphanFunctions(orphans []analyzer.RawFunction, raw *analyzer.RawExt
 	return buildings
 }
 
-// ──────────────────────────────────────────────────────────
 // Phase 2: Generate building summaries
-// ──────────────────────────────────────────────────────────
 
 func (c *Client) summarizeBuildings(ctx context.Context, clonePath string, buildings []models.Building) {
 	var needsLLM []*models.Building
@@ -410,9 +411,7 @@ Output ONLY a raw JSON array of objects with keys "id" (integer) and "summary" (
 	wg.Wait()
 }
 
-// ──────────────────────────────────────────────────────────
 // Phase 3: Group buildings into semantic districts via LLM
-// ──────────────────────────────────────────────────────────
 
 type districtAssignment struct {
 	DistrictName string   `json:"district_name"`
@@ -730,9 +729,7 @@ func fallbackDistricts(buildings []models.Building) []models.District {
 	return districts
 }
 
-// ──────────────────────────────────────────────────────────
 // Phase 4: Build roads from filesystem paths
-// ──────────────────────────────────────────────────────────
 
 func buildRoads(raw *analyzer.RawExtraction, buildings []models.Building) []models.Road {
 	dirBuildings := make(map[string][]string)
@@ -785,9 +782,151 @@ func buildRoads(raw *analyzer.RawExtraction, buildings []models.Building) []mode
 	return roads
 }
 
-// ──────────────────────────────────────────────────────────
+// Phase 5: Build dependency edges from #include graph
+//
+// Resolves file-level #include relationships into building-to-building
+// edges. Zero LLM cost — purely derived from tree-sitter's include
+// extraction. For large repos, edges are capped and sorted by weight
+// so only significant connections are rendered as roads.
+
+func buildDependencies(raw *analyzer.RawExtraction, buildings []models.Building) []models.DependencyEdge {
+	// 1. Map each file path to the buildings it contains
+	fileToBuildingNames := make(map[string][]string)
+	for _, b := range buildings {
+		if b.SourceFile != "" {
+			fileToBuildingNames[b.SourceFile] = append(fileToBuildingNames[b.SourceFile], b.Name)
+		}
+	}
+
+	// 2. Build a lookup from filename (basename) and relative path to full rel path
+	//    This handles includes like "raylib.h" matching "src/raylib.h"
+	basenameToFiles := make(map[string][]string)
+	for _, fi := range raw.Files {
+		base := filepath.Base(fi.Path)
+		basenameToFiles[base] = append(basenameToFiles[base], fi.Path)
+	}
+
+	// 3. Resolve each file's includes into building-to-building edges
+	type edgeKey struct{ src, tgt string }
+	edgeCounts := make(map[edgeKey]int)
+
+	for _, fi := range raw.Files {
+		srcBuildings := fileToBuildingNames[fi.Path]
+		if len(srcBuildings) == 0 {
+			continue
+		}
+
+		for _, inc := range fi.Includes {
+			// Extract the path from #include "..." or #include <...>
+			incPath := extractIncludePath(inc)
+			if incPath == "" {
+				continue
+			}
+
+			// Resolve include to known files
+			targetFiles := resolveInclude(incPath, fi.Path, basenameToFiles)
+			for _, tgtFile := range targetFiles {
+				if tgtFile == fi.Path {
+					continue // skip self-includes
+				}
+				tgtBuildings := fileToBuildingNames[tgtFile]
+				for _, src := range srcBuildings {
+					for _, tgt := range tgtBuildings {
+						if src != tgt {
+							edgeCounts[edgeKey{src, tgt}]++
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// 4. Convert to DependencyEdge slice
+	edges := make([]models.DependencyEdge, 0, len(edgeCounts))
+	for k, w := range edgeCounts {
+		edges = append(edges, models.DependencyEdge{
+			Source: k.src,
+			Target: k.tgt,
+			Weight: w,
+		})
+	}
+
+	// 5. Sort by weight descending and cap for large repos
+	sort.Slice(edges, func(i, j int) bool {
+		return edges[i].Weight > edges[j].Weight
+	})
+
+	const maxEdges = 500
+	if len(edges) > maxEdges {
+		fmt.Printf("[LOG]   Capping dependency edges from %d to %d (keeping heaviest)\n", len(edges), maxEdges)
+		edges = edges[:maxEdges]
+	}
+
+	return edges
+}
+
+// extractIncludePath pulls the file path from an #include directive string.
+// Handles both #include "file.h" and #include <file.h> forms.
+func extractIncludePath(include string) string {
+	// Try quoted include first: #include "path/to/file.h"
+	if idx := strings.Index(include, `"`); idx != -1 {
+		end := strings.Index(include[idx+1:], `"`)
+		if end != -1 {
+			return include[idx+1 : idx+1+end]
+		}
+	}
+	// Try angle-bracket include: #include <path/to/file.h>
+	if idx := strings.Index(include, "<"); idx != -1 {
+		end := strings.Index(include[idx+1:], ">")
+		if end != -1 {
+			return include[idx+1 : idx+1+end]
+		}
+	}
+	return ""
+}
+
+// resolveInclude tries to match an include path to known files in the repo.
+func resolveInclude(incPath, sourceFile string, basenameToFiles map[string][]string) []string {
+	// 1. Try relative resolution from the source file's directory
+	srcDir := filepath.Dir(sourceFile)
+	relResolved := filepath.Join(srcDir, incPath)
+	relResolved = filepath.Clean(relResolved)
+	// Normalize to forward slashes for consistency
+	relResolved = filepath.ToSlash(relResolved)
+
+	// Check if this resolved path is a known file
+	base := filepath.Base(incPath)
+	candidates := basenameToFiles[base]
+
+	for _, c := range candidates {
+		normC := filepath.ToSlash(c)
+		if normC == relResolved {
+			return []string{c}
+		}
+	}
+
+	// 2. Try matching by path suffix (handles includes like "raylib/raylib.h")
+	normInc := filepath.ToSlash(incPath)
+	var matches []string
+	for _, c := range candidates {
+		normC := filepath.ToSlash(c)
+		if strings.HasSuffix(normC, normInc) {
+			matches = append(matches, c)
+		}
+	}
+	if len(matches) > 0 {
+		return matches
+	}
+
+	// 3. Fallback: basename match (for system-like includes within the project)
+	if len(candidates) == 1 {
+		return candidates
+	}
+
+	return nil
+}
+
 // Helpers
-// ──────────────────────────────────────────────────────────
 
 func cleanJSON(s string) string {
 	s = strings.TrimSpace(s)

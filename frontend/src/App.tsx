@@ -51,7 +51,6 @@ function App() {
         setWasmReady(true);
       } catch (e: any) {
         if (e.message?.includes("Using exceptions for control flow")) {
-          // Bevy intentionally throws this to hand over the game loop to the browser!
           setWasmReady(true);
         } else if (e.message?.includes("already initialized")) {
           setWasmReady(true);
@@ -113,7 +112,7 @@ function App() {
         )}
       </form>
 
-      <div className="relative mt-4 ml-2 h-[600px] w-[800px] bg-black">
+      <div className="relative mt-4 ml-2 h-[1000px] w-[1800px] bg-black">
         {!wasmReady && (
           <div className="absolute p-4 text-white">Booting Wasm...</div>
         )}

@@ -56,8 +56,18 @@ type Road struct {
 	Buildings []string `json:"buildings"` // building names along this road
 }
 
+// DependencyEdge represents a code-level dependency (import/include)
+// between two buildings. The Rust engine renders these as glowing
+// "nervous system" roads whose width scales with Weight.
+type DependencyEdge struct {
+	Source string `json:"source"` // building name (source of the dependency)
+	Target string `json:"target"` // building name (target of the dependency)
+	Weight int    `json:"weight"` // strength: number of call sites or import references
+}
+
 // CityMap is the top-level output consumed by the Rust/Wasm renderer.
 type CityMap struct {
-	Districts []District `json:"districts"`
-	Roads     []Road     `json:"roads"`
+	Districts    []District       `json:"districts"`
+	Roads        []Road           `json:"roads"`
+	Dependencies []DependencyEdge `json:"dependencies"`
 }
