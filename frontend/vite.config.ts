@@ -1,11 +1,23 @@
 import tailwindcss from "@tailwindcss/vite";
+import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
 import wasm from "vite-plugin-wasm";
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [tailwindcss(), react(), (wasm as unknown as () => Plugin)()],
+  resolve: {
+    tsconfigPaths: true,
+  },
+  plugins: [
+    tanstackRouter({
+      target: "react",
+      autoCodeSplitting: true,
+    }),
+    tailwindcss(),
+    react(),
+    (wasm as unknown as () => Plugin)(),
+  ],
   server: {
     proxy: {
       "/api": {

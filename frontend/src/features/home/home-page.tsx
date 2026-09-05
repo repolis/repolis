@@ -4,8 +4,7 @@ import { useForm } from "react-hook-form";
 interface RepoForm {
   repoUrl: string;
 }
-
-export default function Home() {
+export default function HomePage() {
   const navigate = useNavigate();
   const {
     register,
@@ -14,9 +13,20 @@ export default function Home() {
   } = useForm<RepoForm>();
 
   const onSubmit = (data: RepoForm) => {
-    // Strip "https://" or "http://" to pass as a clean URL param
-    const cleanPath = data.repoUrl.replace(/^https?:\/\//, "");
-    navigate({ to: `/city/${cleanPath}` });
+    const cleanPath = data.repoUrl.replace(
+      /^https?:\/\/(www\.)?github\.com\//,
+      "",
+    );
+    const parts = cleanPath.split("/");
+    if (parts.length >= 2) {
+      navigate({
+        to: "/city/$owner/$repo",
+        params: {
+          owner: parts[0],
+          repo: parts[1],
+        },
+      });
+    }
   };
 
   return (
@@ -34,8 +44,8 @@ export default function Home() {
           {...register("repoUrl", {
             required: "A repository URL is required",
             pattern: {
-              value: /^https?:\/\/(www\.)?(github|gitlab)\.com\/.+\/.+/,
-              message: "Must be a valid GitHub or GitLab URL",
+              value: /^https?:\/\/(www\.)?github\.com\/.+\/.+/,
+              message: "Must be a valid GitHub URL",
             },
           })}
           className="flex-1 rounded-md border-2 border-gray-200 px-4 py-2 transition-colors outline-none focus:border-blue-500"

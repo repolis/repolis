@@ -3,3 +3,4 @@ dist
 build
 .oxlintignore
 *.lock
+**/routeTree.gen.ts

@@ -1,43 +1,20 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import {
-  createRootRoute,
-  createRoute,
-  createRouter,
-  Outlet,
-  RouterProvider,
-} from "@tanstack/react-router";
+import { createRouter, RouterProvider } from "@tanstack/react-router";
 import { createRoot } from "react-dom/client";
 
-import Home from "./pages/Home";
-import Render from "./pages/Render";
+import { routeTree } from "./routeTree.gen";
 
 import "./index.css";
 
 const queryClient = new QueryClient();
 
-const rootRoute = createRootRoute({
-  component: () => (
-    <div className="w-full space-y-1">
-      <Outlet />
-    </div>
-  ),
+const router = createRouter({
+  routeTree,
+  context: {
+    queryClient,
+  },
+  defaultPreload: "intent",
 });
-
-const indexRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/",
-  component: Home,
-});
-
-export const renderRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/city/$",
-  component: Render,
-});
-
-const routeTree = rootRoute.addChildren([indexRoute, renderRoute]);
-
-const router = createRouter({ routeTree });
 
 declare module "@tanstack/react-router" {
   interface Register {

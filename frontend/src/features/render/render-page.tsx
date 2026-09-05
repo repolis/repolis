@@ -1,17 +1,17 @@
 import { useEffect, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
+import { useParams } from "@tanstack/react-router";
 
-import { renderRoute } from "../main";
-import init, { load_city_data } from "../wasm/engine";
+import init, { load_city_data } from "@/wasm/engine";
 
 interface CityMapResponse {
   status: string;
   cityData?: any;
 }
 
-export default function Render() {
-  const { _splat } = renderRoute.useParams();
-  const fullUrl = `https://${_splat}`;
+export default function RenderPage() {
+  const { owner, repo } = useParams({ from: "/city/$owner/$repo" });
+  const fullUrl = `https://github.com/${owner}/${repo}`;
 
   const [wasmReady, setWasmReady] = useState(false);
 
@@ -57,10 +57,10 @@ export default function Render() {
   }, []);
 
   useEffect(() => {
-    if (wasmReady && _splat) {
+    if (wasmReady && owner && repo) {
       analyzeMutation.mutate(fullUrl);
     }
-  }, [wasmReady, _splat]);
+  }, [wasmReady, owner, repo, analyzeMutation, fullUrl]);
 
   return (
     <div className="relative flex h-screen w-screen flex-col">
