@@ -67,10 +67,10 @@ function App() {
   };
 
   return (
-    <>
+    <div className="w-full space-y-1">
       <form
         onSubmit={handleSubmit(onSubmit)}
-        className="flex w-150 flex-col gap-2 p-2"
+        className="mx-auto flex w-150 flex-col gap-2 p-2"
       >
         <div className="flex gap-2">
           <input
@@ -112,17 +112,19 @@ function App() {
         )}
       </form>
 
-      <div className="relative mt-4 ml-2 h-[1000px] w-[1800px] bg-black">
-        {!wasmReady && (
-          <div className="absolute p-4 text-white">Booting Wasm...</div>
-        )}
-        <canvas
-          id="bevy-canvas"
-          className="h-full w-full"
-          onContextMenu={(e) => e.preventDefault()}
-        ></canvas>
+      <div className="mx-auto w-4/5 px-10">
+        <div className="relative aspect-video w-full bg-black">
+          {!wasmReady && (
+            <div className="absolute p-4 text-white">Booting Wasm...</div>
+          )}
+          <canvas
+            id="bevy-canvas"
+            className="h-full w-full"
+            onContextMenu={(e) => e.preventDefault()}
+          ></canvas>
+        </div>
       </div>
-    </>
+    </div>
   );
 }
 
