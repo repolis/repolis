@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { useParams } from "@tanstack/react-router";
 
@@ -21,7 +21,7 @@ export default function RenderPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ repo_url: url }),
+        body: JSON.stringify({ repo_url: url, force: false }),
       });
 
       if (!res.ok) {
@@ -56,8 +56,11 @@ export default function RenderPage() {
     loadWasm();
   }, []);
 
+  const hasRequested = useRef(false);
+
   useEffect(() => {
-    if (wasmReady && owner && repo) {
+    if (wasmReady && owner && repo && !hasRequested.current) {
+      hasRequested.current = true;
       analyzeMutation.mutate(fullUrl);
     }
   }, [wasmReady, owner, repo, analyzeMutation, fullUrl]);

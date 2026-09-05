@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/repolis/repolis/backend/internal/logger"
+
 	sitter "github.com/smacker/go-tree-sitter"
 	"github.com/smacker/go-tree-sitter/c"
 )
@@ -28,7 +30,7 @@ type RawStruct struct {
 type RawFunction struct {
 	Name        string `json:"name"`
 	SourceFile  string `json:"source_file"`
-	Signature   string `json:"signature"`   // return type + params
+	Signature   string `json:"signature"`    // return type + params
 	BodySnippet string `json:"body_snippet"` // minified source for LLM context
 	LinesOfCode int    `json:"lines_of_code"`
 }
@@ -110,13 +112,12 @@ func ExtractRepository(clonePath string) (*RawExtraction, error) {
 		}
 		if d.IsDir() {
 			if ignoredDirs[d.Name()] {
-				fmt.Printf("[LOG]   Skipping ignored dir: %s\n", d.Name())
+				logger.Log(logger.InfoLevel, "Skipping ignored dir: %s", d.Name())
 				return filepath.SkipDir
 			}
-			// Skip subdirectories that look like vendored third-party code
 			if path != clonePath && isVendoredDir(path) {
 				relDir, _ := filepath.Rel(clonePath, path)
-				fmt.Printf("[LOG]   Skipping vendored dir: %s\n", relDir)
+				logger.Log(logger.InfoLevel, "Skipping vendored dir: %s", relDir)
 				return filepath.SkipDir
 			}
 			return nil
@@ -129,7 +130,7 @@ func ExtractRepository(clonePath string) (*RawExtraction, error) {
 
 		fileInfo, structs, funcs, parseErr := parseCFile(path, clonePath)
 		if parseErr != nil {
-			fmt.Printf("[WARNING] Failed to parse %s: %v\n", path, parseErr)
+			logger.Log(logger.WarnLevel, "Failed to parse %s: %v", path, parseErr)
 			return nil
 		}
 
@@ -143,7 +144,7 @@ func ExtractRepository(clonePath string) (*RawExtraction, error) {
 		return nil, fmt.Errorf("failed to walk directory: %w", err)
 	}
 
-	fmt.Printf("[LOG] Extracted %d files, %d structs, %d functions\n",
+	logger.Log(logger.InfoLevel, "Extracted %d files, %d structs, %d functions",
 		len(result.Files), len(result.Structs), len(result.Functions))
 	return result, nil
 }
@@ -167,12 +168,12 @@ func parseCFile(fullPath, basePath string) (FileInfo, []RawStruct, []RawFunction
 	depth := strings.Count(relPath, string(filepath.Separator))
 
 	fileInfo := FileInfo{
-		Path:         relPath,
-		Extension:    filepath.Ext(fullPath),
-		Depth:        depth,
-		LinesOfCode:  bytes.Count(content, []byte("\n")) + 1,
-		CommitChurn:  getGitChurn(basePath, relPath),
-		LastModified: getGitLastModified(basePath, relPath),
+		Path:          relPath,
+		Extension:     filepath.Ext(fullPath),
+		Depth:         depth,
+		LinesOfCode:   bytes.Count(content, []byte("\n")) + 1,
+		CommitChurn:   getGitChurn(basePath, relPath),
+		LastModified:  getGitLastModified(basePath, relPath),
 		PrimaryAuthor: getGitPrimaryAuthor(basePath, relPath),
 	}
 
@@ -229,7 +230,7 @@ func parseCFile(fullPath, basePath string) (FileInfo, []RawStruct, []RawFunction
 	}
 	walk(rootNode)
 
-	fmt.Printf("[LOG]   Parsed %s: %d structs, %d functions\n", relPath, len(structs), len(funcs))
+	logger.Log(logger.InfoLevel, "Parsed %s: %d structs, %d functions", relPath, len(structs), len(funcs))
 	return fileInfo, structs, funcs, nil
 }
 
@@ -463,7 +464,11 @@ func extractTargetSymbols(node *sitter.Node, content []byte, targets map[string]
 	if nodeType == "function_definition" || nodeType == "struct_specifier" || nodeType == "type_definition" {
 		name := findFirstIdentifier(node, content)
 		if targets[name] {
-			out.WriteString(nodeContent(node, content))
+			if nodeType == "function_definition" {
+				out.WriteString(extractFunctionSignatureAndVars(node, content))
+			} else {
+				out.WriteString(nodeContent(node, content))
+			}
 			out.WriteString("\n")
 		}
 	}
@@ -473,6 +478,32 @@ func extractTargetSymbols(node *sitter.Node, content []byte, targets map[string]
 			extractTargetSymbols(child, content, targets, out)
 		}
 	}
+}
+
+func extractFunctionSignatureAndVars(node *sitter.Node, content []byte) string {
+	var out bytes.Buffer
+	for i := 0; i < int(node.ChildCount()); i++ {
+		child := node.Child(i)
+		if child == nil {
+			continue
+		}
+		if child.Type() == "compound_statement" {
+			out.WriteString(" {\n")
+			for j := 0; j < int(child.ChildCount()); j++ {
+				gc := child.Child(j)
+				if gc != nil && gc.Type() == "declaration" {
+					out.WriteString("  ")
+					out.WriteString(nodeContent(gc, content))
+					out.WriteString("\n")
+				}
+			}
+			out.WriteString("  // body stripped...\n}")
+		} else {
+			out.WriteString(nodeContent(child, content))
+			out.WriteString(" ")
+		}
+	}
+	return out.String()
 }
 
 func findFirstIdentifier(node *sitter.Node, content []byte) string {

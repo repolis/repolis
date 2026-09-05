@@ -20,3 +20,4 @@ engine/pkg/
 .idea/
 .vscode/
 *.swp
+backend/data/

@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/repolis/repolis/backend/internal/logger"
+
 	"github.com/repolis/repolis/backend/internal/analyzer"
 	"github.com/repolis/repolis/backend/internal/models"
 	openai "github.com/sashabaranov/go-openai"
@@ -48,33 +50,28 @@ func NewClient() (*Client, error) {
 
 // BuildCity takes raw AST data and uses the LLM to produce a full CityMap.
 // Pipeline:
-//   1. Associate functions → structs (method inference)
-//   2. Generate building summaries
-//   3. Group buildings into semantic districts
-//   4. Build roads from filesystem paths
+//  1. Associate functions → structs (method inference)
+//  2. Generate building summaries
+//  3. Group buildings into semantic districts
+//  4. Build roads from filesystem paths
 func (c *Client) BuildCity(ctx context.Context, clonePath string, raw *analyzer.RawExtraction) (*models.CityMap, error) {
-	fmt.Println("[LOG] Phase 1: LLM method association...")
+	logger.Log(logger.InfoLevel, "1: LLM method association")
 	buildings, orphanFuncs := c.associateMethods(ctx, clonePath, raw)
 
-	fmt.Printf("[LOG]   → %d buildings, %d orphan functions\n", len(buildings), len(orphanFuncs))
+	logger.Log(logger.InfoLevel, "%d buildings, %d orphan functions", len(buildings), len(orphanFuncs))
 
-	// Promote significant orphan function clusters into standalone buildings
-	promoted := promoteOrphanFunctions(orphanFuncs, raw)
-	buildings = append(buildings, promoted...)
-	fmt.Printf("[LOG]   → %d total buildings after promotion\n", len(buildings))
-
-	fmt.Println("[LOG] Phase 2: LLM building summaries...")
+	logger.Log(logger.InfoLevel, "2: LLM building summaries")
 	c.summarizeBuildings(ctx, clonePath, buildings)
 
-	fmt.Println("[LOG] Phase 3: LLM semantic district grouping...")
+	logger.Log(logger.InfoLevel, "3: LLM semantic district grouping")
 	districts := c.groupIntoDistricts(ctx, buildings)
 
-	fmt.Println("[LOG] Phase 4: Building roads from filesystem...")
+	logger.Log(logger.InfoLevel, "4: Building roads from filesystem")
 	roads := buildRoads(raw, buildings)
 
-	fmt.Println("[LOG] Phase 5: Extracting include-graph dependencies...")
+	logger.Log(logger.InfoLevel, "5: Extracting include-graph dependencies")
 	dependencies := buildDependencies(raw, buildings)
-	fmt.Printf("[LOG]   → %d dependency edges\n", len(dependencies))
+	logger.Log(logger.InfoLevel, "%d dependency edges", len(dependencies))
 
 	city := &models.CityMap{
 		Districts:    districts,
@@ -82,11 +79,11 @@ func (c *Client) BuildCity(ctx context.Context, clonePath string, raw *analyzer.
 		Dependencies: dependencies,
 	}
 
-	fmt.Printf("[LOG] City complete: %d districts, %d roads, %d dependencies\n", len(districts), len(roads), len(dependencies))
+	logger.Log(logger.InfoLevel, "City summary: %d districts, %d roads, %d dependencies", len(districts), len(roads), len(dependencies))
 	return city, nil
 }
 
-// Phase 1: Associate functions → structs via LLM
+// Phase 1: Associate functions into structs via LLM
 
 type methodAssociation struct {
 	StructName string   `json:"struct_name"`
@@ -113,7 +110,7 @@ func (c *Client) associateMethods(ctx context.Context, clonePath string, raw *an
 	}
 
 	if len(raw.Structs) == 0 {
-		fmt.Println("[LOG]   No structs in project; skipping LLM association.")
+		logger.Log(logger.InfoLevel, "No structs in project; skipping LLM association.")
 		return make([]models.Building, 0), raw.Functions
 	}
 
@@ -138,7 +135,13 @@ func (c *Client) associateMethods(ctx context.Context, clonePath string, raw *an
 		orphans      []analyzer.RawFunction
 	}
 	resChan := make(chan assocResult, len(funcsByFile))
-	sem := make(chan struct{}, 4) // Worker pool of 4 concurrent workers
+
+	maxWorkers := 4
+	if os.Getenv("LLM_API_KEY") == "ollama" {
+		maxWorkers = 1
+	}
+	sem := make(chan struct{}, maxWorkers)
+
 	var wg sync.WaitGroup
 
 	fileIdx := 0
@@ -155,7 +158,7 @@ func (c *Client) associateMethods(ctx context.Context, clonePath string, raw *an
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			fmt.Printf("[LOG]   [%d/%d] Associating %d functions in %s (concurrent)...\n", idx, totalFiles, len(funcs), path)
+			logger.Log(logger.InfoLevel, "[%d/%d] Associating %d functions in %s", idx, totalFiles, len(funcs), path)
 
 			funcSummaries := make([]string, 0, len(funcs))
 			for _, f := range funcs {
@@ -260,53 +263,6 @@ Output ONLY raw JSON array, no markdown, no explanation.`,
 	return buildings, orphanFunctions
 }
 
-// promoteOrphanFunctions creates "utility" buildings from files that have many functions but no structs.
-func promoteOrphanFunctions(orphans []analyzer.RawFunction, raw *analyzer.RawExtraction) []models.Building {
-	byFile := make(map[string][]analyzer.RawFunction)
-	for _, f := range orphans {
-		byFile[f.SourceFile] = append(byFile[f.SourceFile], f)
-	}
-
-	fileInfoMap := make(map[string]analyzer.FileInfo)
-	for _, fi := range raw.Files {
-		fileInfoMap[fi.Path] = fi
-	}
-
-	buildings := make([]models.Building, 0)
-	for filePath, funcs := range byFile {
-		if len(funcs) < 2 {
-			continue
-		}
-
-		baseName := strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath))
-		methods := make([]string, 0, len(funcs))
-		totalLOC := 0
-		for _, f := range funcs {
-			methods = append(methods, f.Name)
-			totalLOC += f.LinesOfCode
-		}
-
-		fi := fileInfoMap[filePath]
-		buildings = append(buildings, models.Building{
-			Name:         baseName,
-			SourceFile:   filePath,
-			NumFields:    0,
-			NumMethods:   len(methods),
-			Fields:       make([]string, 0),
-			Methods:      methods,
-			LinesOfCode:  totalLOC,
-			CommitChurn:  fi.CommitChurn,
-			LastModified: fi.LastModified,
-		})
-	}
-
-	sort.Slice(buildings, func(i, j int) bool {
-		return buildings[i].Name < buildings[j].Name
-	})
-
-	return buildings
-}
-
 // Phase 2: Generate building summaries
 
 func (c *Client) summarizeBuildings(ctx context.Context, clonePath string, buildings []models.Building) {
@@ -330,12 +286,12 @@ func (c *Client) summarizeBuildings(ctx context.Context, clonePath string, build
 		needsLLM = append(needsLLM, b)
 	}
 
-	fmt.Printf("[LOG]   Applied %d zero-cost summaries; %d structs require AI abstraction\n", zeroCostCount, len(needsLLM))
+	logger.Log(logger.InfoLevel, "Applied %d zero-cost summaries; %d structs require AI abstraction", zeroCostCount, len(needsLLM))
 	if len(needsLLM) == 0 {
 		return
 	}
 
-	batchSize := 15
+	batchSize := 5
 	var batches [][]*models.Building
 	for i := 0; i < len(needsLLM); i += batchSize {
 		end := i + batchSize
@@ -345,7 +301,7 @@ func (c *Client) summarizeBuildings(ctx context.Context, clonePath string, build
 		batches = append(batches, needsLLM[i:end])
 	}
 
-	fmt.Printf("[LOG]   Processing %d batches concurrently via worker pool...\n", len(batches))
+	logger.Log(logger.InfoLevel, "Processing %d batches concurrently via worker pool", len(batches))
 	sem := make(chan struct{}, 4) // max 4 concurrent AI summarization workers
 	var wg sync.WaitGroup
 
@@ -405,7 +361,7 @@ Output ONLY a raw JSON array of objects with keys "id" (integer) and "summary" (
 					b.Summary = fmt.Sprintf("Data struct %s with %d fields in %s", b.Name, b.NumFields, filepath.Base(b.SourceFile))
 				}
 			}
-			fmt.Printf("[LOG]     Completed AI summary batch %d/%d\n", batchNum+1, len(batches))
+			logger.Log(logger.InfoLevel, "Completed AI summary batch %d/%d", batchNum+1, len(batches))
 		}(bIdx, batch)
 	}
 	wg.Wait()
@@ -430,7 +386,7 @@ func (c *Client) groupIntoDistricts(ctx context.Context, buildings []models.Buil
 		return c.groupIntoDistrictsChunk(ctx, buildings, 0)
 	}
 
-	fmt.Printf("[LOG]   Large codebase detected (%d buildings). Executing Hierarchical MapReduce Clustering...\n", len(buildings))
+	logger.Log(logger.InfoLevel, "Large codebase detected (%d buildings). Executing Hierarchical MapReduce Clustering", len(buildings))
 
 	byDir := make(map[string][]models.Building)
 	for _, b := range buildings {
@@ -471,7 +427,7 @@ func (c *Client) groupIntoDistricts(ctx context.Context, buildings []models.Buil
 		chunks = append(chunks, currentChunk)
 	}
 
-	fmt.Printf("[LOG]     Map Stage: Divided %d buildings into %d localized clusters; processing concurrently...\n", len(buildings), len(chunks))
+	logger.Log(logger.InfoLevel, "Map Stage: Divided %d buildings into %d localized clusters; processing concurrently...", len(buildings), len(chunks))
 
 	sem := make(chan struct{}, 4)
 	var wg sync.WaitGroup
@@ -485,7 +441,7 @@ func (c *Client) groupIntoDistricts(ctx context.Context, buildings []models.Buil
 			defer func() { <-sem }()
 
 			chunkDistricts[chunkIdx] = c.groupIntoDistrictsChunk(ctx, bSlice, chunkIdx+1)
-			fmt.Printf("[LOG]     Completed district cluster %d/%d\n", chunkIdx+1, len(chunks))
+			logger.Log(logger.InfoLevel, "Completed district cluster %d/%d", chunkIdx+1, len(chunks))
 		}(idx, chunk)
 	}
 	wg.Wait()
@@ -495,7 +451,7 @@ func (c *Client) groupIntoDistricts(ctx context.Context, buildings []models.Buil
 		allLocal = append(allLocal, ds...)
 	}
 
-	fmt.Printf("[LOG]     Reduce Stage: Consolidating %d localized districts...\n", len(allLocal))
+	logger.Log(logger.InfoLevel, "Reduce Stage: Consolidating %d localized districts...", len(allLocal))
 	return c.reduceDistricts(allLocal)
 }
 
@@ -514,13 +470,11 @@ func (c *Client) groupIntoDistrictsChunk(ctx context.Context, buildings []models
 	}
 
 	systemPrompt := `You are an expert software architect analyzing a C codebase.
-Your task: group code entities into logical SEMANTIC districts — like neighborhoods in a city.
-
-Districts should reflect LOGICAL relationships: entities that work together belong in the same district.
+Your task: group code entities into logical SEMANTIC districts.
 
 Each district MUST have:
 - "district_name": descriptive 2-4 word name
-- "typology": EXACTLY ONE of: core, data, network, security, interface, utility, config, test, example
+- "typology": EXACTLY ONE of: core, data, network, security, interface, utility, config, test, example, unknown
 - "summary": 5-10 word description of the district's purpose
 - "tags": 2-4 short technical keywords
 - "building_ids": array of integer IDs of the buildings that belong in this district
@@ -528,9 +482,18 @@ Each district MUST have:
 RULES:
 1. Every building ID must appear in exactly ONE district.
 2. Create 2 to 6 districts.
-3. If buildings have no clear relationship, group them in a "Utilities & Helpers" district.
-4. Output ONLY a raw JSON array of district objects. No markdown, no explanation.
-5. Produce strictly valid, parseable JSON.`
+3. Output ONLY a raw JSON array of district objects. No markdown.
+
+EXAMPLE OUTPUT:
+[
+  {
+    "district_name": "Database Layer",
+    "typology": "data",
+    "summary": "Handles all SQLite connections",
+    "tags": ["sql", "storage"],
+    "building_ids": [0, 3, 4]
+  }
+]`
 
 	prompt := fmt.Sprintf("Here are the code entities to group:\n\n%s\n\nGroup them into semantic districts.", manifest.String())
 
@@ -545,9 +508,9 @@ RULES:
 
 	if err != nil || len(resp.Choices) == 0 {
 		if chunkNum > 0 {
-			fmt.Printf("[WARNING] LLM district grouping failed for cluster %d: %v\n", chunkNum, err)
+			logger.Log(logger.WarnLevel, "LLM district grouping failed for cluster %d: %v", chunkNum, err)
 		} else {
-			fmt.Printf("[WARNING] LLM district grouping failed: %v\n", err)
+			logger.Log(logger.WarnLevel, "LLM district grouping failed: %v", err)
 		}
 		return fallbackDistricts(buildings)
 	}
@@ -556,9 +519,9 @@ RULES:
 	var assignments []districtAssignment
 	if err := json.Unmarshal([]byte(content), &assignments); err != nil {
 		if chunkNum > 0 {
-			fmt.Printf("[WARNING] Failed to parse district assignments for cluster %d: %v\n", chunkNum, err)
+			logger.Log(logger.WarnLevel, "Failed to parse district assignments for cluster %d: %v", chunkNum, err)
 		} else {
-			fmt.Printf("[WARNING] Failed to parse district assignments: %v\n", err)
+			logger.Log(logger.WarnLevel, "Failed to parse district assignments: %v", err)
 		}
 		return fallbackDistricts(buildings)
 	}
@@ -858,7 +821,7 @@ func buildDependencies(raw *analyzer.RawExtraction, buildings []models.Building)
 
 	const maxEdges = 500
 	if len(edges) > maxEdges {
-		fmt.Printf("[LOG]   Capping dependency edges from %d to %d (keeping heaviest)\n", len(edges), maxEdges)
+		logger.Log(logger.InfoLevel, "Capping dependency edges from %d to %d (keeping heaviest)", len(edges), maxEdges)
 		edges = edges[:maxEdges]
 	}
 
@@ -990,14 +953,38 @@ func findJSONStart(s string, char byte) int {
 }
 
 func validateTypology(t string) string {
+	t = strings.ToLower(strings.TrimSpace(t))
+
+	// Exact matches
 	valid := map[string]bool{
 		"core": true, "data": true, "network": true, "security": true,
 		"interface": true, "utility": true, "config": true, "test": true,
 		"example": true, "unknown": true,
 	}
-	t = strings.ToLower(strings.TrimSpace(t))
 	if valid[t] {
 		return t
 	}
+
+	// Fuzzy matching for local model hallucinations
+	if strings.Contains(t, "db") || strings.Contains(t, "database") || strings.Contains(t, "store") {
+		return "data"
+	}
+	if strings.Contains(t, "util") || strings.Contains(t, "helper") || strings.Contains(t, "misc") {
+		return "utility"
+	}
+	if strings.Contains(t, "ui") || strings.Contains(t, "view") || strings.Contains(t, "frontend") {
+		return "interface"
+	}
+	if strings.Contains(t, "net") || strings.Contains(t, "api") || strings.Contains(t, "web") {
+		return "network"
+	}
+	if strings.Contains(t, "engine") || strings.Contains(t, "main") || strings.Contains(t, "system") {
+		return "core"
+	}
+	if strings.Contains(t, "test") || strings.Contains(t, "mock") || strings.Contains(t, "stub") {
+		return "test"
+	}
+
+	// If it's completely unmappable
 	return "unknown"
 }

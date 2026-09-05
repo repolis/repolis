@@ -2,12 +2,15 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
+
+	"github.com/repolis/repolis/backend/internal/logger"
 
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
@@ -28,12 +31,14 @@ func CookieMiddleware(next http.Handler) http.Handler {
 		var userID string
 		if err != nil {
 			userID = uuid.New().String()
+			isProd := os.Getenv("APP_ENV") == "production"
+
 			http.SetCookie(w, &http.Cookie{
 				Name:     "repolis_user_id",
 				Value:    userID,
 				Path:     "/",
 				HttpOnly: true,
-				Secure:   false, // set to true in prod
+				Secure:   isProd,
 				SameSite: http.SameSiteLaxMode,
 				Expires:  time.Now().Add(365 * 24 * time.Hour),
 			})
@@ -47,19 +52,23 @@ func CookieMiddleware(next http.Handler) http.Handler {
 }
 
 func main() {
-	_ = godotenv.Load() // Load .env file if present
+	_ = godotenv.Load()
 
 	if err := db.InitDB(); err != nil {
-		log.Fatalf("[ERROR] Failed to initialize database: %v", err)
+		logger.Log(logger.FatalLevel, "Failed to initialize database: %v", err)
+	}
+
+	if err := os.MkdirAll(filepath.Join("data", "cities"), 0755); err != nil {
+		logger.Log(logger.FatalLevel, "Failed to create cache directory: %v", err)
 	}
 
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("POST /api/analyze", handleAnalyze)
 
-	fmt.Println("[LOG] Backend server is running on http://localhost:8080")
+	logger.Log(logger.InfoLevel, "Backend server is running on http://localhost:8080")
 	if err := http.ListenAndServe(":8080", CookieMiddleware(mux)); err != nil {
-		log.Fatalf("[ERROR] Server crashed: %v", err)
+		logger.Log(logger.FatalLevel, "Server crashed: %v", err)
 	}
 }
 
@@ -82,13 +91,35 @@ func handleAnalyze(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fmt.Printf("[LOG] Received request from %s to analyze: %s\n", userID, req.RepoURL)
+	logger.Log(logger.InfoLevel, "Received request from %s to analyze: %s", userID, req.RepoURL)
 
 	remoteCommit, err := git.GetRemoteCommitHash(req.RepoURL)
 	if err != nil {
-		fmt.Printf("[ERROR] Failed to fetch remote commit: %v\n", err)
+		logger.Log(logger.ErrorLevel, "Failed to fetch remote commit: %v", err)
 		sendJSONError(w, "Failed to fetch remote repository info. Ensure it is public.", http.StatusBadRequest)
 		return
+	}
+
+	cacheKey := fmt.Sprintf("%x", sha256.Sum256([]byte(req.RepoURL+"@"+remoteCommit)))
+	cacheFilePath := filepath.Join("data", "cities", cacheKey+".json")
+
+	if !req.Force {
+		if b, err := os.ReadFile(cacheFilePath); err == nil {
+			var cachedCity models.CityMap
+			if json.Unmarshal(b, &cachedCity) == nil {
+				logger.Log(logger.InfoLevel, "Serving cached city map for %s (commit: %s)", req.RepoURL, remoteCommit)
+				resp := models.AnalyzeResponse{
+					Status:   "success",
+					CityData: &cachedCity,
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode(resp)
+				return
+			}
+		}
+	} else {
+		logger.Log(logger.InfoLevel, "Force flag provided, bypassing cache for %s", req.RepoURL)
 	}
 
 	var finalSessionID string
@@ -96,16 +127,15 @@ func handleAnalyze(w http.ResponseWriter, r *http.Request) {
 
 	if existingSessionID, existingCommit, existingClonePath, err := db.GetSessionByUserAndRepo(userID, req.RepoURL); err == nil && existingSessionID != "" {
 		if existingCommit == remoteCommit {
-			// Verify the clone directory still exists (macOS cleans /tmp)
 			if _, statErr := os.Stat(existingClonePath); statErr == nil {
-				fmt.Printf("[LOG] Found existing session %s with matching commit %s. Skipping clone.\n", existingSessionID, existingCommit)
+				logger.Log(logger.InfoLevel, "Found existing session %s with matching commit %s. Skipping clone.", existingSessionID, existingCommit)
 				finalSessionID = existingSessionID
 				finalClonePath = existingClonePath
 			} else {
-				fmt.Printf("[LOG] Cached clone path gone (%s). Will re-clone.\n", existingClonePath)
+				logger.Log(logger.InfoLevel, "Cached clone path gone (%s). Will re-clone.", existingClonePath)
 			}
 		} else {
-			fmt.Printf("[LOG] Remote repo has updated. Will clone anew.\n")
+			logger.Log(logger.InfoLevel, "Remote repo has updated. Will clone anew.")
 		}
 	}
 
@@ -124,27 +154,35 @@ func handleAnalyze(w http.ResponseWriter, r *http.Request) {
 		finalClonePath = clonePath
 	}
 
-	fmt.Printf("[LOG] Phase 1: Extracting AST structure from: %s\n", finalClonePath)
+	logger.Log(logger.InfoLevel, "Extracting AST structure from: %s", finalClonePath)
 	rawData, err := analyzer.ExtractRepository(finalClonePath)
 	if err != nil {
-		log.Printf("[ERROR] AST extraction failed: %v", err)
+		logger.Log(logger.ErrorLevel, "AST extraction failed: %v", err)
 		sendJSONError(w, "Failed to analyze repository AST", http.StatusInternalServerError)
 		return
 	}
 
-	fmt.Printf("[LOG] Phase 2: Building city via LLM pipeline...\n")
+	logger.Log(logger.InfoLevel, "Building city via LLM pipeline")
 	llmClient, err := llm.NewClient()
 	if err != nil {
 		sendJSONError(w, "Failed to create LLM client", http.StatusInternalServerError)
-		log.Printf("[ERROR] Failed to create LLM client: %v", err)
+		logger.Log(logger.ErrorLevel, "Failed to create LLM client: %v", err)
 		return
 	}
 
 	cityMap, err := llmClient.BuildCity(r.Context(), finalClonePath, rawData)
 	if err != nil {
 		sendJSONError(w, "Failed to build city map", http.StatusInternalServerError)
-		log.Printf("[ERROR] LLM city build failed: %v", err)
+		logger.Log(logger.ErrorLevel, "LLM city build failed: %v", err)
 		return
+	}
+
+	if b, err := json.Marshal(cityMap); err == nil {
+		if err := os.WriteFile(cacheFilePath, b, 0644); err != nil {
+			logger.Log(logger.WarnLevel, "Failed to write cache file: %v", err)
+		} else {
+			logger.Log(logger.InfoLevel, "Saved generated city map to cache: %s", cacheFilePath)
+		}
 	}
 
 	resp := models.AnalyzeResponse{

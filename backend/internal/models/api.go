@@ -2,6 +2,7 @@ package models
 
 type AnalyzeRequest struct {
 	RepoURL string `json:"repo_url"`
+	Force   bool   `json:"force"`
 }
 
 type AnalyzeResponse struct {
