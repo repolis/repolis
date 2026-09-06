@@ -135,7 +135,7 @@ pub fn compute_layout(city: &CityMap) -> LayoutResult {
     let district_boxes = layout_city(&mut raw_buildings, city);
     let edges = resolve_dependencies(city, &raw_buildings);
     let roads = route_dependencies(&raw_buildings, &edges);
-    let platforms = generate_platforms(&raw_buildings, city);
+    let platforms = generate_platforms(&raw_buildings, city, &district_boxes);
 
     package_result(city, &raw_buildings, &district_boxes, roads, platforms)
 }
@@ -421,8 +421,8 @@ fn route_dependencies(buildings: &[RawBuilding], edges: &[DepEdge]) -> Vec<RoadS
     }).collect()
 }
 
-fn generate_platforms(buildings: &[RawBuilding], city: &CityMap) -> Vec<Platform> {
-    buildings.iter().map(|building| {
+fn generate_platforms(buildings: &[RawBuilding], city: &CityMap, district_boxes: &[BBox]) -> Vec<Platform> {
+    let mut platforms: Vec<Platform> = buildings.iter().map(|building| {
         Platform {
             pos_x: building.pos_x - LOT_MARGIN, 
             pos_z: building.pos_z - LOT_MARGIN,
@@ -430,7 +430,22 @@ fn generate_platforms(buildings: &[RawBuilding], city: &CityMap) -> Vec<Platform
             depth: building.depth + LOT_MARGIN * 2.0,
             typology: city.districts[building.district_idx].typology.clone(),
         }
-    }).collect()
+    }).collect();
+
+    for bbox in district_boxes {
+        let pad = LOT_MARGIN * 2.0;
+        if bbox.width > 0.0 && bbox.depth > 0.0 {
+            platforms.push(Platform {
+                pos_x: bbox.x - pad,
+                pos_z: bbox.z - pad,
+                width: bbox.width + pad * 2.0,
+                depth: bbox.depth + pad * 2.0,
+                typology: "district_base".to_string(),
+            });
+        }
+    }
+
+    platforms
 }
 
 fn package_result(

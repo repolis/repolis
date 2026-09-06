@@ -363,6 +363,7 @@ fn typology_color(typology: &str, _name: &str) -> Color {
         return Color::srgb(0.35, 0.35, 0.35); // Concrete grey platform
     }
     match typology {
+        "district_base" => Color::srgb(0.25, 0.26, 0.28), // Very dark concrete for district base
         "core"      => Color::srgb(0.35, 0.38, 0.42),
         "data"      => Color::srgb(0.18, 0.42, 0.25),
         "network"   => Color::srgb(0.15, 0.30, 0.55),
@@ -459,9 +460,10 @@ fn spawn_city(
         CityElement,
     ));
 
-    let road_material = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.12, 0.12, 0.12), // Very dark distinct asphalt for roads
-        perceptual_roughness: 0.85,
+    let data_stream_material = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.0, 0.8, 1.0), 
+        emissive: Color::linear_rgb(0.0, 4.0, 5.0).into(), // Glowing cyan
+        perceptual_roughness: 0.2,
         ..default()
     });
 
@@ -477,13 +479,18 @@ fn spawn_city(
         let angle = (delta_x as f32).atan2(delta_z as f32);
         let center_x = (road.start_x + road.end_x) as f32 / 2.0;
         let center_z = (road.start_z + road.end_z) as f32 / 2.0;
-        let width = road.width as f32;
+        
+        // Data streams shouldn't be massive 8-unit wide roads. 
+        // We scale them down to look like thick fiber optic cables.
+        let stream_width = (road.width as f32) * 0.15;
+        // Float them slightly above the ground/platforms
+        let stream_height = 0.3; 
 
         commands.spawn((
             PbrBundle {
-                mesh: meshes.add(Cuboid::new(width, road_height, length)),
-                material: road_material.clone(),
-                transform: Transform::from_xyz(center_x, road_height / 2.0, center_z)
+                mesh: meshes.add(Cuboid::new(stream_width, 0.05, length)),
+                material: data_stream_material.clone(),
+                transform: Transform::from_xyz(center_x, stream_height, center_z)
                     .with_rotation(Quat::from_rotation_y(angle)),
                 ..default()
             },
@@ -492,6 +499,9 @@ fn spawn_city(
     }
 
     for platform in &result.platforms {
+        let is_district_base = platform.typology == "district_base";
+        let current_platform_top = if is_district_base { 0.12 } else { platform_top };
+        
         let platform_color = typology_color(&platform.typology, "platform_color");
         let platform_material = materials.add(StandardMaterial {
             base_color: platform_color,
@@ -503,13 +513,13 @@ fn spawn_city(
             PbrBundle {
                 mesh: meshes.add(Cuboid::new(
                     platform.width as f32,
-                    platform_top,
+                    current_platform_top,
                     platform.depth as f32,
                 )),
                 material: platform_material,
                 transform: Transform::from_xyz(
                     (platform.pos_x + platform.width / 2.0) as f32,
-                    platform_top / 2.0,
+                    current_platform_top / 2.0,
                     (platform.pos_z + platform.depth / 2.0) as f32,
                 ),
                 ..default()
