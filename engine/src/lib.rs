@@ -309,7 +309,6 @@ fn camera_controls(
             
             *transform = Transform::from_xyz(x, y, z).looking_at(camera.focus, Vec3::Y);
         } else {
-            // Freecam logic
             let mut speed = camera.speed;
             if keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight) { speed *= 3.0; }
             if keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::AltLeft) { speed *= 0.3; }
