@@ -1,5 +1,7 @@
 use bevy::prelude::*;
 use bevy::pbr::{CascadeShadowConfigBuilder, ScreenSpaceAmbientOcclusionSettings, FogSettings, FogFalloff};
+use bevy::render::mesh::{Indices, PrimitiveTopology};
+use bevy::render::render_asset::RenderAssetUsages;
 use wasm_bindgen::prelude::*;
 
 use data::CityMap;
@@ -218,12 +220,27 @@ fn process_city_data(
         if road.end_z < min_z { min_z = road.end_z; }
         if road.start_x > max_x { max_x = road.start_x; }
         if road.start_z > max_z { max_z = road.start_z; }
+        for &(px, pz) in &road.points {
+            if px < min_x { min_x = px; }
+            if pz < min_z { min_z = pz; }
+            if px > max_x { max_x = px; }
+            if pz > max_z { max_z = pz; }
+        }
     }
     for platform in &result.platforms {
-        if platform.pos_x < min_x { min_x = platform.pos_x; }
-        if platform.pos_z < min_z { min_z = platform.pos_z; }
-        if platform.pos_x + platform.width > max_x { max_x = platform.pos_x + platform.width; }
-        if platform.pos_z + platform.depth > max_z { max_z = platform.pos_z + platform.depth; }
+        if platform.polygon.is_empty() {
+            if platform.pos_x < min_x { min_x = platform.pos_x; }
+            if platform.pos_z < min_z { min_z = platform.pos_z; }
+            if platform.pos_x + platform.width > max_x { max_x = platform.pos_x + platform.width; }
+            if platform.pos_z + platform.depth > max_z { max_z = platform.pos_z + platform.depth; }
+        } else {
+            for &(px, pz) in &platform.polygon {
+                if px < min_x { min_x = px; }
+                if pz < min_z { min_z = pz; }
+                if px > max_x { max_x = px; }
+                if pz > max_z { max_z = pz; }
+            }
+        }
     }
 
     let extent_x = (max_x - min_x) as f32;
@@ -408,7 +425,6 @@ fn spawn_city(
     materials: &mut ResMut<Assets<StandardMaterial>>,
     result: &LayoutResult,
 ) {
-    let road_height: f32 = 0.15;
     let platform_top: f32 = 0.22;
 
     let (mut min_x, mut min_z, mut max_x, mut max_z) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
@@ -421,27 +437,34 @@ fn spawn_city(
         }
     }
     for road in &result.roads {
-        for &x in &[road.start_x, road.end_x] {
-            if x < min_x { min_x = x; }
-            if x > max_x { max_x = x; }
-        }
-        for &z in &[road.start_z, road.end_z] {
-            if z < min_z { min_z = z; }
-            if z > max_z { max_z = z; }
+        for &(px, pz) in &road.points {
+            if px < min_x { min_x = px; }
+            if pz < min_z { min_z = pz; }
+            if px > max_x { max_x = px; }
+            if pz > max_z { max_z = pz; }
         }
     }
     for platform in &result.platforms {
-        if platform.pos_x < min_x { min_x = platform.pos_x; }
-        if platform.pos_z < min_z { min_z = platform.pos_z; }
-        if platform.pos_x + platform.width > max_x { max_x = platform.pos_x + platform.width; }
-        if platform.pos_z + platform.depth > max_z { max_z = platform.pos_z + platform.depth; }
+        if platform.polygon.is_empty() {
+            if platform.pos_x < min_x { min_x = platform.pos_x; }
+            if platform.pos_z < min_z { min_z = platform.pos_z; }
+            if platform.pos_x + platform.width > max_x { max_x = platform.pos_x + platform.width; }
+            if platform.pos_z + platform.depth > max_z { max_z = platform.pos_z + platform.depth; }
+        } else {
+            for &(px, pz) in &platform.polygon {
+                if px < min_x { min_x = px; }
+                if pz < min_z { min_z = pz; }
+                if px > max_x { max_x = px; }
+                if pz > max_z { max_z = pz; }
+            }
+        }
     }
-    
+
     if min_x > max_x {
         min_x = -50.0; max_x = 50.0; min_z = -50.0; max_z = 50.0;
     }
-    
-    // Spawn a practically infinite ground plane
+
+    // Spawn ground plane
     let ground_center_x = (min_x + max_x) as f32 / 2.0;
     let ground_center_z = (min_z + max_z) as f32 / 2.0;
 
@@ -460,73 +483,98 @@ fn spawn_city(
     ));
 
     let data_stream_material = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.0, 0.8, 1.0), 
+        base_color: Color::srgb(0.0, 0.8, 1.0),
         emissive: Color::linear_rgb(0.0, 4.0, 5.0).into(), // Glowing cyan
         perceptual_roughness: 0.2,
+        double_sided: true,
+        cull_mode: None,
         ..default()
     });
 
+    // Spawn continuous, curved road meshes along the agent paths
     for road in &result.roads {
-        let delta_x = road.end_x - road.start_x;
-        let delta_z = road.end_z - road.start_z;
-        let length = (delta_x * delta_x + delta_z * delta_z).sqrt() as f32;
-        
-        if length < 0.01 {
-            continue;
-        }
-        
-        let angle = (delta_x as f32).atan2(delta_z as f32);
-        let center_x = (road.start_x + road.end_x) as f32 / 2.0;
-        let center_z = (road.start_z + road.end_z) as f32 / 2.0;
-        
-        // Data streams shouldn't be massive 8-unit wide roads. 
-        // We scale them down to look like thick fiber optic cables.
         let stream_width = (road.width as f32) * 0.15;
-        // Float them slightly above the ground/platforms
-        let stream_height = 0.3; 
+        let stream_height = 0.28;
 
-        commands.spawn((
-            PbrBundle {
-                mesh: meshes.add(Cuboid::new(stream_width, 0.05, length)),
-                material: data_stream_material.clone(),
-                transform: Transform::from_xyz(center_x, stream_height, center_z)
-                    .with_rotation(Quat::from_rotation_y(angle)),
-                ..default()
-            },
-            CityElement,
-        ));
+        if road.points.len() >= 2 {
+            let mesh = generate_curved_road_mesh(&road.points, stream_width, stream_height);
+            commands.spawn((
+                PbrBundle {
+                    mesh: meshes.add(mesh),
+                    material: data_stream_material.clone(),
+                    transform: Transform::IDENTITY,
+                    ..default()
+                },
+                CityElement,
+            ));
+        } else {
+            let delta_x = road.end_x - road.start_x;
+            let delta_z = road.end_z - road.start_z;
+            let length = (delta_x * delta_x + delta_z * delta_z).sqrt() as f32;
+            if length < 0.01 {
+                continue;
+            }
+            let angle = (delta_x as f32).atan2(delta_z as f32);
+            let center_x = (road.start_x + road.end_x) as f32 / 2.0;
+            let center_z = (road.start_z + road.end_z) as f32 / 2.0;
+
+            commands.spawn((
+                PbrBundle {
+                    mesh: meshes.add(Cuboid::new(stream_width, 0.05, length)),
+                    material: data_stream_material.clone(),
+                    transform: Transform::from_xyz(center_x, stream_height, center_z)
+                        .with_rotation(Quat::from_rotation_y(angle)),
+                    ..default()
+                },
+                CityElement,
+            ));
+        }
     }
 
+    // Spawn organic Voronoi district platforms and rectangular building lot platforms
     for platform in &result.platforms {
-        let is_district_base = platform.typology == "district_base";
-        let current_platform_top = if is_district_base { 0.12 } else { platform_top };
-        
         let platform_color = typology_color(&platform.typology, "platform_color");
         let platform_material = materials.add(StandardMaterial {
             base_color: platform_color,
             perceptual_roughness: 0.9,
+            double_sided: true,
+            cull_mode: None,
             ..default()
         });
 
-        commands.spawn((
-            PbrBundle {
-                mesh: meshes.add(Cuboid::new(
-                    platform.width as f32,
-                    current_platform_top,
-                    platform.depth as f32,
-                )),
-                material: platform_material,
-                transform: Transform::from_xyz(
-                    (platform.pos_x + platform.width / 2.0) as f32,
-                    current_platform_top / 2.0,
-                    (platform.pos_z + platform.depth / 2.0) as f32,
-                ),
-                ..default()
-            },
-            CityElement,
-        ));
+        if platform.polygon.len() >= 3 {
+            let mesh = generate_polygon_prism_mesh(&platform.polygon, 0.12);
+            commands.spawn((
+                PbrBundle {
+                    mesh: meshes.add(mesh),
+                    material: platform_material,
+                    transform: Transform::IDENTITY,
+                    ..default()
+                },
+                CityElement,
+            ));
+        } else {
+            commands.spawn((
+                PbrBundle {
+                    mesh: meshes.add(Cuboid::new(
+                        platform.width as f32,
+                        platform_top,
+                        platform.depth as f32,
+                    )),
+                    material: platform_material,
+                    transform: Transform::from_xyz(
+                        (platform.pos_x + platform.width / 2.0) as f32,
+                        platform_top / 2.0,
+                        (platform.pos_z + platform.depth / 2.0) as f32,
+                    ),
+                    ..default()
+                },
+                CityElement,
+            ));
+        }
     }
 
+    // Spawn buildings
     for district in &result.districts {
         for building in &district.buildings {
             let b_color = building_color(&district.typology, &building.name);
@@ -556,4 +604,150 @@ fn spawn_city(
             ));
         }
     }
+}
+
+fn generate_curved_road_mesh(points: &[(f64, f64)], width: f32, height: f32) -> Mesh {
+    let n = points.len();
+    let mut positions: Vec<[f32; 3]> = Vec::with_capacity(n * 2);
+    let mut normals: Vec<[f32; 3]> = Vec::with_capacity(n * 2);
+    let mut uvs: Vec<[f32; 2]> = Vec::with_capacity(n * 2);
+    let mut indices: Vec<u32> = Vec::with_capacity((n - 1) * 6);
+
+    let half_w = width * 0.5;
+    let mut cum_dist = 0.0_f32;
+
+    for i in 0..n {
+        let (tx, tz) = if i == 0 {
+            let dx = (points[1].0 - points[0].0) as f32;
+            let dz = (points[1].1 - points[0].1) as f32;
+            let len = (dx * dx + dz * dz).sqrt().max(1e-4);
+            (dx / len, dz / len)
+        } else if i == n - 1 {
+            let dx = (points[n - 1].0 - points[n - 2].0) as f32;
+            let dz = (points[n - 1].1 - points[n - 2].1) as f32;
+            let len = (dx * dx + dz * dz).sqrt().max(1e-4);
+            (dx / len, dz / len)
+        } else {
+            let dx = (points[i + 1].0 - points[i - 1].0) as f32;
+            let dz = (points[i + 1].1 - points[i - 1].1) as f32;
+            let len = (dx * dx + dz * dz).sqrt().max(1e-4);
+            (dx / len, dz / len)
+        };
+
+        if i > 0 {
+            let seg_dx = (points[i].0 - points[i - 1].0) as f32;
+            let seg_dz = (points[i].1 - points[i - 1].1) as f32;
+            cum_dist += (seg_dx * seg_dx + seg_dz * seg_dz).sqrt();
+        }
+
+        let nx = -tz * half_w;
+        let nz = tx * half_w;
+
+        let px = points[i].0 as f32;
+        let pz = points[i].1 as f32;
+
+        positions.push([px + nx, height, pz + nz]);
+        positions.push([px - nx, height, pz - nz]);
+
+        normals.push([0.0, 1.0, 0.0]);
+        normals.push([0.0, 1.0, 0.0]);
+
+        uvs.push([0.0, cum_dist * 0.1]);
+        uvs.push([1.0, cum_dist * 0.1]);
+
+        if i < n - 1 {
+            let a = (i * 2) as u32;
+            let b = a + 1;
+            let c = a + 2;
+            let d = a + 3;
+
+            indices.push(a);
+            indices.push(b);
+            indices.push(d);
+
+            indices.push(a);
+            indices.push(d);
+            indices.push(c);
+        }
+    }
+
+    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_indices(Indices::U32(indices));
+    mesh
+}
+
+fn generate_polygon_prism_mesh(polygon: &[(f64, f64)], height: f32) -> Mesh {
+    let k = polygon.len();
+    let cx = polygon.iter().map(|p| p.0).sum::<f64>() / (k as f64);
+    let cz = polygon.iter().map(|p| p.1).sum::<f64>() / (k as f64);
+
+    let mut positions: Vec<[f32; 3]> = Vec::new();
+    let mut normals: Vec<[f32; 3]> = Vec::new();
+    let mut uvs: Vec<[f32; 2]> = Vec::new();
+    let mut indices: Vec<u32> = Vec::new();
+
+    // 1. Top face
+    let center_idx = positions.len() as u32;
+    positions.push([cx as f32, height, cz as f32]);
+    normals.push([0.0, 1.0, 0.0]);
+    uvs.push([0.5, 0.5]);
+
+    for p in polygon {
+        positions.push([p.0 as f32, height, p.1 as f32]);
+        normals.push([0.0, 1.0, 0.0]);
+        uvs.push([(p.0 - cx) as f32 * 0.05 + 0.5, (p.1 - cz) as f32 * 0.05 + 0.5]);
+    }
+
+    for i in 0..k {
+        let curr = center_idx + 1 + (i as u32);
+        let next = center_idx + 1 + (((i + 1) % k) as u32);
+        indices.push(center_idx);
+        indices.push(curr);
+        indices.push(next);
+    }
+
+    // 2. Side skirts
+    let ground_y = 0.02_f32;
+    for i in 0..k {
+        let p1 = polygon[i];
+        let p2 = polygon[(i + 1) % k];
+
+        let dx = (p2.0 - p1.0) as f32;
+        let dz = (p2.1 - p1.1) as f32;
+        let edge_len = (dx * dx + dz * dz).sqrt().max(1e-4);
+        let nx = dz / edge_len;
+        let nz = -dx / edge_len;
+
+        let base_idx = positions.len() as u32;
+        positions.push([p1.0 as f32, height, p1.1 as f32]);
+        positions.push([p2.0 as f32, height, p2.1 as f32]);
+        positions.push([p1.0 as f32, ground_y, p1.1 as f32]);
+        positions.push([p2.0 as f32, ground_y, p2.1 as f32]);
+
+        for _ in 0..4 {
+            normals.push([nx, 0.0, nz]);
+        }
+        uvs.push([0.0, 1.0]);
+        uvs.push([1.0, 1.0]);
+        uvs.push([0.0, 0.0]);
+        uvs.push([1.0, 0.0]);
+
+        indices.push(base_idx);
+        indices.push(base_idx + 2);
+        indices.push(base_idx + 1);
+
+        indices.push(base_idx + 1);
+        indices.push(base_idx + 2);
+        indices.push(base_idx + 3);
+    }
+
+    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_indices(Indices::U32(indices));
+    mesh
 }
