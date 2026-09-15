@@ -77,6 +77,7 @@ pub struct DistrictLayoutInfo {
     pub max_x: f64,
     pub max_z: f64,
     pub polygon: Vec<(f64, f64)>,
+    pub raw_polygon: Vec<(f64, f64)>,
 }
 
 struct DepEdge {
@@ -182,13 +183,13 @@ fn layout_districts_voronoi(buildings: &mut [RawBuilding], city: &CityMap) -> Ve
                     (b.width + LOCAL_STREET_WIDTH) * (b.depth + LOCAL_STREET_WIDTH)
                 }).sum()
             }
-            _ => 400.0,
+            _ => 120.0,
         };
-        let radius = (total_area / std::f64::consts::PI).sqrt() * 1.5 + 24.0;
+        let radius = (total_area / std::f64::consts::PI).sqrt() * 0.95 + 6.0;
         district_radii.push(radius);
     }
 
-    // 2. Generate organic seed points using golden spiral with relaxation
+    // 2. Generate organic seed points using golden spiral with tight spacing
     let mut seeds: Vec<(f64, f64)> = Vec::with_capacity(num_districts);
     let avg_radius = district_radii.iter().sum::<f64>() / (num_districts.max(1) as f64);
     for i in 0..num_districts {
@@ -197,12 +198,12 @@ fn layout_districts_voronoi(buildings: &mut [RawBuilding], city: &CityMap) -> Ve
         } else {
             let hash = hash_str(&city.districts[i].name, 42);
             let angle = (i as f64) * 2.399963229728653 + hash * 0.35;
-            let dist = (i as f64).sqrt() * (avg_radius * 1.8) + hash * 6.0;
+            let dist = (i as f64).sqrt() * (avg_radius * 1.05) + hash * 3.0;
             seeds.push((dist * angle.cos(), dist * angle.sin()));
         }
     }
 
-    // 3. Relaxation pass: prevent seed crowding while preserving organic European clustering
+    // 3. Relaxation pass: prevent seed crowding while keeping districts tight
     if num_districts > 1 {
         for _ in 0..30 {
             for i in 0..num_districts {
@@ -210,7 +211,7 @@ fn layout_districts_voronoi(buildings: &mut [RawBuilding], city: &CityMap) -> Ve
                     let dx = seeds[j].0 - seeds[i].0;
                     let dz = seeds[j].1 - seeds[i].1;
                     let dist = (dx * dx + dz * dz).sqrt().max(0.1);
-                    let min_dist = (district_radii[i] + district_radii[j]) * 1.05;
+                    let min_dist = (district_radii[i] + district_radii[j]) * 0.92;
                     if dist < min_dist {
                         let overlap = min_dist - dist;
                         let nx = dx / dist;
@@ -229,15 +230,15 @@ fn layout_districts_voronoi(buildings: &mut [RawBuilding], city: &CityMap) -> Ve
     let max_extent = seeds.iter().enumerate()
         .map(|(i, (x, z))| (x * x + z * z).sqrt() + district_radii[i])
         .fold(0.0_f64, f64::max);
-    let box_size = (max_extent * 2.6).max(350.0);
+    let box_size = (max_extent * 2.2).max(120.0);
 
     // Anchor sites outside the district cluster guarantee closed cells for all districts
     let mut sites: Vec<Point> = seeds.iter()
         .map(|&(x, z)| Point { x, y: z })
         .collect();
 
-    let anchor_count = 8;
-    let anchor_radius = box_size * 0.48;
+    let anchor_count = 10;
+    let anchor_radius = (max_extent * 1.35).max(box_size * 0.45);
     for k in 0..anchor_count {
         let a = (k as f64) * 2.0 * std::f64::consts::PI / (anchor_count as f64);
         sites.push(Point {
@@ -273,18 +274,9 @@ fn layout_districts_voronoi(buildings: &mut [RawBuilding], city: &CityMap) -> Ve
             angle_a.partial_cmp(&angle_b).unwrap_or(std::cmp::Ordering::Equal)
         });
 
-        let mut min_x = f64::MAX;
-        let mut min_z = f64::MAX;
-        let mut max_x = f64::MIN;
-        let mut max_z = f64::MIN;
-        for &(vx, vz) in &poly {
-            if vx < min_x { min_x = vx; }
-            if vz < min_z { min_z = vz; }
-            if vx > max_x { max_x = vx; }
-            if vz > max_z { max_z = vz; }
-        }
+        let raw_poly = poly.clone();
 
-        // 5. Organic Polygon Lot Packing
+        // 5. Organic Polygon Lot Packing (dense and compact)
         // Place building footprints inside the Voronoi polygon along concentric arcs
         if let Some(building_indices) = district_to_buildings.get(&i) {
             let mut sorted_b = building_indices.clone();
@@ -314,8 +306,8 @@ fn layout_districts_voronoi(buildings: &mut [RawBuilding], city: &CityMap) -> Ve
 
                 if !placed {
                     let r_step = (bw.max(bd) + LOCAL_STREET_WIDTH) * 0.95;
-                    let mut ring_r = 12.0;
-                    let max_r = district_radii[i] * 1.5;
+                    let mut ring_r = 10.0;
+                    let max_r = district_radii[i] * 1.6;
 
                     while ring_r <= max_r && !placed {
                         let circumference = 2.0 * std::f64::consts::PI * ring_r;
@@ -356,7 +348,7 @@ fn layout_districts_voronoi(buildings: &mut [RawBuilding], city: &CityMap) -> Ve
                 if !placed {
                     let hash = hash_str(&buildings[b_idx].name, 88);
                     let angle = hash * 2.0 * std::f64::consts::PI;
-                    let dist = 8.0 + (hash * 0.5) * district_radii[i];
+                    let dist = 6.0 + (hash * 0.4) * district_radii[i];
                     let cx = sx + dist * angle.cos();
                     let cz = sz + dist * angle.sin();
                     buildings[b_idx].pos_x = cx - bw / 2.0;
@@ -364,6 +356,55 @@ fn layout_districts_voronoi(buildings: &mut [RawBuilding], city: &CityMap) -> Ve
                     placed_lots.push((cx, cz, lot_w, lot_d));
                 }
             }
+        }
+
+        // 6. Shrink district platform to snugly hug the placed buildings
+        let mut max_b_dist: f64 = 0.0;
+        if let Some(building_indices) = district_to_buildings.get(&i) {
+            for &b_idx in building_indices {
+                let b = &buildings[b_idx];
+                for &(bx, bz) in &[
+                    (b.pos_x, b.pos_z),
+                    (b.pos_x + b.width, b.pos_z),
+                    (b.pos_x, b.pos_z + b.depth),
+                    (b.pos_x + b.width, b.pos_z + b.depth),
+                ] {
+                    let d = (bx - sx).hypot(bz - sz);
+                    if d > max_b_dist {
+                        max_b_dist = d;
+                    }
+                }
+            }
+        }
+
+        let safe_margin = (max_b_dist * 0.12 + 5.5).max(6.0);
+        let mut shrunk_poly = Vec::with_capacity(poly.len());
+        for &(vx, vz) in &poly {
+            let orig_dist = (vx - sx).hypot(vz - sz);
+            if orig_dist < 1e-4 {
+                shrunk_poly.push((vx, vz));
+                continue;
+            }
+            // Inset from raw Voronoi boundary to leave a natural street channel
+            let max_allowed = (orig_dist - 2.5).max(3.0);
+            let target_dist = if max_b_dist > 0.0 {
+                (max_b_dist + safe_margin).min(max_allowed)
+            } else {
+                8.0_f64.min(max_allowed)
+            };
+            let scale = target_dist / orig_dist;
+            shrunk_poly.push((sx + (vx - sx) * scale, sz + (vz - sz) * scale));
+        }
+
+        let mut min_x = f64::MAX;
+        let mut min_z = f64::MAX;
+        let mut max_x = f64::MIN;
+        let mut max_z = f64::MIN;
+        for &(vx, vz) in &shrunk_poly {
+            if vx < min_x { min_x = vx; }
+            if vz < min_z { min_z = vz; }
+            if vx > max_x { max_x = vx; }
+            if vz > max_z { max_z = vz; }
         }
 
         district_infos.push(DistrictLayoutInfo {
@@ -374,7 +415,8 @@ fn layout_districts_voronoi(buildings: &mut [RawBuilding], city: &CityMap) -> Ve
             min_z,
             max_x,
             max_z,
-            polygon: poly,
+            polygon: shrunk_poly,
+            raw_polygon: raw_poly,
         });
     }
 
@@ -512,8 +554,8 @@ fn route_dependencies_agent(
     // 2. Shared Voronoi boundary boulevards (arterial streets outlining the European districts)
     for i in 0..district_infos.len() {
         for j in (i + 1)..district_infos.len() {
-            let poly_i = &district_infos[i].polygon;
-            let poly_j = &district_infos[j].polygon;
+            let poly_i = &district_infos[i].raw_polygon;
+            let poly_j = &district_infos[j].raw_polygon;
 
             for e_i in 0..poly_i.len() {
                 let p1 = poly_i[e_i];
@@ -527,15 +569,26 @@ fn route_dependencies_agent(
                     let d2 = (p1.0 - q1.0).hypot(p1.1 - q1.1) + (p2.0 - q2.0).hypot(p2.1 - q2.1);
 
                     if d1 < 2.0 || d2 < 2.0 {
-                        roads.push(RoadSegment {
-                            start_x: p1.0,
-                            start_z: p1.1,
-                            end_x: p2.0,
-                            end_z: p2.1,
-                            points: vec![p1, p2],
-                            width: 3.5,
-                            road_type: "arterial".to_string(),
-                        });
+                        let mid_x = (p1.0 + p2.0) * 0.5;
+                        let mid_z = (p1.1 + p2.1) * 0.5;
+                        let s_i = (district_infos[i].seed_x, district_infos[i].seed_z);
+                        let s_j = (district_infos[j].seed_x, district_infos[j].seed_z);
+                        let d_i = (mid_x - s_i.0).hypot(mid_z - s_i.1);
+                        let d_j = (mid_x - s_j.0).hypot(mid_z - s_j.1);
+
+                        let max_d = (district_infos[i].max_x - district_infos[i].min_x)
+                            .max(district_infos[j].max_x - district_infos[j].min_x) * 0.85 + 15.0;
+                        if d_i <= max_d || d_j <= max_d {
+                            roads.push(RoadSegment {
+                                start_x: p1.0,
+                                start_z: p1.1,
+                                end_x: p2.0,
+                                end_z: p2.1,
+                                points: vec![p1, p2],
+                                width: 3.5,
+                                road_type: "arterial".to_string(),
+                            });
+                        }
                     }
                 }
             }

@@ -1,8 +1,10 @@
 use bevy::prelude::*;
-use bevy::pbr::{CascadeShadowConfigBuilder, ScreenSpaceAmbientOcclusionSettings, FogSettings, FogFalloff};
+use bevy::pbr::{CascadeShadowConfigBuilder, ScreenSpaceAmbientOcclusionSettings};
 use bevy::render::mesh::{Indices, PrimitiveTopology};
 use bevy::render::render_asset::RenderAssetUsages;
 use wasm_bindgen::prelude::*;
+
+pub const SKY_COLOR: Color = Color::srgb(0.60, 0.70, 0.80);
 
 use data::CityMap;
 use layout::LayoutResult;
@@ -52,8 +54,6 @@ impl Default for CityCamera {
 
 #[wasm_bindgen(start)]
 pub fn run_bevy_app() {
-    let sky_color = Color::srgb(0.60, 0.70, 0.80);
-
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
@@ -65,7 +65,7 @@ pub fn run_bevy_app() {
             ..default()
         }))
         .init_resource::<CitySpawned>()
-        .insert_resource(ClearColor(sky_color))
+        .insert_resource(ClearColor(SKY_COLOR))
         .add_systems(Startup, setup_scene)
         .add_systems(Update, (process_city_data, camera_controls))
         .run();
@@ -108,23 +108,18 @@ thread_local! {
 }
 
 fn setup_scene(mut commands: Commands) {
-    let sky_color = Color::srgb(0.60, 0.70, 0.80);
-
     commands.spawn((
         Camera3dBundle {
+            projection: Projection::Perspective(PerspectiveProjection {
+                near: 0.5,
+                far: 100000.0,
+                ..default()
+            }),
             transform: Transform::from_xyz(40.0, 50.0, 80.0)
                 .looking_at(Vec3::ZERO, Vec3::Y),
             ..default()
         },
         CityCamera::default(),
-        FogSettings {
-            color: sky_color,
-            falloff: FogFalloff::Linear {
-                start: 100.0,
-                end: 800.0,
-            },
-            ..default()
-        },
         ScreenSpaceAmbientOcclusionSettings::default(),
     ));
 
@@ -139,8 +134,8 @@ fn setup_scene(mut commands: Commands) {
             Quat::from_euler(EulerRot::XYZ, -0.8, 0.5, 0.0),
         ),
         cascade_shadow_config: CascadeShadowConfigBuilder {
-            first_cascade_far_bound: 20.0,
-            maximum_distance: 800.0,
+            first_cascade_far_bound: 50.0,
+            maximum_distance: 4000.0,
             ..default()
         }
         .into(),
@@ -464,19 +459,86 @@ fn spawn_city(
         min_x = -50.0; max_x = 50.0; min_z = -50.0; max_z = 50.0;
     }
 
-    // Spawn ground plane
+    // Spawn circular ground plane and horizon fog fade
     let ground_center_x = (min_x + max_x) as f32 / 2.0;
     let ground_center_z = (min_z + max_z) as f32 / 2.0;
 
+    let mut max_dist_sq: f32 = 0.0;
+    let mut check_point = |px: f32, pz: f32| {
+        let dx = px - ground_center_x;
+        let dz = pz - ground_center_z;
+        let d2 = dx * dx + dz * dz;
+        if d2 > max_dist_sq {
+            max_dist_sq = d2;
+        }
+    };
+
+    for district in &result.districts {
+        for b in &district.buildings {
+            check_point(b.pos_x as f32, b.pos_z as f32);
+            check_point((b.pos_x + b.width) as f32, b.pos_z as f32);
+            check_point(b.pos_x as f32, (b.pos_z + b.depth) as f32);
+            check_point((b.pos_x + b.width) as f32, (b.pos_z + b.depth) as f32);
+        }
+    }
+    for road in &result.roads {
+        for &(px, pz) in &road.points {
+            check_point(px as f32, pz as f32);
+        }
+    }
+    for platform in &result.platforms {
+        if platform.polygon.is_empty() {
+            check_point(platform.pos_x as f32, platform.pos_z as f32);
+            check_point((platform.pos_x + platform.width) as f32, platform.pos_z as f32);
+            check_point(platform.pos_x as f32, (platform.pos_z + platform.depth) as f32);
+            check_point((platform.pos_x + platform.width) as f32, (platform.pos_z + platform.depth) as f32);
+        } else {
+            for &(px, pz) in &platform.polygon {
+                check_point(px as f32, pz as f32);
+            }
+        }
+    }
+
+    let raw_radius = max_dist_sq.sqrt().max(50.0);
+    let city_radius = raw_radius + 30.0;
+    let r_inner = city_radius;
+    let transition_width = (city_radius * 0.35).clamp(80.0, 300.0);
+    let r_outer = r_inner + transition_width;
+    let r_far = 60000.0_f32;
+
+    // 1. Lit asphalt circular ground under the city
+    let ground_mesh = generate_circular_ground_mesh(r_outer + 50.0, 128);
     commands.spawn((
         PbrBundle {
-            mesh: meshes.add(Cuboid::new(20000.0, 0.04, 20000.0)),
+            mesh: meshes.add(ground_mesh),
             material: materials.add(StandardMaterial {
                 base_color: Color::srgb(0.20, 0.20, 0.20), // Dark asphalt
                 perceptual_roughness: 0.95,
+                cull_mode: None,
+                double_sided: true,
                 ..default()
             }),
             transform: Transform::from_xyz(ground_center_x, 0.02, ground_center_z),
+            ..default()
+        },
+        CityElement,
+    ));
+
+    // 2. Circular fog fade and horizon skirt (alpha 0.0 inside city, fading to 1.0 sky color at edge)
+    let fog_mesh = generate_circular_fog_mesh(r_inner, r_outer, r_far, SKY_COLOR, 128);
+    commands.spawn((
+        PbrBundle {
+            mesh: meshes.add(fog_mesh),
+            material: materials.add(StandardMaterial {
+                base_color: Color::WHITE,
+                unlit: true,
+                alpha_mode: AlphaMode::Blend,
+                cull_mode: None,
+                double_sided: true,
+                perceptual_roughness: 1.0,
+                ..default()
+            }),
+            transform: Transform::from_xyz(ground_center_x, 0.022, ground_center_z),
             ..default()
         },
         CityElement,
@@ -748,6 +810,133 @@ fn generate_polygon_prism_mesh(polygon: &[(f64, f64)], height: f32) -> Mesh {
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_indices(Indices::U32(indices));
+    mesh
+}
+
+fn generate_circular_ground_mesh(radius: f32, segments: usize) -> Mesh {
+    let mut positions: Vec<[f32; 3]> = Vec::with_capacity(segments + 1);
+    let mut normals: Vec<[f32; 3]> = Vec::with_capacity(segments + 1);
+    let mut uvs: Vec<[f32; 2]> = Vec::with_capacity(segments + 1);
+    let mut indices: Vec<u32> = Vec::with_capacity(segments * 3);
+
+    // Center vertex
+    positions.push([0.0, 0.0, 0.0]);
+    normals.push([0.0, 1.0, 0.0]);
+    uvs.push([0.5, 0.5]);
+
+    let step = std::f32::consts::TAU / (segments as f32);
+    for i in 0..segments {
+        let angle = (i as f32) * step;
+        let x = radius * angle.cos();
+        let z = radius * angle.sin();
+        positions.push([x, 0.0, z]);
+        normals.push([0.0, 1.0, 0.0]);
+        uvs.push([x * 0.05 + 0.5, z * 0.05 + 0.5]);
+    }
+
+    for i in 0..segments {
+        let curr = (i + 1) as u32;
+        let next = ((i + 1) % segments + 1) as u32;
+        indices.push(0);
+        indices.push(curr);
+        indices.push(next);
+    }
+
+    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_indices(Indices::U32(indices));
+    mesh
+}
+
+fn generate_circular_fog_mesh(
+    r_inner: f32,
+    r_outer: f32,
+    r_far: f32,
+    sky_color: Color,
+    segments: usize,
+) -> Mesh {
+    let sky_linear = sky_color.to_linear();
+    let (sr, sg, sb) = (sky_linear.red, sky_linear.green, sky_linear.blue);
+
+    let transition_rings = 16;
+    let mut rings: Vec<(f32, f32)> = Vec::new();
+
+    // Inner edge: alpha = 0.0 (completely clear over the city)
+    rings.push((r_inner, 0.0));
+
+    // Smooth transition from r_inner to r_outer
+    for i in 1..=transition_rings {
+        let t = (i as f32) / (transition_rings as f32);
+        let r = r_inner + t * (r_outer - r_inner);
+        // Smoothstep: 3t^2 - 2t^3
+        let alpha = t * t * (3.0 - 2.0 * t);
+        rings.push((r, alpha));
+    }
+
+    // Skirt rings extending to the horizon / far clipping plane
+    rings.push((r_outer + 200.0, 1.0));
+    rings.push((r_outer + 1000.0, 1.0));
+    rings.push((r_outer + 5000.0, 1.0));
+    rings.push((20000.0_f32.max(r_outer + 10000.0), 1.0));
+    rings.push((r_far, 1.0));
+
+    let num_rings = rings.len();
+    let total_vertices = num_rings * segments;
+    let mut positions: Vec<[f32; 3]> = Vec::with_capacity(total_vertices);
+    let mut normals: Vec<[f32; 3]> = Vec::with_capacity(total_vertices);
+    let mut uvs: Vec<[f32; 2]> = Vec::with_capacity(total_vertices);
+    let mut colors: Vec<[f32; 4]> = Vec::with_capacity(total_vertices);
+
+    let step = std::f32::consts::TAU / (segments as f32);
+
+    for &(r, alpha) in &rings {
+        for s in 0..segments {
+            let angle = (s as f32) * step;
+            let cos_a = angle.cos();
+            let sin_a = angle.sin();
+            let x = r * cos_a;
+            let z = r * sin_a;
+
+            positions.push([x, 0.0, z]);
+            normals.push([0.0, 1.0, 0.0]);
+            uvs.push([0.5 + 0.5 * cos_a * (r / r_far), 0.5 + 0.5 * sin_a * (r / r_far)]);
+            colors.push([sr, sg, sb, alpha]);
+        }
+    }
+
+    let mut indices: Vec<u32> = Vec::with_capacity((num_rings - 1) * segments * 6);
+
+    for k in 0..(num_rings - 1) {
+        let row_curr = (k * segments) as u32;
+        let row_next = ((k + 1) * segments) as u32;
+
+        for s in 0..segments {
+            let s_next = (s + 1) % segments;
+
+            let v00 = row_curr + s as u32;
+            let v01 = row_curr + s_next as u32;
+            let v10 = row_next + s as u32;
+            let v11 = row_next + s_next as u32;
+
+            // Quad split into two CCW triangles viewed from +Y
+            indices.push(v00);
+            indices.push(v10);
+            indices.push(v01);
+
+            indices.push(v01);
+            indices.push(v10);
+            indices.push(v11);
+        }
+    }
+
+    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
     mesh.insert_indices(Indices::U32(indices));
     mesh
 }
