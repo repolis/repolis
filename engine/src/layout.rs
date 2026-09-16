@@ -39,6 +39,10 @@ pub struct RoadSegment {
     pub points: Vec<(f64, f64)>,
     pub width: f64,
     pub road_type: String,
+    pub source: String,
+    pub target: String,
+    pub weight: u32,
+    pub name: String,
 }
 
 pub struct Platform {
@@ -48,6 +52,7 @@ pub struct Platform {
     pub depth: f64,
     pub polygon: Vec<(f64, f64)>,
     pub typology: String,
+    pub district_idx: usize,
 }
 
 pub struct LayoutResult {
@@ -116,7 +121,7 @@ pub fn compute_layout(city: &CityMap) -> LayoutResult {
 
     let district_infos = layout_districts_voronoi(&mut raw_buildings, city);
     let edges = resolve_dependencies(city, &raw_buildings);
-    let roads = route_dependencies_agent(&raw_buildings, &edges, &district_infos);
+    let roads = route_dependencies_agent(&raw_buildings, &edges, &district_infos, city);
     let platforms = generate_platforms(&raw_buildings, city, &district_infos);
 
     package_result(city, &raw_buildings, &district_infos, roads, platforms)
@@ -487,6 +492,7 @@ fn route_dependencies_agent(
     buildings: &[RawBuilding],
     edges: &[DepEdge],
     district_infos: &[DistrictLayoutInfo],
+    city: &CityMap,
 ) -> Vec<RoadSegment> {
     let mut roads = Vec::with_capacity(edges.len() + district_infos.len());
 
@@ -540,6 +546,8 @@ fn route_dependencies_agent(
         let smooth_curve = smooth_path(&waypoints, 3);
         let width = (MIN_ROAD_WIDTH + edge.weight.ln().max(0.0) * 1.5).min(MAX_ROAD_WIDTH);
 
+        let src_name = src.name.clone();
+        let tgt_name = tgt.name.clone();
         roads.push(RoadSegment {
             start_x: p_src.0,
             start_z: p_src.1,
@@ -548,6 +556,10 @@ fn route_dependencies_agent(
             points: smooth_curve,
             width,
             road_type: "dependency".to_string(),
+            source: src_name.clone(),
+            target: tgt_name.clone(),
+            weight: edge.weight as u32,
+            name: format!("{} ➔ {}", src_name, tgt_name),
         });
     }
 
@@ -579,6 +591,8 @@ fn route_dependencies_agent(
                         let max_d = (district_infos[i].max_x - district_infos[i].min_x)
                             .max(district_infos[j].max_x - district_infos[j].min_x) * 0.85 + 15.0;
                         if d_i <= max_d || d_j <= max_d {
+                            let d1_name = if i < city.districts.len() { city.districts[i].name.clone() } else { format!("District {}", i) };
+                            let d2_name = if j < city.districts.len() { city.districts[j].name.clone() } else { format!("District {}", j) };
                             roads.push(RoadSegment {
                                 start_x: p1.0,
                                 start_z: p1.1,
@@ -587,6 +601,10 @@ fn route_dependencies_agent(
                                 points: vec![p1, p2],
                                 width: 3.5,
                                 road_type: "arterial".to_string(),
+                                source: d1_name.clone(),
+                                target: d2_name.clone(),
+                                weight: 1,
+                                name: format!("Boulevard: {} — {}", d1_name, d2_name),
                             });
                         }
                     }
@@ -634,6 +652,7 @@ fn generate_platforms(
             depth: building.depth + LOT_MARGIN * 2.0,
             polygon: Vec::new(),
             typology: city.districts[building.district_idx].typology.clone(),
+            district_idx: building.district_idx,
         }
     }).collect();
 
@@ -646,6 +665,7 @@ fn generate_platforms(
                 depth: info.max_z - info.min_z,
                 polygon: info.polygon.clone(),
                 typology: "district_base".to_string(),
+                district_idx: info.idx,
             });
         }
     }

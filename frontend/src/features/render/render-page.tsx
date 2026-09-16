@@ -3,6 +3,7 @@ import { useMutation } from "@tanstack/react-query";
 import { useParams } from "@tanstack/react-router";
 
 import init, { load_city_data } from "@/wasm/engine";
+import { InspectorPanel, type HoverData } from "./inspector-panel";
 
 interface CityMapResponse {
   status: string;
@@ -14,6 +15,21 @@ export default function RenderPage() {
   const fullUrl = `https://github.com/${owner}/${repo}`;
 
   const [wasmReady, setWasmReady] = useState(false);
+  const [hoverData, setHoverData] = useState<HoverData | null>(null);
+
+  useEffect(() => {
+    const handleHover = (e: Event) => {
+      const customEvent = e as CustomEvent<HoverData>;
+      if (customEvent.detail) {
+        setHoverData(customEvent.detail);
+      }
+    };
+
+    window.addEventListener("repolis:hover", handleHover);
+    return () => {
+      window.removeEventListener("repolis:hover", handleHover);
+    };
+  }, []);
 
   const analyzeMutation = useMutation({
     mutationFn: async (url: string): Promise<CityMapResponse> => {
@@ -76,6 +92,7 @@ export default function RenderPage() {
           className="h-full w-full"
           onContextMenu={(e) => e.preventDefault()}
         ></canvas>
+        <InspectorPanel hover={hoverData} />
       </div>
     </div>
   );

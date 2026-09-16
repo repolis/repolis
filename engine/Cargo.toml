@@ -17,7 +17,7 @@ voronoice = "0.2.0"
 
 [dependencies.web-sys]
 version = "0.3"
-features = ["console"]
+features = ["console", "Window", "Document", "CustomEvent", "CustomEventInit"]
 
 # Optimize for Wasm size and speed
 [profile.release]

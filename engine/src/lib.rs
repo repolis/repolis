@@ -6,11 +6,15 @@ use wasm_bindgen::prelude::*;
 
 pub const SKY_COLOR: Color = Color::srgb(0.60, 0.70, 0.80);
 
+use std::collections::HashMap;
+
 use data::CityMap;
 use layout::LayoutResult;
+use hover::*;
 
 mod data;
 mod layout;
+mod hover;
 
 #[derive(Resource, Default)]
 struct CitySpawned(bool);
@@ -65,9 +69,10 @@ pub fn run_bevy_app() {
             ..default()
         }))
         .init_resource::<CitySpawned>()
+        .init_resource::<HoverState>()
         .insert_resource(ClearColor(SKY_COLOR))
         .add_systems(Startup, setup_scene)
-        .add_systems(Update, (process_city_data, camera_controls))
+        .add_systems(Update, (process_city_data, camera_controls, hover_picking_system))
         .run();
 }
 
@@ -172,6 +177,7 @@ fn process_city_data(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut spawned: ResMut<CitySpawned>,
+    mut hover_state: ResMut<HoverState>,
     mut camera_query: Query<(&mut Transform, &mut CityCamera)>,
     existing_elements: Query<Entity, With<CityElement>>,
 ) {
@@ -181,12 +187,15 @@ fn process_city_data(
         None => return,
     };
 
+    hover_state.hovered_entity = None;
+    dispatch_hover_event(&HoverPayload::None);
+
     for entity in existing_elements.iter() {
         commands.entity(entity).despawn_recursive();
     }
 
     let result = layout::compute_layout(&city_map);
-    spawn_city(&mut commands, &mut meshes, &mut materials, &result);
+    spawn_city(&mut commands, &mut meshes, &mut materials, &result, &city_map);
 
     let all_buildings: Vec<&layout::PlacedBuilding> = result
         .districts
@@ -419,8 +428,25 @@ fn spawn_city(
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
     result: &LayoutResult,
+    city_map: &CityMap,
 ) {
     let platform_top: f32 = 0.22;
+
+    // Index dependencies
+    let mut outgoing_deps: HashMap<String, Vec<String>> = HashMap::new();
+    let mut incoming_deps: HashMap<String, Vec<String>> = HashMap::new();
+    for edge in &city_map.dependencies {
+        outgoing_deps.entry(edge.source.clone()).or_default().push(edge.target.clone());
+        incoming_deps.entry(edge.target.clone()).or_default().push(edge.source.clone());
+    }
+
+    // Index building data
+    let mut building_data_map: HashMap<&str, (&data::Building, &data::District)> = HashMap::new();
+    for district in &city_map.districts {
+        for b in &district.buildings {
+            building_data_map.insert(b.name.as_str(), (b, district));
+        }
+    }
 
     let (mut min_x, mut min_z, mut max_x, mut max_z) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
     for district in &result.districts {
@@ -544,10 +570,19 @@ fn spawn_city(
         CityElement,
     ));
 
-    let data_stream_material = materials.add(StandardMaterial {
+    let default_road_material = materials.add(StandardMaterial {
         base_color: Color::srgb(0.0, 0.8, 1.0),
         emissive: Color::linear_rgb(0.0, 4.0, 5.0).into(), // Glowing cyan
         perceptual_roughness: 0.2,
+        double_sided: true,
+        cull_mode: None,
+        ..default()
+    });
+
+    let hover_road_material = materials.add(StandardMaterial {
+        base_color: Color::srgb(1.0, 0.88, 0.2),
+        emissive: Color::linear_rgb(8.0, 6.0, 1.0).into(), // Intense electric amber-gold glow
+        perceptual_roughness: 0.1,
         double_sided: true,
         cull_mode: None,
         ..default()
@@ -558,15 +593,38 @@ fn spawn_city(
         let stream_width = (road.width as f32) * 0.15;
         let stream_height = 0.28;
 
+        let road_info = RoadHoverInfo {
+            name: road.name.clone(),
+            road_type: road.road_type.clone(),
+            source: road.source.clone(),
+            target: road.target.clone(),
+            weight: road.weight,
+        };
+
+        let road_points = if road.points.len() >= 2 {
+            road.points.clone()
+        } else {
+            vec![(road.start_x, road.start_z), (road.end_x, road.end_z)]
+        };
+
+        let pickable = PickableRoad {
+            info: road_info,
+            points: road_points,
+            width: stream_width,
+            default_material: default_road_material.clone(),
+            hover_material: hover_road_material.clone(),
+        };
+
         if road.points.len() >= 2 {
             let mesh = generate_curved_road_mesh(&road.points, stream_width, stream_height);
             commands.spawn((
                 PbrBundle {
                     mesh: meshes.add(mesh),
-                    material: data_stream_material.clone(),
+                    material: default_road_material.clone(),
                     transform: Transform::IDENTITY,
                     ..default()
                 },
+                pickable,
                 CityElement,
             ));
         } else {
@@ -583,11 +641,12 @@ fn spawn_city(
             commands.spawn((
                 PbrBundle {
                     mesh: meshes.add(Cuboid::new(stream_width, 0.05, length)),
-                    material: data_stream_material.clone(),
+                    material: default_road_material.clone(),
                     transform: Transform::from_xyz(center_x, stream_height, center_z)
                         .with_rotation(Quat::from_rotation_y(angle)),
                     ..default()
                 },
+                pickable,
                 CityElement,
             ));
         }
@@ -604,6 +663,59 @@ fn spawn_city(
             ..default()
         });
 
+        let plat_linear = platform_color.to_linear();
+        let hover_platform_material = materials.add(StandardMaterial {
+            base_color: Color::srgb(
+                (plat_linear.red * 1.4).min(1.0),
+                (plat_linear.green * 1.4).min(1.0),
+                (plat_linear.blue * 1.4).min(1.0),
+            ),
+            emissive: Color::linear_rgb(0.3, 0.6, 1.0).into(), // Cyber blue illuminated base
+            perceptual_roughness: 0.4,
+            double_sided: true,
+            cull_mode: None,
+            ..default()
+        });
+
+        let district_data = city_map.districts.get(platform.district_idx);
+        let district_info = if let Some(d) = district_data {
+            let total_loc: u32 = d.buildings.iter().map(|b| b.lines_of_code).sum();
+            let b_names: Vec<String> = d.buildings.iter().map(|b| b.name.clone()).collect();
+            DistrictHoverInfo {
+                name: d.name.clone(),
+                typology: d.typology.clone(),
+                summary: d.summary.clone(),
+                tags: d.tags.clone(),
+                building_count: d.buildings.len(),
+                total_lines_of_code: total_loc,
+                buildings: b_names,
+            }
+        } else {
+            DistrictHoverInfo {
+                name: platform.typology.clone(),
+                typology: platform.typology.clone(),
+                ..default()
+            }
+        };
+
+        let poly = if platform.polygon.len() >= 3 {
+            platform.polygon.clone()
+        } else {
+            vec![
+                (platform.pos_x, platform.pos_z),
+                (platform.pos_x + platform.width, platform.pos_z),
+                (platform.pos_x + platform.width, platform.pos_z + platform.depth),
+                (platform.pos_x, platform.pos_z + platform.depth),
+            ]
+        };
+
+        let pickable = PickableDistrict {
+            info: district_info,
+            polygon: poly,
+            default_material: platform_material.clone(),
+            hover_material: hover_platform_material,
+        };
+
         if platform.polygon.len() >= 3 {
             let mesh = generate_polygon_prism_mesh(&platform.polygon, 0.12);
             commands.spawn((
@@ -613,6 +725,7 @@ fn spawn_city(
                     transform: Transform::IDENTITY,
                     ..default()
                 },
+                pickable,
                 CityElement,
             ));
         } else {
@@ -631,12 +744,15 @@ fn spawn_city(
                     ),
                     ..default()
                 },
+                pickable,
                 CityElement,
             ));
         }
     }
 
     // Spawn buildings
+    let fallback_b = data::Building::default();
+    let fallback_d = data::District::default();
     for district in &result.districts {
         for building in &district.buildings {
             let b_color = building_color(&district.typology, &building.name);
@@ -646,7 +762,55 @@ fn spawn_city(
                 ..default()
             });
 
+            let b_linear = b_color.to_linear();
+            let hover_building_material = materials.add(StandardMaterial {
+                base_color: Color::srgb(
+                    (b_linear.red * 1.5).min(1.0),
+                    (b_linear.green * 1.5).min(1.0),
+                    (b_linear.blue * 1.5).min(1.0),
+                ),
+                emissive: Color::linear_rgb(0.6, 1.4, 2.2).into(), // High-tech cyan edge/emissive glow
+                perceptual_roughness: 0.25,
+                ..default()
+            });
+
             let half_height = building.height as f32 / 2.0;
+            let center_x = (building.pos_x + building.width / 2.0) as f32;
+            let center_y = platform_top + half_height;
+            let center_z = (building.pos_z + building.depth / 2.0) as f32;
+            let half_w = (building.width / 2.0) as f32;
+            let half_d = (building.depth / 2.0) as f32;
+
+            let aabb_min = Vec3::new(center_x - half_w, platform_top, center_z - half_d);
+            let aabb_max = Vec3::new(center_x + half_w, platform_top + building.height as f32, center_z + half_d);
+
+            let (b_data, d_data) = building_data_map.get(building.name.as_str()).copied().unwrap_or((&fallback_b, &fallback_d));
+
+            let building_info = BuildingHoverInfo {
+                name: building.name.clone(),
+                source_file: b_data.source_file.clone(),
+                district_name: d_data.name.clone(),
+                typology: d_data.typology.clone(),
+                num_fields: b_data.num_fields,
+                num_methods: b_data.num_methods,
+                lines_of_code: b_data.lines_of_code,
+                commit_churn: b_data.commit_churn,
+                last_modified: b_data.last_modified.clone(),
+                summary: b_data.summary.clone(),
+                fields: b_data.fields.clone(),
+                methods: b_data.methods.clone(),
+                dependencies: outgoing_deps.get(&building.name).cloned().unwrap_or_default(),
+                callers: incoming_deps.get(&building.name).cloned().unwrap_or_default(),
+            };
+
+            let pickable = PickableBuilding {
+                info: building_info,
+                aabb_min,
+                aabb_max,
+                default_material: building_material.clone(),
+                hover_material: hover_building_material,
+            };
+
             commands.spawn((
                 PbrBundle {
                     mesh: meshes.add(Cuboid::new(
@@ -655,13 +819,10 @@ fn spawn_city(
                         building.depth as f32,
                     )),
                     material: building_material,
-                    transform: Transform::from_xyz(
-                        (building.pos_x + building.width / 2.0) as f32,
-                        platform_top + half_height,
-                        (building.pos_z + building.depth / 2.0) as f32,
-                    ),
+                    transform: Transform::from_xyz(center_x, center_y, center_z),
                     ..default()
                 },
+                pickable,
                 CityElement,
             ));
         }
@@ -939,4 +1100,228 @@ fn generate_circular_fog_mesh(
     mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
     mesh.insert_indices(Indices::U32(indices));
     mesh
+}
+
+enum HitType {
+    Building(BuildingHoverInfo, Handle<StandardMaterial>),
+    Road(RoadHoverInfo, Handle<StandardMaterial>),
+    District(DistrictHoverInfo, Handle<StandardMaterial>),
+}
+
+fn hover_picking_system(
+    windows: Query<&Window>,
+    camera_query: Query<(&Camera, &GlobalTransform), With<CityCamera>>,
+    buildings_query: Query<(Entity, &PickableBuilding)>,
+    roads_query: Query<(Entity, &PickableRoad)>,
+    districts_query: Query<(Entity, &PickableDistrict)>,
+    mut mat_query: Query<&mut Handle<StandardMaterial>>,
+    mut hover_state: ResMut<HoverState>,
+) {
+    let Some(window) = windows.iter().next() else { return; };
+    let Some(cursor_pos) = window.cursor_position() else {
+        if let Some(prev_e) = hover_state.hovered_entity.take() {
+            revert_entity_material(prev_e, &buildings_query, &roads_query, &districts_query, &mut mat_query);
+            dispatch_hover_event(&HoverPayload::None);
+        }
+        return;
+    };
+
+    let Ok((camera, camera_transform)) = camera_query.get_single() else { return; };
+    let Some(ray) = camera.viewport_to_world(camera_transform, cursor_pos) else { return; };
+
+    let ray_origin = ray.origin;
+    let ray_dir = *ray.direction;
+
+    let mut closest_t = f32::MAX;
+    let mut closest_hit: Option<(Entity, HitType)> = None;
+
+    // 1. Test buildings (Ray-AABB)
+    for (entity, building) in buildings_query.iter() {
+        if let Some(t) = ray_aabb_intersection(ray_origin, ray_dir, building.aabb_min, building.aabb_max) {
+            if t < closest_t {
+                closest_t = t;
+                closest_hit = Some((
+                    entity,
+                    HitType::Building(building.info.clone(), building.hover_material.clone()),
+                ));
+            }
+        }
+    }
+
+    // 2. Test roads (horizontal plane y = 0.28)
+    if ray_dir.y.abs() > 1e-4 {
+        let t_road = (0.28 - ray_origin.y) / ray_dir.y;
+        if t_road > 0.0 && t_road < closest_t {
+            let hit_pt = ray_origin + ray_dir * t_road;
+            let p = Vec2::new(hit_pt.x, hit_pt.z);
+            for (entity, road) in roads_query.iter() {
+                let threshold = (road.width * 0.5 + 1.2).max(1.5);
+                let thresh_sq = threshold * threshold;
+                let mut hit = false;
+                for i in 0..(road.points.len().saturating_sub(1)) {
+                    let a = Vec2::new(road.points[i].0 as f32, road.points[i].1 as f32);
+                    let b = Vec2::new(road.points[i + 1].0 as f32, road.points[i + 1].1 as f32);
+                    if dist_sq_to_segment(p, a, b) <= thresh_sq {
+                        hit = true;
+                        break;
+                    }
+                }
+                if hit {
+                    // Small priority bias (-0.02) so roads render over district plane
+                    let effective_t = t_road - 0.02;
+                    if effective_t < closest_t {
+                        closest_t = effective_t;
+                        closest_hit = Some((
+                            entity,
+                            HitType::Road(road.info.clone(), road.hover_material.clone()),
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Test districts (horizontal plane y = 0.22)
+    if ray_dir.y.abs() > 1e-4 {
+        let t_plat = (0.22 - ray_origin.y) / ray_dir.y;
+        if t_plat > 0.0 && t_plat < closest_t {
+            let hit_pt = ray_origin + ray_dir * t_plat;
+            for (entity, district) in districts_query.iter() {
+                if is_point_in_polygon(hit_pt.x as f64, hit_pt.z as f64, &district.polygon) {
+                    if t_plat < closest_t {
+                        closest_t = t_plat;
+                        closest_hit = Some((
+                            entity,
+                            HitType::District(district.info.clone(), district.hover_material.clone()),
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    // Check if hovered entity changed
+    let new_entity = closest_hit.as_ref().map(|(e, _)| *e);
+    if new_entity != hover_state.hovered_entity {
+        // Revert previous entity material
+        if let Some(prev_e) = hover_state.hovered_entity {
+            revert_entity_material(prev_e, &buildings_query, &roads_query, &districts_query, &mut mat_query);
+        }
+
+        // Apply new hover
+        if let Some((entity, hit_type)) = closest_hit {
+            match hit_type {
+                HitType::Building(info, hover_mat) => {
+                    if let Ok(mut mat) = mat_query.get_mut(entity) {
+                        *mat = hover_mat;
+                    }
+                    dispatch_hover_event(&HoverPayload::Building(info));
+                }
+                HitType::Road(info, hover_mat) => {
+                    if let Ok(mut mat) = mat_query.get_mut(entity) {
+                        *mat = hover_mat;
+                    }
+                    dispatch_hover_event(&HoverPayload::Road(info));
+                }
+                HitType::District(info, hover_mat) => {
+                    if let Ok(mut mat) = mat_query.get_mut(entity) {
+                        *mat = hover_mat;
+                    }
+                    dispatch_hover_event(&HoverPayload::District(info));
+                }
+            }
+            hover_state.hovered_entity = Some(entity);
+        } else {
+            hover_state.hovered_entity = None;
+            dispatch_hover_event(&HoverPayload::None);
+        }
+    }
+}
+
+fn revert_entity_material(
+    entity: Entity,
+    buildings_query: &Query<(Entity, &PickableBuilding)>,
+    roads_query: &Query<(Entity, &PickableRoad)>,
+    districts_query: &Query<(Entity, &PickableDistrict)>,
+    mat_query: &mut Query<&mut Handle<StandardMaterial>>,
+) {
+    if let Ok((_, building)) = buildings_query.get(entity) {
+        if let Ok(mut mat) = mat_query.get_mut(entity) {
+            *mat = building.default_material.clone();
+        }
+    } else if let Ok((_, road)) = roads_query.get(entity) {
+        if let Ok(mut mat) = mat_query.get_mut(entity) {
+            *mat = road.default_material.clone();
+        }
+    } else if let Ok((_, district)) = districts_query.get(entity) {
+        if let Ok(mut mat) = mat_query.get_mut(entity) {
+            *mat = district.default_material.clone();
+        }
+    }
+}
+
+fn ray_aabb_intersection(origin: Vec3, dir: Vec3, min: Vec3, max: Vec3) -> Option<f32> {
+    let inv_x = if dir.x.abs() > 1e-6 { 1.0 / dir.x } else { 1e6 * dir.x.signum() };
+    let inv_y = if dir.y.abs() > 1e-6 { 1.0 / dir.y } else { 1e6 * dir.y.signum() };
+    let inv_z = if dir.z.abs() > 1e-6 { 1.0 / dir.z } else { 1e6 * dir.z.signum() };
+
+    let t1_x = (min.x - origin.x) * inv_x;
+    let t2_x = (max.x - origin.x) * inv_x;
+    let (tmin_x, tmax_x) = if t1_x < t2_x { (t1_x, t2_x) } else { (t2_x, t1_x) };
+
+    let t1_y = (min.y - origin.y) * inv_y;
+    let t2_y = (max.y - origin.y) * inv_y;
+    let (tmin_y, tmax_y) = if t1_y < t2_y { (t1_y, t2_y) } else { (t2_y, t1_y) };
+
+    let tmin = tmin_x.max(tmin_y);
+    let tmax = tmax_x.min(tmax_y);
+
+    if tmin > tmax {
+        return None;
+    }
+
+    let t1_z = (min.z - origin.z) * inv_z;
+    let t2_z = (max.z - origin.z) * inv_z;
+    let (tmin_z, tmax_z) = if t1_z < t2_z { (t1_z, t2_z) } else { (t2_z, t1_z) };
+
+    let tmin_final = tmin.max(tmin_z);
+    let tmax_final = tmax.min(tmax_z);
+
+    if tmin_final > tmax_final || tmax_final < 0.0 {
+        return None;
+    }
+
+    Some(if tmin_final > 0.0 { tmin_final } else { tmax_final })
+}
+
+fn dist_sq_to_segment(p: Vec2, a: Vec2, b: Vec2) -> f32 {
+    let ab = b - a;
+    let ap = p - a;
+    let ab_len_sq = ab.length_squared();
+    if ab_len_sq < 1e-6 {
+        return ap.length_squared();
+    }
+    let t = (ap.dot(ab) / ab_len_sq).clamp(0.0, 1.0);
+    let closest = a + ab * t;
+    (p - closest).length_squared()
+}
+
+fn is_point_in_polygon(px: f64, pz: f64, polygon: &[(f64, f64)]) -> bool {
+    let n = polygon.len();
+    if n < 3 {
+        return false;
+    }
+    let mut inside = false;
+    let mut j = n - 1;
+    for i in 0..n {
+        let (xi, zi) = polygon[i];
+        let (xj, zj) = polygon[j];
+        let intersect = ((zi > pz) != (zj > pz))
+            && (px < (xj - xi) * (pz - zi) / (zj - zi + 1e-12) + xi);
+        if intersect {
+            inside = !inside;
+        }
+        j = i;
+    }
+    inside
 }
