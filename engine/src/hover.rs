@@ -77,6 +77,8 @@ pub struct PickableRoad {
 #[derive(Resource, Default)]
 pub struct HoverState {
     pub hovered_entity: Option<Entity>,
+    pub last_cursor_pos: Option<Vec2>,
+    pub last_camera_transform: Option<(Vec3, Quat)>,
 }
 
 pub fn dispatch_hover_event(payload: &HoverPayload) {

@@ -6,6 +6,53 @@ import { routeTree } from "./routeTree.gen";
 
 import "./index.css";
 
+// WebGPU compatibility shim for modern browsers (e.g. Chrome 130+) where deprecated limits
+// like 'maxInterStageShaderComponents' have been removed from the WebGPU specification, but are
+// still requested by wgpu 0.20 (used by Bevy 0.14).
+if (typeof window !== "undefined") {
+  const sanitizeLimits = (descriptor?: any, limits?: any) => {
+    if (descriptor?.requiredLimits) {
+      delete descriptor.requiredLimits.maxInterStageShaderComponents;
+      if (limits) {
+        for (const key of Object.keys(descriptor.requiredLimits)) {
+          if (!(key in limits)) {
+            delete descriptor.requiredLimits[key];
+          }
+        }
+      }
+    }
+  };
+
+  const GPUAdapterClass = (window as any).GPUAdapter;
+  if (GPUAdapterClass?.prototype?.requestDevice) {
+    const origProtoReqDevice = GPUAdapterClass.prototype.requestDevice;
+    GPUAdapterClass.prototype.requestDevice = async function (descriptor?: any) {
+      sanitizeLimits(descriptor, this.limits);
+      const device = await origProtoReqDevice.call(this, descriptor);
+      console.log("%c[repolis] WebGPU device successfully initialized", "color: #00ff88; font-weight: bold;", device);
+      return device;
+    };
+  }
+
+  const navGpu = (navigator as any)?.gpu;
+  if (navGpu?.requestAdapter) {
+    const origRequestAdapter = navGpu.requestAdapter;
+    navGpu.requestAdapter = async function (...args: any[]) {
+      const adapter = await origRequestAdapter.apply(this, args);
+      if (adapter?.requestDevice) {
+        const origReqDevice = adapter.requestDevice;
+        adapter.requestDevice = async function (descriptor?: any) {
+          sanitizeLimits(descriptor, this.limits);
+          const device = await origReqDevice.call(this, descriptor);
+          console.log("%c[repolis] WebGPU device successfully initialized", "color: #00ff88; font-weight: bold;", device);
+          return device;
+        };
+      }
+      return adapter;
+    };
+  }
+}
+
 const queryClient = new QueryClient();
 
 const router = createRouter({

@@ -363,49 +363,12 @@ fn layout_districts_voronoi(buildings: &mut [RawBuilding], city: &CityMap) -> Ve
             }
         }
 
-        // 6. Shrink district platform to snugly hug the placed buildings
-        let mut max_b_dist: f64 = 0.0;
-        if let Some(building_indices) = district_to_buildings.get(&i) {
-            for &b_idx in building_indices {
-                let b = &buildings[b_idx];
-                for &(bx, bz) in &[
-                    (b.pos_x, b.pos_z),
-                    (b.pos_x + b.width, b.pos_z),
-                    (b.pos_x, b.pos_z + b.depth),
-                    (b.pos_x + b.width, b.pos_z + b.depth),
-                ] {
-                    let d = (bx - sx).hypot(bz - sz);
-                    if d > max_b_dist {
-                        max_b_dist = d;
-                    }
-                }
-            }
-        }
-
-        let safe_margin = (max_b_dist * 0.12 + 5.5).max(6.0);
-        let mut shrunk_poly = Vec::with_capacity(poly.len());
-        for &(vx, vz) in &poly {
-            let orig_dist = (vx - sx).hypot(vz - sz);
-            if orig_dist < 1e-4 {
-                shrunk_poly.push((vx, vz));
-                continue;
-            }
-            // Inset from raw Voronoi boundary to leave a natural street channel
-            let max_allowed = (orig_dist - 2.5).max(3.0);
-            let target_dist = if max_b_dist > 0.0 {
-                (max_b_dist + safe_margin).min(max_allowed)
-            } else {
-                8.0_f64.min(max_allowed)
-            };
-            let scale = target_dist / orig_dist;
-            shrunk_poly.push((sx + (vx - sx) * scale, sz + (vz - sz) * scale));
-        }
-
+        // 6. District platform polygon extends to the magistral boundaries (no gap)
         let mut min_x = f64::MAX;
         let mut min_z = f64::MAX;
         let mut max_x = f64::MIN;
         let mut max_z = f64::MIN;
-        for &(vx, vz) in &shrunk_poly {
+        for &(vx, vz) in &poly {
             if vx < min_x { min_x = vx; }
             if vz < min_z { min_z = vz; }
             if vx > max_x { max_x = vx; }
@@ -420,7 +383,7 @@ fn layout_districts_voronoi(buildings: &mut [RawBuilding], city: &CityMap) -> Ve
             min_z,
             max_x,
             max_z,
-            polygon: shrunk_poly,
+            polygon: poly,
             raw_polygon: raw_poly,
         });
     }

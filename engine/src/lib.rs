@@ -1,7 +1,8 @@
 use bevy::prelude::*;
-use bevy::pbr::{CascadeShadowConfigBuilder, ScreenSpaceAmbientOcclusionSettings};
 use bevy::render::mesh::{Indices, PrimitiveTopology};
 use bevy::render::render_asset::RenderAssetUsages;
+use bevy::render::settings::{Backends, RenderCreation, WgpuFeatures, WgpuSettings};
+use bevy::render::RenderPlugin;
 use wasm_bindgen::prelude::*;
 
 pub const SKY_COLOR: Color = Color::srgb(0.60, 0.70, 0.80);
@@ -58,16 +59,29 @@ impl Default for CityCamera {
 
 #[wasm_bindgen(start)]
 pub fn run_bevy_app() {
+    console_error_panic_hook::set_once();
+
     App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "CodeCity Engine".into(),
-                canvas: Some("#bevy-canvas".into()),
-                fit_canvas_to_parent: true,
-                ..default()
-            }),
-            ..default()
-        }))
+        .add_plugins(
+            DefaultPlugins
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        title: "CodeCity Engine".into(),
+                        canvas: Some("#bevy-canvas".into()),
+                        fit_canvas_to_parent: true,
+                        ..default()
+                    }),
+                    ..default()
+                })
+                .set(RenderPlugin {
+                    render_creation: RenderCreation::Automatic(WgpuSettings {
+                        backends: Some(Backends::BROWSER_WEBGPU),
+                        features: WgpuFeatures::empty(),
+                        ..default()
+                    }),
+                    ..default()
+                }),
+        )
         .init_resource::<CitySpawned>()
         .init_resource::<HoverState>()
         .insert_resource(ClearColor(SKY_COLOR))
@@ -125,31 +139,24 @@ fn setup_scene(mut commands: Commands) {
             ..default()
         },
         CityCamera::default(),
-        ScreenSpaceAmbientOcclusionSettings::default(),
     ));
 
     commands.spawn(DirectionalLightBundle {
         directional_light: DirectionalLight {
-            illuminance: 12000.0,
-            shadows_enabled: true,
+            illuminance: 14000.0,
+            shadows_enabled: false,
             color: Color::srgb(1.0, 0.98, 0.95), // Clean, slightly warm sunlight
             ..default()
         },
         transform: Transform::from_rotation(
             Quat::from_euler(EulerRot::XYZ, -0.8, 0.5, 0.0),
         ),
-        cascade_shadow_config: CascadeShadowConfigBuilder {
-            first_cascade_far_bound: 50.0,
-            maximum_distance: 4000.0,
-            ..default()
-        }
-        .into(),
         ..default()
     });
 
     commands.insert_resource(AmbientLight {
-        color: Color::WHITE,
-        brightness: 200.0, // Neutral white ambient light to avoid blue tinting
+        color: Color::srgb(0.92, 0.94, 0.98),
+        brightness: 450.0, // Neutral ambient light for crisp architectural clarity
     });
     
     // UI Text for Camera State
@@ -423,6 +430,15 @@ fn building_color(typology: &str, name: &str) -> Color {
     }
 }
 
+fn color_to_key(color: &Color) -> u32 {
+    let linear = color.to_linear();
+    let r = (linear.red * 255.0).clamp(0.0, 255.0) as u32;
+    let g = (linear.green * 255.0).clamp(0.0, 255.0) as u32;
+    let b = (linear.blue * 255.0).clamp(0.0, 255.0) as u32;
+    let a = (linear.alpha * 255.0).clamp(0.0, 255.0) as u32;
+    (r << 24) | (g << 16) | (b << 8) | a
+}
+
 fn spawn_city(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
@@ -431,6 +447,14 @@ fn spawn_city(
     city_map: &CityMap,
 ) {
     let platform_top: f32 = 0.22;
+
+    // Shared unit cube mesh for all buildings, straight roads, and rectangular platforms
+    // Allows Bevy's PBR engine to batch and GPU-instance thousands of entities into ~10 draw calls
+    let unit_cube_mesh = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
+
+    // Material caches to share identical StandardMaterial handles
+    let mut building_material_cache: HashMap<u32, (Handle<StandardMaterial>, Handle<StandardMaterial>)> = HashMap::new();
+    let mut platform_material_cache: HashMap<String, (Handle<StandardMaterial>, Handle<StandardMaterial>)> = HashMap::new();
 
     // Index dependencies
     let mut outgoing_deps: HashMap<String, Vec<String>> = HashMap::new();
@@ -640,10 +664,11 @@ fn spawn_city(
 
             commands.spawn((
                 PbrBundle {
-                    mesh: meshes.add(Cuboid::new(stream_width, 0.05, length)),
+                    mesh: unit_cube_mesh.clone(),
                     material: default_road_material.clone(),
                     transform: Transform::from_xyz(center_x, stream_height, center_z)
-                        .with_rotation(Quat::from_rotation_y(angle)),
+                        .with_rotation(Quat::from_rotation_y(angle))
+                        .with_scale(Vec3::new(stream_width, 0.05, length)),
                     ..default()
                 },
                 pickable,
@@ -654,28 +679,33 @@ fn spawn_city(
 
     // Spawn organic Voronoi district platforms and rectangular building lot platforms
     for platform in &result.platforms {
-        let platform_color = typology_color(&platform.typology, "platform_color");
-        let platform_material = materials.add(StandardMaterial {
-            base_color: platform_color,
-            perceptual_roughness: 0.9,
-            double_sided: true,
-            cull_mode: None,
-            ..default()
-        });
-
-        let plat_linear = platform_color.to_linear();
-        let hover_platform_material = materials.add(StandardMaterial {
-            base_color: Color::srgb(
-                (plat_linear.red * 1.4).min(1.0),
-                (plat_linear.green * 1.4).min(1.0),
-                (plat_linear.blue * 1.4).min(1.0),
-            ),
-            emissive: Color::linear_rgb(0.3, 0.6, 1.0).into(), // Cyber blue illuminated base
-            perceptual_roughness: 0.4,
-            double_sided: true,
-            cull_mode: None,
-            ..default()
-        });
+        let (platform_material, hover_platform_material) = platform_material_cache
+            .entry(platform.typology.clone())
+            .or_insert_with(|| {
+                let platform_color = typology_color(&platform.typology, "platform_color");
+                let plat_linear = platform_color.to_linear();
+                let def = materials.add(StandardMaterial {
+                    base_color: platform_color,
+                    perceptual_roughness: 0.9,
+                    double_sided: true,
+                    cull_mode: None,
+                    ..default()
+                });
+                let hov = materials.add(StandardMaterial {
+                    base_color: Color::srgb(
+                        (plat_linear.red * 1.4).min(1.0),
+                        (plat_linear.green * 1.4).min(1.0),
+                        (plat_linear.blue * 1.4).min(1.0),
+                    ),
+                    emissive: Color::linear_rgb(0.3, 0.6, 1.0).into(), // Cyber blue illuminated base
+                    perceptual_roughness: 0.4,
+                    double_sided: true,
+                    cull_mode: None,
+                    ..default()
+                });
+                (def, hov)
+            })
+            .clone();
 
         let district_data = city_map.districts.get(platform.district_idx);
         let district_info = if let Some(d) = district_data {
@@ -731,17 +761,18 @@ fn spawn_city(
         } else {
             commands.spawn((
                 PbrBundle {
-                    mesh: meshes.add(Cuboid::new(
-                        platform.width as f32,
-                        platform_top,
-                        platform.depth as f32,
-                    )),
+                    mesh: unit_cube_mesh.clone(),
                     material: platform_material,
                     transform: Transform::from_xyz(
                         (platform.pos_x + platform.width / 2.0) as f32,
                         platform_top / 2.0,
                         (platform.pos_z + platform.depth / 2.0) as f32,
-                    ),
+                    )
+                    .with_scale(Vec3::new(
+                        platform.width as f32,
+                        platform_top,
+                        platform.depth as f32,
+                    )),
                     ..default()
                 },
                 pickable,
@@ -750,29 +781,36 @@ fn spawn_city(
         }
     }
 
-    // Spawn buildings
+    // Spawn buildings with shared unit cube mesh and batched materials
     let fallback_b = data::Building::default();
     let fallback_d = data::District::default();
     for district in &result.districts {
         for building in &district.buildings {
             let b_color = building_color(&district.typology, &building.name);
-            let building_material = materials.add(StandardMaterial {
-                base_color: b_color,
-                perceptual_roughness: 0.8,
-                ..default()
-            });
+            let color_key = color_to_key(&b_color);
 
-            let b_linear = b_color.to_linear();
-            let hover_building_material = materials.add(StandardMaterial {
-                base_color: Color::srgb(
-                    (b_linear.red * 1.5).min(1.0),
-                    (b_linear.green * 1.5).min(1.0),
-                    (b_linear.blue * 1.5).min(1.0),
-                ),
-                emissive: Color::linear_rgb(0.6, 1.4, 2.2).into(), // High-tech cyan edge/emissive glow
-                perceptual_roughness: 0.25,
-                ..default()
-            });
+            let (building_material, hover_building_material) = building_material_cache
+                .entry(color_key)
+                .or_insert_with(|| {
+                    let b_linear = b_color.to_linear();
+                    let def = materials.add(StandardMaterial {
+                        base_color: b_color,
+                        perceptual_roughness: 0.8,
+                        ..default()
+                    });
+                    let hov = materials.add(StandardMaterial {
+                        base_color: Color::srgb(
+                            (b_linear.red * 1.5).min(1.0),
+                            (b_linear.green * 1.5).min(1.0),
+                            (b_linear.blue * 1.5).min(1.0),
+                        ),
+                        emissive: Color::linear_rgb(0.6, 1.4, 2.2).into(), // High-tech cyan edge/emissive glow
+                        perceptual_roughness: 0.25,
+                        ..default()
+                    });
+                    (def, hov)
+                })
+                .clone();
 
             let half_height = building.height as f32 / 2.0;
             let center_x = (building.pos_x + building.width / 2.0) as f32;
@@ -813,13 +851,14 @@ fn spawn_city(
 
             commands.spawn((
                 PbrBundle {
-                    mesh: meshes.add(Cuboid::new(
-                        building.width as f32,
-                        building.height as f32,
-                        building.depth as f32,
-                    )),
+                    mesh: unit_cube_mesh.clone(),
                     material: building_material,
-                    transform: Transform::from_xyz(center_x, center_y, center_z),
+                    transform: Transform::from_xyz(center_x, center_y, center_z)
+                        .with_scale(Vec3::new(
+                            building.width as f32,
+                            building.height as f32,
+                            building.depth as f32,
+                        )),
                     ..default()
                 },
                 pickable,
@@ -1102,12 +1141,6 @@ fn generate_circular_fog_mesh(
     mesh
 }
 
-enum HitType {
-    Building(BuildingHoverInfo, Handle<StandardMaterial>),
-    Road(RoadHoverInfo, Handle<StandardMaterial>),
-    District(DistrictHoverInfo, Handle<StandardMaterial>),
-}
-
 fn hover_picking_system(
     windows: Query<&Window>,
     camera_query: Query<(&Camera, &GlobalTransform), With<CityCamera>>,
@@ -1123,27 +1156,43 @@ fn hover_picking_system(
             revert_entity_material(prev_e, &buildings_query, &roads_query, &districts_query, &mut mat_query);
             dispatch_hover_event(&HoverPayload::None);
         }
+        hover_state.last_cursor_pos = None;
         return;
     };
 
     let Ok((camera, camera_transform)) = camera_query.get_single() else { return; };
+
+    let cam_translation = camera_transform.translation();
+    let cam_rotation = camera_transform.to_scale_rotation_translation().1;
+
+    let cursor_unchanged = hover_state.last_cursor_pos == Some(cursor_pos);
+    let camera_unchanged = hover_state.last_camera_transform == Some((cam_translation, cam_rotation));
+
+    if cursor_unchanged && camera_unchanged {
+        return;
+    }
+
+    hover_state.last_cursor_pos = Some(cursor_pos);
+    hover_state.last_camera_transform = Some((cam_translation, cam_rotation));
+
     let Some(ray) = camera.viewport_to_world(camera_transform, cursor_pos) else { return; };
 
     let ray_origin = ray.origin;
     let ray_dir = *ray.direction;
 
     let mut closest_t = f32::MAX;
-    let mut closest_hit: Option<(Entity, HitType)> = None;
+    let mut best_building: Option<Entity> = None;
+    let mut best_road: Option<Entity> = None;
+    let mut best_district: Option<Entity> = None;
 
-    // 1. Test buildings (Ray-AABB)
+    // 1. Test buildings (Ray-AABB) - zero allocations during loop
     for (entity, building) in buildings_query.iter() {
         if let Some(t) = ray_aabb_intersection(ray_origin, ray_dir, building.aabb_min, building.aabb_max) {
             if t < closest_t {
                 closest_t = t;
-                closest_hit = Some((
-                    entity,
-                    HitType::Building(building.info.clone(), building.hover_material.clone()),
-                ));
+                best_building = Some(entity);
+                best_road = None;
+                best_district = None;
             }
         }
     }
@@ -1171,10 +1220,9 @@ fn hover_picking_system(
                     let effective_t = t_road - 0.02;
                     if effective_t < closest_t {
                         closest_t = effective_t;
-                        closest_hit = Some((
-                            entity,
-                            HitType::Road(road.info.clone(), road.hover_material.clone()),
-                        ));
+                        best_road = Some(entity);
+                        best_building = None;
+                        best_district = None;
                     }
                 }
             }
@@ -1190,10 +1238,9 @@ fn hover_picking_system(
                 if is_point_in_polygon(hit_pt.x as f64, hit_pt.z as f64, &district.polygon) {
                     if t_plat < closest_t {
                         closest_t = t_plat;
-                        closest_hit = Some((
-                            entity,
-                            HitType::District(district.info.clone(), district.hover_material.clone()),
-                        ));
+                        best_district = Some(entity);
+                        best_building = None;
+                        best_road = None;
                     }
                 }
             }
@@ -1201,36 +1248,38 @@ fn hover_picking_system(
     }
 
     // Check if hovered entity changed
-    let new_entity = closest_hit.as_ref().map(|(e, _)| *e);
-    if new_entity != hover_state.hovered_entity {
+    let winning_entity = best_building.or(best_road).or(best_district);
+    if winning_entity != hover_state.hovered_entity {
         // Revert previous entity material
         if let Some(prev_e) = hover_state.hovered_entity {
             revert_entity_material(prev_e, &buildings_query, &roads_query, &districts_query, &mut mat_query);
         }
 
         // Apply new hover
-        if let Some((entity, hit_type)) = closest_hit {
-            match hit_type {
-                HitType::Building(info, hover_mat) => {
-                    if let Ok(mut mat) = mat_query.get_mut(entity) {
-                        *mat = hover_mat;
-                    }
-                    dispatch_hover_event(&HoverPayload::Building(info));
+        if let Some(e) = best_building {
+            if let Ok((_, building)) = buildings_query.get(e) {
+                if let Ok(mut mat) = mat_query.get_mut(e) {
+                    *mat = building.hover_material.clone();
                 }
-                HitType::Road(info, hover_mat) => {
-                    if let Ok(mut mat) = mat_query.get_mut(entity) {
-                        *mat = hover_mat;
-                    }
-                    dispatch_hover_event(&HoverPayload::Road(info));
-                }
-                HitType::District(info, hover_mat) => {
-                    if let Ok(mut mat) = mat_query.get_mut(entity) {
-                        *mat = hover_mat;
-                    }
-                    dispatch_hover_event(&HoverPayload::District(info));
-                }
+                dispatch_hover_event(&HoverPayload::Building(building.info.clone()));
             }
-            hover_state.hovered_entity = Some(entity);
+            hover_state.hovered_entity = Some(e);
+        } else if let Some(e) = best_road {
+            if let Ok((_, road)) = roads_query.get(e) {
+                if let Ok(mut mat) = mat_query.get_mut(e) {
+                    *mat = road.hover_material.clone();
+                }
+                dispatch_hover_event(&HoverPayload::Road(road.info.clone()));
+            }
+            hover_state.hovered_entity = Some(e);
+        } else if let Some(e) = best_district {
+            if let Ok((_, district)) = districts_query.get(e) {
+                if let Ok(mut mat) = mat_query.get_mut(e) {
+                    *mat = district.hover_material.clone();
+                }
+                dispatch_hover_event(&HoverPayload::District(district.info.clone()));
+            }
+            hover_state.hovered_entity = Some(e);
         } else {
             hover_state.hovered_entity = None;
             dispatch_hover_event(&HoverPayload::None);
