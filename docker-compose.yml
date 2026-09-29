@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   backend:
     build:
@@ -8,10 +6,22 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - ENV=development
+      # The code reads APP_ENV; the previous compose file set ENV, which
+      # nothing looked at, so cookies never became Secure in production.
+      - APP_ENV=${APP_ENV:-development}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - DB_PATH=/app/data/sqlite.db
+      # host.docker.internal reaches an Ollama running on the host.
+      - LLM_BASE_URL=${LLM_BASE_URL:-http://host.docker.internal:11434/v1}
+      - LLM_API_KEY=${LLM_API_KEY:-ollama}
+      - LLM_MODEL=${LLM_MODEL:-qwen2.5:1.5b}
+      - LLM_MODEL_FAST=${LLM_MODEL_FAST:-qwen2.5:1.5b}
+      - LLM_CONCURRENCY=${LLM_CONCURRENCY:-2}
+      - CORS_ORIGIN=${CORS_ORIGIN:-http://localhost:3000}
     volumes:
-      - repo-clones:/tmp/repolis-clones
       - repolis-db-data:/app/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   frontend:
     build:
@@ -23,5 +33,4 @@ services:
       - backend
 
 volumes:
-  repo-clones:
   repolis-db-data:
