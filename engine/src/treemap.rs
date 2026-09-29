@@ -1,15 +1,9 @@
 //! Squarified treemap packing (Bruls, Huizing & van Wijk, 2000).
 //!
-//! This replaces the previous concentric-ring placement, which searched rings
-//! outward from a district seed and, when a district overflowed its cell, fell
-//! back to a hash-derived position with no collision test and no containment
-//! test at all — so buildings interpenetrated and could land outside their own
-//! district. A treemap cannot produce an overlap: it recursively subdivides a
-//! rectangle, so disjointness is a property of the construction rather than
-//! something to be checked for afterwards.
-//!
-//! It is also the layout used by the original CodeCity work, is O(n log n),
-//! and is stable: similar inputs give similar pictures.
+//! A treemap cannot produce an overlap: it recursively subdivides a rectangle,
+//! so disjointness comes from the construction rather than from a collision
+//! test afterwards. It is also what the original CodeCity work used, is
+//! O(n log n), and is stable - similar inputs give similar pictures.
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Rect {
@@ -29,8 +23,7 @@ impl Rect {
     pub fn center(&self) -> (f64, f64) {
         (self.x + self.w * 0.5, self.z + self.d * 0.5)
     }
-    /// Shrinks the rectangle by `m` on every side. The removed band is what
-    /// becomes a street.
+    /// Shrinks by `m` on every side; the removed band becomes a street.
     pub fn inset(&self, m: f64) -> Rect {
         let w = (self.w - 2.0 * m).max(0.0);
         let d = (self.d - 2.0 * m).max(0.0);
@@ -50,9 +43,8 @@ pub struct Item {
     pub area: f64,
 }
 
-/// Packs items into `bounds`, returning one rectangle per item in the same
-/// order the items were given. Areas are scaled to exactly fill `bounds`, so
-/// relative size is preserved even though absolute size is not.
+/// Packs items into `bounds`, one rectangle per item in the given order. Areas
+/// are scaled to fill `bounds` exactly, preserving relative size only.
 pub fn squarify(items: &[Item], bounds: Rect) -> Vec<(usize, Rect)> {
     let mut out = Vec::with_capacity(items.len());
     if items.is_empty() || bounds.area() <= 0.0 {
@@ -83,7 +75,7 @@ fn layout_rows(items: &[Item], mut free: Rect, out: &mut Vec<(usize, Rect)>) {
     while start < items.len() {
         let side = free.w.min(free.d);
         if side <= 1e-9 {
-            // Degenerate strip: emit zero-area rects rather than lose items.
+            // Degenerate strip: zero-area rects rather than lost items.
             for it in &items[start..] {
                 out.push((it.key, Rect::new(free.x, free.z, 0.0, 0.0)));
             }

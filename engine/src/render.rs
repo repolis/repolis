@@ -29,10 +29,9 @@ pub fn district_ground_rgb(typology: &str) -> [f32; 3] {
     [c[0] * 0.30 + 0.05, c[1] * 0.30 + 0.05, c[2] * 0.30 + 0.06]
 }
 
-/// Age buckets, in days. Discrete steps rather than a continuous gradient:
-/// five distinguishable shades are easier to compare across a city than a
-/// smooth ramp, and they keep the number of distinct materials (and therefore
-/// draw calls) bounded - a continuous ramp produced 131 materials on libgit2.
+/// Age buckets, in days. Five distinguishable shades compare better across a
+/// city than a smooth ramp, and keep materials bounded: a continuous ramp
+/// produced 131 of them on libgit2.
 const AGE_BUCKETS: [u32; 4] = [45, 180, 400, 900];
 
 pub fn age_bucket(age_days: u32) -> u32 {
@@ -45,8 +44,8 @@ pub fn age_bucket(age_days: u32) -> u32 {
     b
 }
 
-/// Age desaturates a building toward concrete grey; code untouched for years
-/// is fully weathered. Recently touched code keeps its district's hue.
+/// Age desaturates toward concrete grey: code untouched for years is fully
+/// weathered, recent code keeps its district's hue.
 pub fn apply_age(rgb: [f32; 3], age_days: u32) -> [f32; 3] {
     let t = age_bucket(age_days) as f32 / AGE_BUCKETS.len() as f32;
     let grey = (rgb[0] + rgb[1] + rgb[2]) / 3.0;
@@ -58,13 +57,10 @@ pub fn apply_age(rgb: [f32; 3], age_days: u32) -> [f32; 3] {
     ]
 }
 
-/// Quantised colour key so identical appearances share one material handle and
-/// Bevy can batch them into a single draw call.
-///
-/// `module` is deliberately not part of the key. It used to be, but nothing
-/// downstream ever read it, so it only doubled the number of materials -
-/// and therefore draw calls - for two appearances that were byte-identical.
-/// Modules are distinguished by geometry (a plinth) instead.
+/// Quantised, so identical appearances share one material handle and batch
+/// into a single draw call. `module` is deliberately absent: nothing
+/// downstream read it, so it doubled the materials for byte-identical
+/// appearances. Modules are distinguished by geometry instead.
 pub fn color_key(rgb: [f32; 3], churn_bucket: u32) -> u32 {
     let q = |v: f32| ((v.clamp(0.0, 1.0) * 31.0).round() as u32) & 0x1f;
     (q(rgb[0]) << 16) | (q(rgb[1]) << 11) | (q(rgb[2]) << 6) | churn_bucket
@@ -74,11 +70,9 @@ pub fn churn_bucket(churn_rank: f64) -> u32 {
     (churn_rank.clamp(0.0, 1.0) * 3.999) as u32
 }
 
-/// Roof cap for a churn bucket: the colour of the slab, and how hard it glows.
-///
-/// Emissive values go above 1.0 on purpose. The camera renders HDR and the
-/// bloom pass only picks up what exceeds the threshold, so this is what makes
-/// a busy building actually glow rather than merely look slightly warmer.
+/// Roof cap for a churn bucket: slab colour and glow. Emissive goes above 1.0
+/// on purpose - the camera is HDR and bloom only picks up what exceeds the
+/// threshold, which is what makes a busy building glow rather than look warm.
 pub fn make_cap_material(materials: &mut Assets<StandardMaterial>, bucket: u32) -> Handle<StandardMaterial> {
     let (base, emissive) = match bucket {
         3 => ([1.00, 0.55, 0.16], LinearRgba::new(5.2, 1.9, 0.35, 1.0)),
@@ -94,7 +88,7 @@ pub fn make_cap_material(materials: &mut Assets<StandardMaterial>, bucket: u32) 
 }
 
 /// Plinth under a "module" building, so file modules read differently from
-/// types at a glance. The legend promised this marker; nothing drew it.
+/// types at a glance.
 pub fn make_plinth_material(materials: &mut Assets<StandardMaterial>) -> Handle<StandardMaterial> {
     materials.add(StandardMaterial {
         base_color: Color::srgb(0.16, 0.17, 0.20),
@@ -113,10 +107,8 @@ pub fn make_building_materials(
     materials: &mut Assets<StandardMaterial>,
     rgb: [f32; 3],
 ) -> BuildingMaterials {
-    // Churn is no longer a faint emissive tint on the facade. At its strongest
-    // that was 0.55 of red added to a building whose base colour was already
-    // warm, with no bloom to turn it into a halo - invisible in practice.
-    // It is a roof cap now; see `make_cap_material`.
+    // Churn is a roof cap now (see `make_cap_material`): at full strength a
+    // facade tint was 0.55 of red on an already warm colour, and invisible.
     let normal = materials.add(StandardMaterial {
         base_color: Color::srgb(rgb[0], rgb[1], rgb[2]),
         perceptual_roughness: 0.78,
@@ -141,12 +133,9 @@ pub fn make_building_materials(
     BuildingMaterials { normal, dim, bright }
 }
 
-/// Builds one mesh containing every supplied arc.
-///
-/// Each link previously got its own generated mesh and its own entity, so a
-/// city with 500 dependencies cost 500+ draw calls with no instancing
-/// possible. Merging them makes the whole dependency graph one draw call; the
-/// highlighted subset is rebuilt separately into a second, small mesh.
+/// Builds one mesh containing every arc, so the whole dependency graph is a
+/// single draw call rather than one entity per link. The highlighted subset is
+/// rebuilt separately into a second, small mesh.
 pub fn build_link_mesh(links: &[&Link], vertical: f32) -> Mesh {
     let mut positions: Vec<[f32; 3]> = Vec::new();
     let mut normals: Vec<[f32; 3]> = Vec::new();
@@ -227,8 +216,7 @@ pub fn polygon_prism(polygon: &[(f64, f64)], top: f32, bottom: f32) -> Mesh {
         normals.push([0.0, 1.0, 0.0]);
         uvs.push([((p.0 - cx) * 0.02 + 0.5) as f32, ((p.1 - cz) * 0.02 + 0.5) as f32]);
     }
-    // Wound so the top face is front-facing when viewed from +Y, which lets
-    // back-face culling stay on instead of being disabled everywhere.
+    // Wound front-facing from +Y, so back-face culling can stay on.
     for i in 0..k {
         let curr = 1 + i as u32;
         let next = 1 + ((i + 1) % k) as u32;
@@ -263,10 +251,8 @@ pub fn polygon_prism(polygon: &[(f64, f64)], top: f32, bottom: f32) -> Mesh {
     mesh
 }
 
-/// Merges all of a district's street slabs into one mesh.
-///
-/// Previously every building also spawned its own platform entity — 434 extra
-/// entities on a mid-sized repo — each registered as a separate pickable.
+/// Merges all of a district's street slabs into one mesh, rather than a
+/// platform entity per building - 434 extra pickables on a mid-sized repo.
 pub struct QuadBuilder {
     positions: Vec<[f32; 3]>,
     normals: Vec<[f32; 3]>,

@@ -6,23 +6,16 @@ import (
 	"github.com/repolis/repolis/backend/internal/models"
 )
 
-// maxReliableCycle is the largest component reported as a finding rather than
-// as a tangled region. Chosen because components up to this size were
-// verifiable by hand against the source; larger ones were not.
+// The largest component reported as a finding rather than a tangled region:
+// up to this size a cycle is verifiable by hand against the source.
 const maxReliableCycle = 12
 
-// FindCycles labels every strongly connected component of the call graph that
-// contains more than one building, using Tarjan's algorithm.
+// FindCycles labels every strongly connected component of more than one
+// building (Tarjan). A dependency cycle is the clearest thing a city shows
+// that a file tree cannot, and the edge set already has everything needed.
 //
-// A dependency cycle is the clearest thing a city can show that a file tree
-// cannot: it is a property of the graph, invisible in any directory listing,
-// and an IDE will only reveal it one hop at a time. Everything needed is
-// already in the edge set, so this costs one linear pass.
-//
-// The traversal is iterative on purpose. A recursive Tarjan over libgit2's
-// ~1300 buildings is fine, but the depth is bounded by the longest path in the
-// graph rather than by anything we control, and a blown stack in the analysis
-// pass would take the whole request down.
+// Iterative on purpose: recursion depth would be bounded by the graph's
+// longest path, and a blown stack here takes the whole request down.
 func FindCycles(buildings []models.Building, edges []models.DependencyEdge) []models.Cycle {
 	index := make(map[string]int, len(buildings))
 	for i, b := range buildings {
@@ -38,7 +31,7 @@ func FindCycles(buildings []models.Building, edges []models.DependencyEdge) []mo
 		}
 		adj[from] = append(adj[from], to)
 	}
-	// Deterministic output regardless of map iteration order upstream.
+	// Deterministic whatever order the maps upstream iterated in.
 	for i := range adj {
 		sort.Ints(adj[i])
 	}
@@ -120,7 +113,7 @@ func FindCycles(buildings []models.Building, edges []models.DependencyEdge) []mo
 		}
 	}
 
-	// Largest first: those are the ones worth looking at.
+	// Largest first: those are worth looking at.
 	sort.Slice(components, func(i, j int) bool {
 		if len(components[i]) != len(components[j]) {
 			return len(components[i]) > len(components[j])
@@ -145,8 +138,7 @@ func FindCycles(buildings []models.Building, edges []models.DependencyEdge) []mo
 		})
 	}
 
-	// Reliable cross-module cycles first: those are the actionable findings.
-	// Then everything else by size.
+	// Reliable cross-module cycles are the actionable findings; then by size.
 	sort.SliceStable(out, func(i, j int) bool {
 		ai := out[i].Reliable && out[i].CrossModule()
 		aj := out[j].Reliable && out[j].CrossModule()
@@ -164,13 +156,11 @@ func FindCycles(buildings []models.Building, edges []models.DependencyEdge) []mo
 	return out
 }
 
-// MarkCycles writes the component id onto each member building and flags every
-// edge that runs between two members of the same component. Only those edges
-// are part of a cycle; an edge leaving the component is not.
+// MarkCycles tags each member building and every edge running between two
+// members. An edge leaving the component is not part of the cycle.
 func MarkCycles(buildings []models.Building, edges []models.DependencyEdge, cycles []models.Cycle) {
-	// Only cycles we are prepared to call findings are marked for display.
-	// Drawing a 68-building tangle would bury the two-building cycles that
-	// are both verifiable and fixable.
+	// Only findings are drawn: a 68-building tangle would bury the
+	// two-building cycles that are verifiable and fixable.
 	of := make(map[string]int, len(buildings))
 	for _, c := range cycles {
 		if !c.Reliable || !c.CrossModule() {

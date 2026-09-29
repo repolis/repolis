@@ -1,7 +1,6 @@
 //! Runs a real CityMap JSON through the layout and checks every invariant the
-//! renderer depends on. This is the headless equivalent of looking at the city:
-//! it cannot tell you whether it is pretty, but it proves nothing overlaps,
-//! nothing escapes its district and nothing is silently dropped.
+//! renderer depends on: nothing overlaps, nothing escapes its district and
+//! nothing is silently dropped. It cannot tell you whether it is pretty.
 //!
 //! Usage: cargo run --release --example layout_check -- <city.json>
 
@@ -28,8 +27,7 @@ fn main() {
 
     assert_eq!(result.buildings.len(), expected, "buildings were dropped by the layout");
 
-    // 1. No two buildings overlap. Compared in district-local space, where
-    //    footprints are axis aligned.
+    // 1. No two buildings overlap, compared in district-local space.
     let mut per_district: HashMap<usize, Vec<usize>> = HashMap::new();
     for (i, b) in result.buildings.iter().enumerate() {
         per_district.entry(b.district_idx).or_default().push(i);
@@ -108,12 +106,10 @@ fn main() {
         v.len()
     };
     println!("  height  min {:.1}  mean {:.1}  max {:.1}  ({} distinct)", min, mean, max, distinct);
-    // Small repos genuinely have few distinct sizes; only demand variety once
-    // there is enough code for it to be meaningful.
+    // Small repos genuinely have few distinct sizes.
     assert!(distinct > 5 || heights.len() < 12, "height carries no signal");
 
-    // Buildings all share one cube mesh, so the number of distinct materials
-    // is what the city costs in draw calls.
+    // One shared cube mesh, so distinct materials are the draw-call cost.
     let mut keys = std::collections::HashSet::new();
     for (di, d) in city.districts.iter().enumerate() {
         let _ = di;
@@ -127,8 +123,7 @@ fn main() {
     }
     println!("  materials        {} distinct (= building draw calls)", keys.len());
 
-    // Roof caps are the churn channel; a city where nothing qualifies would
-    // silently lose that dimension.
+    // The churn channel: a city where nothing qualifies loses that dimension.
     let mut caps = 0usize;
     let mut plinths = 0usize;
     for d in &city.districts {

@@ -1,9 +1,7 @@
 import type { PathInfo } from "./types";
 
-/**
- * Shows the state of a path query, which is otherwise invisible: pinning a
- * start building changes nothing on screen until a second building is chosen.
- */
+/** Shows a path query's state: pinning a start changes nothing on screen until
+ * a second building is chosen. */
 export function PathBanner({
   anchorName,
   path,

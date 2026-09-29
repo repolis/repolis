@@ -2,10 +2,8 @@ import { useMemo, useState } from "react";
 import { Regenerate } from "./regenerate";
 import type { CitySummary, IndexEntry } from "./types";
 
-/**
- * Finding a named symbol was previously impossible without flying around the
- * city by hand, which made the view pretty but not addressable.
- */
+/** Makes the city addressable: without it a named symbol can only be found by
+ * flying around by hand. */
 export function SearchBar({
   summary,
   busy,

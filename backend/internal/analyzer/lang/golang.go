@@ -30,16 +30,12 @@ func (goLang) Namespace(relPath string) string {
 	return d
 }
 
-// ImportTargets turns a Go import path into namespace candidates.
+// ImportTargets turns an import path into namespace candidates. Imports are
+// absolute module paths while namespaces are repo-relative directories, so the
+// path is offered with successively fewer leading segments.
 //
-// Imports are absolute module paths ("github.com/owner/repo/internal/x") while
-// namespaces are repository-relative directories ("internal/x"), so the path
-// is offered with successively fewer leading segments and the longest match
-// wins.
-//
-// A first segment without a dot means the standard library. Returning nothing
-// for those matters: otherwise `import "os"` would match a repository's own
-// `internal/os` by suffix and invent edges into it.
+// A dotless first segment is the standard library, and returning nothing for
+// those keeps `import "os"` from matching a repo's own `internal/os`.
 func (goLang) ImportTargets(imp Import, _ string) []string {
 	p := strings.Trim(imp.Path, `"`)
 	if p == "" {
@@ -66,8 +62,7 @@ func (goLang) Parse(root *sitter.Node, src []byte) FileFacts {
 
 		case "type_declaration":
 			Children(n, func(_ int, spec *sitter.Node) {
-				// `type Alias = Camera` declares no members of its own;
-				// recording it would duplicate the real type.
+				// An alias declares no members; recording it duplicates the type.
 				if spec.Type() != "type_spec" {
 					return
 				}
@@ -103,9 +98,8 @@ func goImports(n *sitter.Node, src []byte, out *[]Import) {
 		imp := Import{Path: raw}
 		switch name := spec.ChildByFieldName("name"); {
 		case name == nil:
-			// The package name is conventionally the last path segment, and
-			// that is what qualifies every call site, so it has to be
-			// recorded as the alias even when nothing was renamed.
+			// The package name - by convention the last path segment - is
+			// what qualifies every call site, renamed or not.
 			imp.Alias = path.Base(raw)
 		case name.Type() == "dot":
 			imp.Wildcard = true
@@ -177,8 +171,7 @@ func goTypeDef(spec *sitter.Node, src []byte) *TypeDef {
 		})
 
 	default:
-		// `type Celsius float64` and friends define a named type with no
-		// members. They can still own methods, so they are worth recording.
+		// A named type with no members can still own methods.
 	}
 
 	return &TypeDef{
@@ -261,10 +254,9 @@ func goBodyRefs(n *sitter.Node, src []byte, fn *FuncDef) {
 			case "selector_expression":
 				field := Text(f.ChildByFieldName("field"), src)
 				operand := f.ChildByFieldName("operand")
-				// `pkg.Fn()` and `value.Method()` are the same shape. A plain
-				// identifier operand might be a package, so it is offered as a
-				// qualifier; if no import matches, resolution falls back to
-				// the bare name, which is the method case.
+				// `pkg.Fn()` and `value.Method()` have the same shape, so the
+				// operand is offered as a qualifier and resolution falls back
+				// to the bare name when no import matches.
 				if operand != nil && operand.Type() == "identifier" {
 					fn.Calls = append(fn.Calls, Ref{Qualifier: Text(operand, src), Name: field})
 				} else {

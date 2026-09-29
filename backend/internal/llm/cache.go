@@ -5,16 +5,12 @@ import (
 	"sync"
 )
 
-// Cache persists every LLM decision keyed by the hash of its exact inputs.
-//
-// This is what makes iteration affordable: re-analysing the same repository,
-// a later commit (only changed files produce new prompts), or two repos that
-// vendor the same library costs zero tokens.
+// Cache persists every LLM decision, keyed by the hash of its exact inputs, so
+// a re-analysis, a later commit or a shared vendored library costs nothing.
 type Cache struct {
 	db *sql.DB
 	mu sync.RWMutex
-	// mem fronts the database so a single run never round-trips twice for the
-	// same prompt (common when several files share a candidate shape).
+	// Fronts the database so one run never round-trips twice for a prompt.
 	mem map[string]string
 }
 
@@ -47,9 +43,8 @@ func (c *Cache) Get(key string) (string, bool) {
 	return out, true
 }
 
-// Invalidate drops a stored answer so the next identical question is asked
-// again. Used when a regeneration bypasses the cache and the fresh answer
-// should replace the old one even if the new call fails.
+// Invalidate drops a stored answer, so a bypassed regeneration replaces it
+// even if the fresh call fails.
 func (c *Cache) Invalidate(key string) {
 	if c == nil {
 		return

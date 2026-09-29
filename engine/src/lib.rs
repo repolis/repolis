@@ -46,8 +46,7 @@ const BUILDING_BASE: f32 = 0.45;
 #[derive(Component)]
 struct CityElement;
 
-/// A roof cap or plinth belonging to `owner`. Kept as its own entity so it can
-/// use a different material from the building body.
+/// A roof cap or plinth, its own entity so it can use a different material.
 #[derive(Component)]
 struct BuildingTrim {
     owner: Entity,
@@ -59,8 +58,7 @@ struct LinkLayer;
 #[derive(Component)]
 struct HighlightLinkLayer;
 
-/// Everything picking and selection need, kept in one resource rather than
-/// duplicated onto every entity.
+/// Everything picking and selection need, in one resource.
 #[derive(Resource, Default)]
 struct CityIndex {
     districts: Vec<DistrictGeom>,
@@ -123,8 +121,7 @@ mod path_tests {
 
     #[test]
     fn edges_are_followed_in_both_directions() {
-        // Links are stored canonically, so a path must not depend on which
-        // way round the edge happened to be recorded.
+        // Links are stored canonically, so direction must not matter.
         let l = links(&[("b", "a"), ("c", "b")]);
         assert_eq!(shortest_path(&l, "a", "c"), vec!["a", "b", "c"]);
     }
@@ -149,9 +146,8 @@ mod path_tests {
     }
 }
 
-/// Everything the current view is showing. One resource so that mode, filter,
-/// selection and path all settle in a single pass rather than each fighting
-/// over the same material handles.
+/// Everything the view is showing. One resource, so mode, filter, selection
+/// and path settle in a single pass instead of fighting over material handles.
 #[derive(Resource, Default)]
 struct ViewState {
     mode: ColorMode,
@@ -159,20 +155,14 @@ struct ViewState {
     scales: Scales,
     /// Buildings on the highlighted dependency path, in order.
     path: Vec<Entity>,
-    /// The building a path query starts from.
-    ///
-    /// Kept separate from the selection on purpose: clicking the second
-    /// building replaces the selection, so a path query that read "from the
-    /// selection" could only ever ask for a path from a building to itself.
+    /// Where a path query starts. Separate from the selection: clicking the
+    /// second building replaces it, so "from the selection" would only ever
+    /// ask for a path from a building to itself.
     path_anchor: Option<String>,
-    /// Day of the repository's history to show the city as of, or None for
-    /// the present. A building appears on the day its file first appeared.
-    ///
-    /// This is the timeline done honestly and cheaply: file birth dates come
-    /// out of the `git log` pass that already runs, so no commit has to be
-    /// checked out or re-parsed. What it shows is when each part of the system
-    /// came into existence - not how it grew, which would need per-commit
-    /// metrics and is the expensive half.
+    /// Day of history to show the city as of, None for the present. Birth
+    /// dates come from the `git log` pass that already runs, so no commit is
+    /// checked out. It shows when each part came into existence, not how it
+    /// grew - that would need per-commit metrics.
     timeline: Option<u32>,
     dirty: bool,
 }
@@ -189,11 +179,9 @@ thread_local! {
     static PENDING_COMMAND: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
 }
 
-/// Registers every resource and system the city needs.
-///
-/// Split out from `run_bevy_app` so a headless test can build the same
-/// schedule: Bevy validates system parameters when the schedule is first run,
-/// and conflicting queries panic there rather than at compile time.
+/// Registers every resource and system the city needs. Split out from
+/// `run_bevy_app` so a headless test can build the same schedule: Bevy only
+/// validates system parameters on the first run, not at compile time.
 pub fn add_city_systems(app: &mut App) {
     app.init_resource::<SelectionState>()
         .init_resource::<CityIndex>()
@@ -202,8 +190,8 @@ pub fn add_city_systems(app: &mut App) {
         .insert_resource(ClearColor(SKY_COLOR))
         .insert_resource(AmbientLight {
             color: Color::srgb(0.80, 0.86, 0.96),
-            // Lower than before because real shadows now provide the depth
-            // cue; the previous value washed the massing flat.
+            // Low: shadows carry the depth cue, and more washes the massing
+            // flat.
             brightness: 260.0,
         })
         .add_systems(Startup, setup_scene)
@@ -241,8 +229,8 @@ pub fn run_bevy_app() {
                 })
                 .set(RenderPlugin {
                     render_creation: RenderCreation::Automatic(WgpuSettings {
-                        // WebGL2 as well as WebGPU. Pinning WebGPU only meant a
-                        // silently blank canvas in Firefox and older Safari.
+                        // WebGL2 too: WebGPU alone is a blank canvas in
+                        // Firefox and older Safari.
                         backends: Some(Backends::BROWSER_WEBGPU | Backends::GL),
                         ..default()
                     }),
@@ -305,11 +293,8 @@ pub fn set_timeline(day: String) {
     PENDING_COMMAND.with(|c| *c.borrow_mut() = Some(format!("timeline:{day}")));
 }
 
-/// The current camera, as `focusX,focusZ,radius,alpha,beta`.
-///
-/// Read rather than pushed continuously: the camera changes every frame while
-/// the mouse is down, and writing the URL that often would flood the history
-/// and cost more than the feature is worth.
+/// The current camera, as `focusX,focusZ,radius,alpha,beta`. Polled rather
+/// than pushed: it changes every frame during a drag.
 #[wasm_bindgen]
 pub fn camera_state() -> String {
     CAMERA_OUT.with(|c| c.borrow().clone())
@@ -343,8 +328,8 @@ fn setup_scene(mut commands: Commands) {
     commands.spawn((
         Camera3dBundle {
             camera: Camera {
-                // Required for bloom: without HDR every emissive value is
-                // clamped at 1.0 and nothing can glow brighter than white.
+                // Bloom needs it: without HDR emissive clamps at 1.0 and
+                // nothing glows brighter than white.
                 hdr: true,
                 ..default()
             },
@@ -357,9 +342,7 @@ fn setup_scene(mut commands: Commands) {
             transform: Transform::from_xyz(60.0, 70.0, 100.0).looking_at(Vec3::ZERO, Vec3::Y),
             ..default()
         },
-        // Deliberately weak. Only the roof caps of high-churn buildings push
-        // past the threshold, so bloom marks those and leaves the rest of the
-        // city alone.
+        // Weak on purpose: only high-churn roof caps pass the threshold.
         BloomSettings {
             intensity: 0.12,
             ..BloomSettings::NATURAL
@@ -367,9 +350,8 @@ fn setup_scene(mut commands: Commands) {
         CityCamera::default(),
     ));
 
-    // Shadows are the cheapest large improvement to legibility in the whole
-    // scene: height is the primary metric, and without cast shadows the
-    // massing reads flat at every camera angle.
+    // Height is the primary metric, and without cast shadows the massing
+    // reads flat at every angle.
     commands.spawn(DirectionalLightBundle {
         directional_light: DirectionalLight {
             illuminance: 11000.0,
@@ -410,12 +392,10 @@ fn setup_scene(mut commands: Commands) {
 #[derive(Component)]
 struct HelpText;
 
-/// Replaces characters Bevy's bundled subset font cannot draw.
-///
-/// District names come from a language model, so they can contain dashes,
-/// quotes and accents that would otherwise render as empty boxes.
+/// Replaces characters Bevy's bundled subset font cannot draw. District names
+/// come from a language model, so they carry dashes, quotes and accents.
 fn ascii_only(s: &str) -> String {
-    // Multi-character substitutions first; the char map below cannot expand.
+    // Multi-character first; the char map below cannot expand.
     s.replace('\u{2026}', "...")
         .chars()
         .map(|c| match c {
@@ -446,9 +426,8 @@ fn process_city_data(
         return;
     };
 
-    // Capture this before the index is reset: a refinement pass re-sends the
-    // same repository, and throwing the user back to the overview each time
-    // would undo whatever they were looking at.
+    // Before the index resets: the refinement pass re-sends the same repo,
+    // and dropping the user back to the overview would undo their work.
     let had_city = index.radius > 0.0;
 
     for e in existing.iter() {
@@ -471,9 +450,8 @@ fn process_city_data(
         &city,
     );
 
-    // Percentile rather than maximum: libgit2's worst function has complexity
-    // 129 and almost everything else is under 15, so scaling to the maximum
-    // would render the whole city in one flat colour.
+    // Percentile, not maximum: libgit2's worst function is 129 and nearly
+    // everything is under 15, which would flatten the whole ramp.
     {
         let mut cx: Vec<u32> = Vec::new();
         let mut fi: Vec<u32> = Vec::new();
@@ -514,8 +492,7 @@ fn process_city_data(
     }
 
     for mut text in help_q.iter_mut() {
-        // ASCII only: Bevy's bundled default font is a subset that has no
-        // middle dot or ellipsis, so those rendered as empty boxes.
+        // ASCII only: the bundled font has no middle dot or ellipsis.
         text.sections[0].value =
             "drag: orbit | scroll: zoom | WASD: pan | click: select | Esc: clear | F: fly | R: reset".into();
     }
@@ -644,8 +621,7 @@ fn spawn_city(
     let mut cap_materials: HashMap<u32, Handle<StandardMaterial>> = HashMap::new();
     let plinth_material = make_plinth_material(materials);
 
-    // District ground + street grid: one mesh per district instead of one
-    // platform entity per building.
+    // One mesh per district, not one platform entity per building.
     for (i, d) in result.districts.iter().enumerate() {
         let rgb = district_ground_rgb(&d.typology);
         commands.spawn((
@@ -668,7 +644,7 @@ fn spawn_city(
 
         let mut quads = QuadBuilder::new();
         for s in result.streets.iter().filter(|s| s.district_idx == i) {
-            // Rotate each block slab into world space about the district origin.
+            // Rotate each slab into world space about the district origin.
             let (sin_r, cos_r) = (d.rot as f32).sin_cos();
             let dx = s.local_x as f32 - d.origin_x as f32;
             let dz = s.local_z as f32 - d.origin_z as f32;
@@ -698,9 +674,8 @@ fn spawn_city(
             max: Vec2::new(d.max_x as f32, d.max_z as f32),
         });
 
-        // One world-space label per district. This is the single largest
-        // navigation win: previously the view contained no text at all, so a
-        // district could only be identified by hovering it.
+        // One world-space label per district: without text, a district can
+        // only be identified by hovering it.
         commands.spawn((
             TextBundle::from_section(
                 ascii_only(&format!("{} ({})", d.name, d.building_count)),
@@ -722,8 +697,8 @@ fn spawn_city(
         ));
     }
 
-    // Buildings: one shared cube mesh and a small set of shared materials, so
-    // Bevy instances them into a handful of draw calls.
+    // One shared cube mesh and a few shared materials, so Bevy instances
+    // them into a handful of draw calls.
     let by_district: Vec<&data::District> = city.districts.iter().collect();
     let mut raw: HashMap<&str, &data::Building> = HashMap::new();
     for d in &city.districts {
@@ -811,8 +786,8 @@ fn spawn_city(
 
         let rot = Quat::from_rotation_y(result.districts[pb.district_idx].rot as f32);
 
-        // Roof cap: the churn signal. Skipping the dullest quarter keeps the
-        // marker meaningful and avoids ~25% of the extra entities.
+        // The churn signal. Skipping the dullest quarter keeps the marker
+        // meaningful and saves ~25% of the extra entities.
         if bucket >= 1 {
             let cap_mat = cap_materials
                 .entry(bucket)
@@ -866,8 +841,7 @@ fn spawn_city(
         }
     }
 
-    // Links: one merged mesh for the overview, one empty mesh reserved for the
-    // selection highlight.
+    // One merged mesh for the overview, one reserved for the selection.
     let links: Vec<layout::Link> = result
         .links
         .iter()
@@ -895,9 +869,8 @@ fn spawn_city(
         });
     }
 
-    // Showing every dependency at once is unreadable, so the resting view is
-    // the heaviest cross-district links only; selecting a building reveals its
-    // full neighbourhood.
+    // Every dependency at once is unreadable: at rest show only the heaviest
+    // cross-district links, and reveal a neighbourhood on selection.
     let mut overview: Vec<&layout::Link> = links.iter().filter(|l| l.inter_district).collect();
     overview.sort_by_key(|l| std::cmp::Reverse(l.weight));
     overview.truncate(90);
@@ -920,9 +893,8 @@ fn spawn_city(
         CityElement,
     ));
 
-    // Dependency cycles are drawn permanently and in their own colour. They
-    // are rare, they are the one thing here that a file tree cannot show at
-    // all, and hiding them behind a selection would defeat the point.
+    // Cycles are drawn permanently: they are rare, and they are the one thing
+    // here a file tree cannot show at all.
     let cycle_links: Vec<&layout::Link> = links.iter().filter(|l| l.in_cycle).collect();
     commands.spawn((
         PbrBundle {
@@ -1077,7 +1049,7 @@ fn picking_system(
     let cam_rot = cam_tf.to_scale_rotation_translation().1;
     let clicked = mouse.just_pressed(MouseButton::Left);
 
-    // Recompute only when something actually moved, unless this is a click.
+    // Only when something moved, unless this is a click.
     let unchanged = interaction.last_cursor == Some(cursor)
         && interaction.last_camera == Some((cam_pos, cam_rot));
     if unchanged && !clicked {
@@ -1092,9 +1064,8 @@ fn picking_system(
     let origin = ray.origin;
     let dir = *ray.direction;
 
-    // Two-level cull: test each district's bounding box first, then only the
-    // buildings inside the districts the ray actually crosses. The previous
-    // version swept every building AABB on every cursor movement.
+    // Two-level cull: district bounding boxes first, then only the buildings
+    // inside the districts the ray crosses.
     let mut candidate_districts = vec![false; index.districts.len()];
     let mut any_candidate = false;
     for (i, g) in index.districts.iter().enumerate() {
@@ -1122,8 +1093,8 @@ fn picking_system(
         let Some(g) = index.districts.get(p.district_idx) else {
             continue;
         };
-        // Rotate the ray into the district's local frame so rotated footprints
-        // stay exact axis-aligned boxes.
+        // Into the district's local frame, so rotated footprints stay
+        // axis-aligned boxes.
         let (o, d) = to_local(origin, dir, g.origin, g.rot);
         let min = Vec3::new(p.local_min.x, p.y_min, p.local_min.y);
         let max = Vec3::new(p.local_max.x, p.y_max, p.local_max.y);
@@ -1253,8 +1224,7 @@ fn to_world(local: Vec2, pivot: Vec2, rot: f32) -> Vec2 {
     Vec2::new(pivot.x + dx * c - dz * s, pivot.y + dx * s + dz * c)
 }
 
-/// Quantised key so two buildings that look the same share one material, and
-/// Bevy can batch them into one draw call.
+/// Quantised, so lookalike buildings share a material and batch into one call.
 fn rgb_key(rgb: [f32; 3]) -> u32 {
     let q = |v: f32| ((v.clamp(0.0, 1.0) * 31.0).round() as u32) & 0x1f;
     (q(rgb[0]) << 10) | (q(rgb[1]) << 5) | q(rgb[2])
@@ -1274,13 +1244,10 @@ fn material_set(
         .clone()
 }
 
-/// Settles every building's appearance from the current view state.
-///
-/// Colour mode, filter, selection and path all want to change the same
-/// material handle, so they are resolved in one place and in one order rather
-/// than by three systems overwriting each other. Filtered-out buildings become
-/// translucent instead of hidden: the shape of the city is the context that
-/// makes a match meaningful.
+/// Settles every building's appearance in one pass, since colour mode, filter,
+/// selection and path all want the same material handle. Filtered-out
+/// buildings turn translucent rather than hidden: the shape of the city is the
+/// context that makes a match meaningful.
 #[allow(clippy::too_many_arguments)]
 fn refresh_view(
     mut commands: Commands,
@@ -1333,8 +1300,7 @@ fn refresh_view(
 
     let on_path: std::collections::HashSet<Entity> = state.path.iter().copied().collect();
     if !on_path.is_empty() {
-        // The path replaces the neighbour highlight: showing both at once
-        // makes it impossible to see which arcs are the answer.
+        // Replaces the neighbour highlight; both at once hides the answer.
         chosen.clear();
         let path_ids: Vec<String> = state
             .path
@@ -1358,8 +1324,7 @@ fn refresh_view(
 
     let mut pending: Vec<(Entity, Handle<StandardMaterial>)> = Vec::new();
     for (entity, p) in buildings.iter() {
-        // A building that did not exist yet is simply absent, not faded: the
-        // point of the timeline is to watch the city get built.
+        // Absent rather than faded: the timeline is for watching it get built.
         if let Some(day) = state.timeline {
             if p.info.born_day > day {
                 pending.push((entity, faded.clone()));
@@ -1402,8 +1367,7 @@ fn refresh_view(
         }
     }
 
-    // Roof caps carry their own emissive material, so a dimmed or filtered
-    // building would otherwise keep glowing.
+    // Caps carry their own emissive material and would otherwise keep glowing.
     for (t, mut vis) in trim.iter_mut() {
         *vis = if visible_trim.contains(&t.owner) {
             Visibility::Inherited
@@ -1420,8 +1384,8 @@ fn refresh_view(
     let _ = &mut commands;
 }
 
-/// Age desaturation belongs to the typology view only. In a numeric mode the
-/// ramp already carries the meaning, and fading it by age would corrupt it.
+/// Typology view only: in a numeric mode the ramp carries the meaning, and
+/// fading it by age would corrupt it.
 fn apply_age_if_typology(mode: ColorMode, rgb: [f32; 3], age_days: u32) -> [f32; 3] {
     if mode == ColorMode::Typology {
         apply_age(rgb, age_days)
@@ -1430,10 +1394,8 @@ fn apply_age_if_typology(mode: ColorMode, rgb: [f32; 3], age_days: u32) -> [f32;
     }
 }
 
-/// Publishes the camera once it has settled.
-///
-/// Waiting for stillness means the URL records where the user stopped looking,
-/// not every intermediate frame of the drag that got them there.
+/// Publishes the camera once still, so the URL records where the user stopped
+/// looking rather than every frame of the drag.
 fn publish_camera(
     cam_q: Query<(&Transform, &CityCamera)>,
     time: Res<Time>,
@@ -1461,10 +1423,8 @@ fn publish_camera(
     CAMERA_OUT.with(|c| *c.borrow_mut() = text);
 }
 
-/// Shortest dependency path between two buildings, by hop count.
-///
-/// Hops rather than edge weight: "three steps away" is a statement anyone can
-/// act on, where a weighted cost is not.
+/// Shortest dependency path, by hop count: "three steps away" is actionable
+/// where a weighted cost is not.
 fn shortest_path(links: &[LinkRef], from: &str, to: &str) -> Vec<String> {
     if from == to {
         return vec![from.to_string()];
@@ -1524,8 +1484,8 @@ fn update_labels(
         };
 
         let dist = cam_pos.distance(label.world);
-        // Fade labels out when the camera is far enough that they would
-        // overlap into noise, and when zoomed right into one building.
+        // Fade out where labels would overlap into noise, and when zoomed
+        // right into one building.
         let hide = dist > index.radius.max(1.0) * 6.0 || dist < 12.0;
         *vis = if hide { Visibility::Hidden } else { Visibility::Inherited };
 
@@ -1646,7 +1606,7 @@ fn consume_commands(
         return;
     };
 
-    // Exact id first, then exact name, then a case-insensitive substring.
+    // Exact id, then exact name, then a case-insensitive substring.
     let mut found: Option<(Entity, &Pickable)> = None;
     for (e, p) in buildings.iter() {
         if p.info.id == query {

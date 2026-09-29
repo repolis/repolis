@@ -61,9 +61,8 @@ pub struct Link {
     pub points: Vec<(f64, f64, f64)>,
     pub width: f64,
     pub weight: u32,
-    /// Weight in the source -> target direction, and the reverse. Reciprocal
-    /// edges share one piece of geometry but keep their direction so the
-    /// inspector can still distinguish callers from callees.
+    /// Weight each way. Reciprocal edges share geometry but keep direction,
+    /// so the inspector can still tell callers from callees.
     pub fwd: u32,
     pub rev: u32,
     pub kind: String,
@@ -125,8 +124,8 @@ pub fn compute_layout(city: &CityMap) -> LayoutResult {
     }
     for (i, a) in needed.iter_mut().enumerate() {
         let count = city.districts[i].buildings.len().max(1) as f64;
-        // Streets and block gutters are real area; budget for them up front so
-        // the Voronoi cell is sized for the city, not just for the footprints.
+        // Streets and gutters are real area: budget for them, or the cell is
+        // sized for the footprints alone.
         *a = (*a * 1.45 + count * STREET_WIDTH * STREET_WIDTH).max(400.0);
     }
 
@@ -143,12 +142,11 @@ pub fn compute_layout(city: &CityMap) -> LayoutResult {
         let (cx, cz) = polygon_centroid(&polygon);
         let rot = principal_angle(&polygon, cx, cz);
 
-        // The built-up area is the largest rectangle that fits inside the cell
-        // at the cell's own principal orientation. Rotating each district
-        // independently is what keeps the result organic instead of a grid.
+        // The largest rectangle fitting the cell at its own principal
+        // orientation. Rotating each district independently keeps the result
+        // organic rather than a grid.
         let raw_plot = inscribed_rect(&polygon, cx, cz, rot);
-        // Padding scales with the district: a fixed inset consumed the whole
-        // plot of a one-building district and silently dropped its buildings.
+        // Scaled: a fixed inset ate a one-building district's whole plot.
         let pad = (raw_plot.w.min(raw_plot.d) * 0.07).clamp(0.5, DISTRICT_PADDING);
         let plot = raw_plot.inset(pad);
 
@@ -198,9 +196,7 @@ fn compute_dimensions(city: &CityMap) -> Vec<Sized> {
     let mut out = Vec::new();
     for (d_idx, district) in city.districts.iter().enumerate() {
         for (b_idx, b) in district.buildings.iter().enumerate() {
-            // Footprint encodes state (fields); height encodes behaviour
-            // (methods). Both now carry real signal: before the extraction
-            // fixes, num_methods was zero for essentially every building.
+            // Footprint is state (fields), height is behaviour (methods).
             let raw_side = MIN_FOOTPRINT + (b.num_fields as f64).powf(0.58) * 2.4;
             let side = if raw_side > 26.0 {
                 26.0 + (raw_side - 26.0).powf(0.5)
@@ -285,9 +281,8 @@ fn place_seeds(city: &CityMap, needed: &[f64]) -> Vec<(f64, f64)> {
     }
 
     for pass in 0..140 {
-        // Attraction: districts that call each other pull together, so spatial
-        // proximity in the finished city means coupling. Previously seeds were
-        // laid out in alphabetical district order, making adjacency meaningless.
+        // Districts that call each other pull together, so proximity in the
+        // finished city means coupling rather than alphabetical order.
         let cool = 1.0 - (pass as f64 / 140.0);
         for i in 0..n {
             for j in (i + 1)..n {
@@ -312,25 +307,20 @@ fn place_seeds(city: &CityMap, needed: &[f64]) -> Vec<(f64, f64)> {
     seeds
 }
 
-/// Shrinks each cell about its centroid until its area matches what the
-/// district actually needs.
+/// Shrinks each cell about its centroid to the area its district needs.
 ///
-/// Seed placement alone cannot do this. A Voronoi boundary is the
-/// perpendicular bisector of two seeds, so it is equidistant from both: giving
-/// a large cell the radius it needs (separation >= 2*max(r_i, r_j)) hands its
-/// small neighbour exactly the same radius. The separation rule guarantees
-/// every cell is big ENOUGH; this step removes the surplus, so the ground area
-/// a district occupies is proportional to the code it contains. The land
-/// between districts becomes open ground, which also gives the boundaries
-/// somewhere to breathe.
+/// Seed placement alone cannot do this: a Voronoi boundary is equidistant from
+/// both seeds, so giving a large cell its radius hands its small neighbour the
+/// same one. The separation rule makes every cell big ENOUGH; this removes the
+/// surplus, leaving ground area proportional to the code and open land between
+/// districts.
 fn fit_cells(cells: &mut [Vec<(f64, f64)>], needed: &[f64]) {
     for (i, poly) in cells.iter_mut().enumerate() {
         let area = polygon_area(poly);
         if area <= 1e-6 {
             continue;
         }
-        // Never shrink below a floor: a two-building district still has to be
-        // findable and clickable.
+        // A floor: a two-building district must stay findable and clickable.
         let scale = (needed[i] / area).sqrt().clamp(0.28, 1.0);
         if scale >= 0.999 {
             continue;
@@ -351,8 +341,8 @@ fn separate(seeds: &mut [(f64, f64)], radii: &[f64]) {
             let dx = seeds[j].0 - seeds[i].0;
             let dz = seeds[j].1 - seeds[i].1;
             let dist = (dx * dx + dz * dz).sqrt().max(1e-3);
-            // 2 * max(r_i, r_j) is the separation a bisector needs to give the
-            // larger cell its radius; 0.93 tolerates non-circular cells.
+            // The separation a bisector needs to give the larger cell its
+            // radius; 0.93 tolerates non-circular cells.
             let min_dist = 2.0 * radii[i].max(radii[j]) * 1.02;
             if dist < min_dist {
                 let push = (min_dist - dist) * 0.5;
@@ -395,10 +385,9 @@ fn voronoi_cells(seeds: &[(f64, f64)], needed: &[f64]) -> Vec<Vec<(f64, f64)>> {
         .fold(0.0_f64, f64::max)
         + max_r;
 
-    // The bounding box must comfortably contain every site. voronoice's default
-    // ClipBehavior removes sites that fall outside it, so the previous anchor
-    // ring at 1.35x the extent inside a box of half-extent 1.1x silently lost
-    // the anchors nearest the axes and skewed the outer cells.
+    // The box must comfortably contain every site: voronoice's default
+    // ClipBehavior drops sites outside it, which silently loses anchors and
+    // skews the outer cells.
     let box_size = (extent * 3.2).max(200.0);
     let anchor_radius = extent * 1.28 + max_r * 0.5;
 
@@ -415,10 +404,9 @@ fn voronoi_cells(seeds: &[(f64, f64)], needed: &[f64]) -> Vec<Vec<(f64, f64)>> {
     let built = VoronoiBuilder::default()
         .set_sites(sites)
         .set_bounding_box(BoundingBox::new_centered(box_size, box_size))
-        // No Lloyd relaxation: it relocates every site to its cell centroid and
-        // rebuilds, so the seeds this code reasons about would no longer be the
-        // sites of the cells it reads back. It also equalises cell areas, which
-        // is the opposite of what size-proportional districts need.
+        // No Lloyd relaxation: it moves every site to its centroid, so the
+        // seeds this code reasons about stop being the cells' sites, and it
+        // equalises areas - the opposite of size-proportional districts.
         .build();
 
     (0..n)
@@ -455,8 +443,7 @@ fn pack_district(
         return;
     }
 
-    // Level 1: one block per source directory, sized by its total footprint.
-    // This gives the city visible blocks that correspond to real folders.
+    // One block per source directory, sized by its total footprint.
     let mut by_dir: HashMap<&str, Vec<&Sized>> = HashMap::new();
     for s in mine {
         by_dir.entry(s.dir.as_str()).or_default().push(s);
@@ -486,8 +473,8 @@ fn pack_district(
 
     for (dir_key, block) in squarify(&dir_items, *plot) {
         let dir = dir_keys[dir_key];
-        // The band removed here is the street between blocks. Its width is
-        // proportional so that a block never disappears into its own gutter.
+        // The street between blocks, proportional so a block never disappears
+        // into its own gutter.
         let street = (block.w.min(block.d) * 0.09).clamp(0.25, STREET_WIDTH * 0.5);
         let inner = block.inset(street);
         if inner.area() <= 1e-6 {
@@ -502,7 +489,7 @@ fn pack_district(
             district_idx,
         });
 
-        // Level 2: one lot per building inside its directory's block.
+        // One lot per building inside its directory's block.
         let items: Vec<Item> = by_dir[dir]
             .iter()
             .enumerate()
@@ -521,9 +508,8 @@ fn pack_district(
                 continue;
             }
 
-            // Keep the designed footprint when the lot allows it, otherwise
-            // shrink to fit. Either way the building stays inside its lot, so
-            // no two buildings can touch.
+            // Shrink to fit when the lot is smaller. Either way the building
+            // stays inside its lot, so no two can touch.
             let w = s.width.min(cell.w).max(0.4);
             let d = s.depth.min(cell.d).max(0.4);
             let (lx, lz) = cell.center();
@@ -548,21 +534,17 @@ fn pack_district(
     }
 }
 
-/// Dependency links are drawn as arcs above the rooftops.
-///
-/// Ground routing was the original design, but every road ran centre-to-centre
-/// at a fixed height, so it began underneath its source building, ended
-/// underneath its target, and crossed everything between. An arc cannot
-/// intersect the city, reads unambiguously as a connection rather than as
-/// street furniture, and leaves the ground plane to the street grid.
+/// Dependency links, drawn as arcs above the rooftops. A ground road runs
+/// centre to centre, so it starts under its source building, ends under its
+/// target and crosses everything between; an arc cannot intersect the city and
+/// leaves the ground plane to the street grid.
 fn build_links(city: &CityMap, buildings: &[PlacedBuilding], districts: &[PlacedDistrict]) -> Vec<Link> {
     let mut index: HashMap<&str, usize> = HashMap::new();
     for (i, b) in buildings.iter().enumerate() {
         index.insert(b.id.as_str(), i);
     }
 
-    // Collapse reciprocal edges: A->B and B->A were previously two overlapping
-    // pieces of geometry.
+    // Collapse reciprocal edges; A->B and B->A would overlap exactly.
     struct Merged {
         fwd: u32,
         rev: u32,
@@ -703,8 +685,8 @@ pub fn polygon_bounds(poly: &[(f64, f64)]) -> (f64, f64, f64, f64) {
 }
 
 /// Orientation of the cell's dominant axis, from the covariance of its
-/// vertices. Each district is built along its own axis, which is what stops
-/// the city looking like a circuit board.
+/// vertices. Building each district along its own axis is what stops the city
+/// looking like a circuit board.
 fn principal_angle(poly: &[(f64, f64)], cx: f64, cz: f64) -> f64 {
     if poly.len() < 3 {
         return 0.0;
@@ -723,9 +705,8 @@ fn principal_angle(poly: &[(f64, f64)], cx: f64, cz: f64) -> f64 {
 pub fn point_in_convex(px: f64, pz: f64, poly: &[(f64, f64)]) -> bool {
     let n = poly.len();
     if n < 3 {
-        // A degenerate cell contains nothing. Returning true here (as the
-        // previous version did) let every candidate rectangle "fit", so
-        // buildings scattered with no boundary at all.
+        // A degenerate cell contains nothing; returning true lets every
+        // candidate rectangle "fit" and scatters the buildings.
         return false;
     }
     for i in 0..n {
@@ -742,7 +723,7 @@ pub fn point_in_convex(px: f64, pz: f64, poly: &[(f64, f64)]) -> bool {
 /// that fits inside the polygon, found by bisection on scale.
 fn inscribed_rect(poly: &[(f64, f64)], cx: f64, cz: f64, rot: f64) -> Rect {
     let (sin_r, cos_r) = rot.sin_cos();
-    // Work in the rotated frame: rotate the polygon by -rot about the centroid.
+    // Work in the rotated frame.
     let local: Vec<(f64, f64)> = poly
         .iter()
         .map(|&(x, z)| {
@@ -816,8 +797,8 @@ mod tests {
         c
     }
 
-    /// The invariant that the previous layout could not hold: no two buildings
-    /// may overlap, whatever the relative district sizes.
+    /// The core invariant: no two buildings overlap, whatever the relative
+    /// district sizes.
     #[test]
     fn no_building_overlaps_even_with_extreme_size_spread() {
         let c = city(&[("huge", 221), ("mid", 40), ("tiny", 2), ("small", 7), ("m2", 60)]);
@@ -828,7 +809,7 @@ mod tests {
         for b in &r.buildings {
             per_district.entry(b.district_idx).or_default().push(b);
         }
-        // Compare in district-local space, where footprints are axis aligned.
+        // District-local space, where footprints are axis aligned.
         for (_, list) in per_district {
             for i in 0..list.len() {
                 for j in (i + 1)..list.len() {
@@ -858,8 +839,7 @@ mod tests {
         }
     }
 
-    /// Cell area must track district size; this is what the old
-    /// 0.92*(r_i+r_j) spacing got wrong.
+    /// Cell area must track district size.
     #[test]
     fn district_cell_area_scales_with_content() {
         let c = city(&[("big", 150), ("small", 6)]);

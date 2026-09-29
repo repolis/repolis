@@ -18,15 +18,10 @@ type Label struct {
 	FromLLM  bool
 }
 
-// The prompt deliberately says nothing about cities. Told it was naming
-// neighbourhoods, qwen2.5:1.5b took the metaphor literally and produced
-// "CityBuildingSimulator - Simulates a city's development" for a maths
-// library. Describing the actual task - naming a group of C symbols - fixes it.
-//
-// TYPE is also deliberately absent: asked to choose a typology, the model
-// answered "core" for every district regardless of content. Typology is
-// derived instead from the name it produces plus the folder paths, both of
-// which are checkable. The model is asked only for the thing it is good at.
+// The prompt says nothing about cities: told it was naming neighbourhoods,
+// qwen2.5:1.5b named a maths library "CityBuildingSimulator". TYPE is absent
+// for the same reason - asked for a typology it answered "core" every time,
+// so typology is derived from the name and paths, which are checkable.
 var labelSystemFmt = `You give a short technical name to a group of related %s source symbols.
 Judge only from the symbol names and folder paths given.
 
@@ -42,22 +37,17 @@ Example output:
 NAME: Object Database
 DESC: Reads and writes packed object storage`
 
-// exampleName and exampleDesc are the worked example in the system prompt. An
-// unsure model sometimes copies it verbatim, which produced a ripgrep district
-// called "Regex Matcher" described as "Reads and writes packed object
-// storage". Echoed text is not an answer.
+// The worked example from the system prompt. An unsure model copies it
+// verbatim, so echoed text is rejected rather than treated as an answer.
 const (
 	exampleName = "object database"
 	exampleDesc = "reads and writes packed object storage"
 )
 
-// LabelClusters names each district with one small, independent call.
-//
-// One call per cluster rather than one call for all of them: each prompt stays
-// ~150 tokens, well inside the effective context of a small local model; each
-// is cached and retried independently; and a failure costs one district's name
-// instead of the whole city's. Cluster *membership* was already decided
-// deterministically, so the LLM cannot damage the structure.
+// LabelClusters names each district in one small, independent call: ~150
+// tokens, inside a small model's effective context, cached and retried on its
+// own, and a failure costs one name rather than the city's. Membership was
+// already decided deterministically, so the model cannot damage the structure.
 func (c *Client) LabelClusters(ctx context.Context, clusters []analyzer.Cluster, progress func(done, total int)) []Label {
 	labels := make([]Label, len(clusters))
 	for i, cl := range clusters {
@@ -78,13 +68,10 @@ func (c *Client) LabelClusters(ctx context.Context, clusters []analyzer.Cluster,
 	}
 	logger.Log(logger.InfoLevel, "Labelling %d %s districts (1 call each)", len(clusters), language)
 
-	// Strip what every cluster has in common. On libgit2 the model saw
-	// "git_repository, git_index, git_odb..." in all sixteen prompts and
-	// named all sixteen districts "Git <something>"; the shared prefix and
-	// the shared path segments are pure noise for a naming task.
+	// Strip what every cluster shares: seeing "git_repository, git_index..."
+	// in all sixteen prompts, the model named all sixteen "Git <something>".
 	common := analyzer.CommonDirSegments(clusters)
-	// Words shared by most districts: the project's own name, and anything
-	// else that is true of the whole codebase.
+	// The project's own name, and anything else true of the whole codebase.
 	noise := append([]string(nil), clusters[0].Noise...)
 	if p := strings.Trim(clusters[0].SymbolPrefix, "_0123456789"); p != "" {
 		noise = append(noise, strings.ToLower(p))
@@ -141,10 +128,8 @@ func (c *Client) LabelClusters(ctx context.Context, clusters []analyzer.Cluster,
 				labels[i].Name = trimmed
 				named++
 			}
-			// The produced name is often the strongest typology signal
-			// available ("Graphics Engine" -> core, "UI Elements" ->
-			// interface), and unlike the model's own TYPE answer it is
-			// classified by code we control.
+			// The name is the strongest typology signal available, and
+			// unlike the model's own TYPE answer we classify it ourselves.
 			if t := analyzer.GuessTypology(l.Name); t != "unknown" {
 				labels[i].Typology = t
 			}
@@ -160,8 +145,7 @@ func (c *Client) LabelClusters(ctx context.Context, clusters []analyzer.Cluster,
 		labels[i].FromLLM = true
 	}
 
-	// District names must be unique: they are the primary way a user
-	// identifies a place in the city, and duplicates make labels useless.
+	// Names are how a user identifies a place; duplicates make them useless.
 	seen := make(map[string]int)
 	for i := range labels {
 		base := labels[i].Name
@@ -190,17 +174,16 @@ func (c *Client) LabelClusters(ctx context.Context, clusters []analyzer.Cluster,
 	return labels
 }
 
-// vagueNames are labels that describe every cluster equally and so identify
-// none. A rejected name falls back to the cluster's dominant directory, which
-// at least locates it.
+// Labels that describe every cluster equally and so identify none. A rejected
+// name falls back to the dominant directory, which at least locates it.
 var vagueNames = map[string]bool{
 	"library": true, "subsystem": true, "system": true, "module": true,
 	"core": true, "utilities": true, "utility": true, "misc": true,
 	"components": true, "code": true, "implementation": true,
 }
 
-// isVague reports whether a name, once the project's own token is removed,
-// says nothing that distinguishes this district from any other.
+// isVague: once the project's own token is removed, does anything
+// distinguishing remain?
 func isVague(name string, noise []string) bool {
 	banned := make(map[string]bool, len(noise))
 	for _, w := range noise {
@@ -217,9 +200,8 @@ func isVague(name string, noise []string) bool {
 	return kept == 0
 }
 
-// stripProjectToken removes the project's own name from a district label.
-// Every district of libgit2 is "Git something"; the word carries no
-// information inside that city and crowds out the two words that do.
+// stripProjectToken removes the project's own name: every libgit2 district is
+// "Git something", and the word crowds out the two that carry information.
 func stripProjectToken(name string, noise []string) string {
 	if len(noise) == 0 {
 		return name
@@ -245,9 +227,8 @@ func stripProjectToken(name string, noise []string) string {
 func parseLabel(s string) *Label {
 	l := &Label{}
 	for _, line := range strings.Split(s, "\n") {
-		// Local models routinely decorate the keys with markdown: a reply of
-		// "**NAME:** `Hash Functions`" is well-formed as far as they are
-		// concerned, and was silently dropped by a plain prefix match.
+		// Local models decorate keys with markdown ("**NAME:** `Hash`"),
+		// which a plain prefix match drops silently.
 		line = strings.TrimLeft(strings.TrimSpace(line), "*_#-> \t")
 		upper := strings.ToUpper(line)
 		switch {
@@ -263,8 +244,7 @@ func parseLabel(s string) *Label {
 	return l
 }
 
-// stripNoise removes codebase-wide words from the symbol names shown to the
-// model, leaving only the parts that distinguish this group.
+// stripNoise drops codebase-wide words from the symbols shown to the model.
 func stripNoise(names, noise []string) []string {
 	if len(noise) == 0 {
 		return names

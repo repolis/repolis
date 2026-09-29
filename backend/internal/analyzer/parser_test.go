@@ -26,10 +26,9 @@ func structByName(raw *RawExtraction, name string) *RawStruct {
 	return nil
 }
 
-// A forward declaration and a bare type reference both contain a
-// struct_specifier node in tree-sitter-c. Recording those as definitions is
-// what previously overwrote real struct data with empty stubs, leaving ~30-40%
-// of every generated city as zero-field, one-line placeholders.
+// A forward declaration and a bare reference are both struct_specifier nodes.
+// Recording them as definitions overwrote real structs with empty stubs,
+// leaving 30-40% of a city as zero-field placeholders.
 func TestOnlyRealDefinitionsAreExtracted(t *testing.T) {
 	raw := extract(t)
 
@@ -83,8 +82,7 @@ func TestFunctionSignatureExtraction(t *testing.T) {
 		t.Errorf("widget_free first param type = %v, want Widget", f.ParamTypes)
 	}
 
-	// Call sites drive the dependency graph; they must be attributed to the
-	// enclosing function, not to the file.
+	// Call sites drive the graph: they belong to the enclosing function.
 	m := byName["main"]
 	if m == nil {
 		t.Fatal("main not extracted")
@@ -122,9 +120,8 @@ func TestAssociationLadder(t *testing.T) {
 	if a := get("rect_make"); st.TypeName(a.Chosen) != "Rect" {
 		t.Errorf("rect_make -> %q, want Rect", st.TypeName(a.Chosen))
 	}
-	// Name says Widget, first parameter says Palette: genuinely ambiguous, so
-	// it must reach the LLM — while still carrying a usable tentative answer,
-	// so that a missing or slow model never loses the function.
+	// Name says Widget, first parameter says Palette: ambiguous, so it must
+	// reach the LLM carrying a tentative answer a missing model cannot lose.
 	amb := get("widget_recolor")
 	if amb.Confidence != ConfLow {
 		t.Errorf("widget_recolor confidence = %s, want low", amb.Confidence)
@@ -245,9 +242,8 @@ func TestTypologyClosedSet(t *testing.T) {
 	}
 }
 
-// A workspace member owns a licence and a build manifest exactly like a
-// vendored library does. Treating that as vendoring silently deleted three of
-// ripgrep's own crates from the city.
+// A workspace member owns a licence and manifest exactly like a vendored
+// library; treating that as vendoring deleted three of ripgrep's own crates.
 func TestWorkspaceMemberIsNotVendored(t *testing.T) {
 	dir := t.TempDir()
 	crate := filepath.Join(dir, "printer")

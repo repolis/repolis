@@ -65,9 +65,8 @@ func CookieMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// CORSMiddleware allows the frontend to run on a different origin than the API.
-// In development Vite proxies /api so this is a no-op; without it any deployment
-// that does not proxy is broken.
+// CORSMiddleware lets the frontend run on a different origin. A no-op behind
+// Vite's dev proxy, required for any deployment that does not proxy.
 func CORSMiddleware(next http.Handler) http.Handler {
 	allowed := os.Getenv("CORS_ORIGIN")
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -158,8 +157,8 @@ func readCachedCity(key string) *models.CityMap {
 	return &city
 }
 
-// writeCachedCity writes atomically; the previous direct WriteFile could be
-// read half-written by a concurrent request.
+// writeCachedCity writes atomically: a plain WriteFile can be read
+// half-written by a concurrent request.
 func writeCachedCity(key string, city *models.CityMap) {
 	b, err := json.Marshal(city)
 	if err != nil {
@@ -212,9 +211,8 @@ func (s *server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 		logger.Log(logger.InfoLevel, "Regenerating %s@%s at level %q", repoURL, commit[:8], level)
 	}
 
-	// Single-flight is keyed by the refresh level as well as the commit, so a
-	// forced regeneration never quietly attaches to a weaker run that is
-	// already in flight and would not redo the work being asked for.
+	// Keyed by refresh level too, so a forced regeneration never attaches to
+	// a weaker run already in flight.
 	jobKey := key
 	if level != models.RefreshNone {
 		jobKey = key + "|" + level
@@ -231,8 +229,8 @@ func (s *server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, models.AnalyzeResponse{Status: "pending", JobID: job.ID})
 }
 
-// runAnalysis performs the two-pass pipeline on a detached context, so the
-// work survives the originating HTTP request.
+// runAnalysis runs the two passes on a detached context, so the work survives
+// the originating request.
 func (s *server) runAnalysis(j *jobs.Job, key, level string) {
 	ctx, cancel := context.WithTimeout(context.Background(), analysisLimit)
 	defer cancel()
@@ -244,9 +242,8 @@ func (s *server) runAnalysis(j *jobs.Job, key, level string) {
 
 	j.Stage(pipeline.Stage{Name: "cloning"})
 
-	// A checkout is content-addressed by commit, so any existing clone of this
-	// commit is reusable regardless of who requested it. Scoping clones per
-	// user only produced redundant copies of the same tree.
+	// A checkout is content-addressed by commit, so any existing clone of it
+	// is reusable whoever requested it.
 	clonePath := ""
 	if id, path, found := db.FindClone(j.RepoURL, j.Commit); found {
 		if models.Redoes(level, models.RefreshClone) {
@@ -278,8 +275,8 @@ func (s *server) runAnalysis(j *jobs.Job, key, level string) {
 		return
 	}
 
-	// Publish the deterministic city immediately: it is complete, navigable,
-	// and available in a fraction of the time the LLM pass takes.
+	// The deterministic city is complete and navigable, and ready in a
+	// fraction of the LLM pass's time.
 	j.Emit(jobs.Event{Type: jobs.EventCity, City: draft, Refined: false})
 	writeCachedCity(key, draft)
 	logger.Log(logger.InfoLevel, "Draft city published: %d districts, %d buildings, %d edges",
@@ -292,8 +289,8 @@ func (s *server) runAnalysis(j *jobs.Job, key, level string) {
 		return
 	}
 	if models.Redoes(level, models.RefreshModel) {
-		// Ask everything again. Answers are still written back, so the cache
-		// ends up refreshed rather than bypassed permanently.
+		// Answers are still written back, so the cache ends up refreshed
+		// rather than permanently bypassed.
 		client.SetCacheBypass(true)
 		logger.Log(logger.InfoLevel, "Ignoring cached model answers for this run")
 	}
@@ -359,8 +356,8 @@ func (s *server) handleJobEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleExplain produces a description of one building on demand. This is the
-// only place the large model runs, and nothing waits on it.
+// handleExplain describes one building on demand: the only place the large
+// model runs, and nothing waits on it.
 func (s *server) handleExplain(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 

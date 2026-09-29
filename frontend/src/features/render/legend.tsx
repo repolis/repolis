@@ -1,10 +1,8 @@
 import { useState } from "react";
 import { TYPOLOGY_COLORS, type CitySummary } from "./types";
 
-/**
- * The city uses five visual channels at once. An encoding nobody can decode is
- * decoration, so the mapping is always one click away.
- */
+/** Five visual channels are in use at once, and an encoding nobody can decode
+ * is decoration. */
 const MODE_HELP: Record<string, string> = {
   complexity: "Colour = worst cyclomatic complexity in the building. Pale is simple, red is branchy.",
   age: "Colour = recency. Red was edited recently, pale has not changed in a long time.",

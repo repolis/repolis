@@ -18,39 +18,23 @@ const (
 	maxReachable = 400
 )
 
-// scopes is the resolved import graph: which namespaces each file can see,
-// and what local aliases stand for.
-//
-// The first version resolved a call by bare name across the whole repository,
-// preferring the same file and then the same directory. That is adequate for C,
-// which has one global namespace, and wrong for everything else: `layout::new`
-// and `camera::new` are different functions and a bare-name lookup cannot tell
-// them apart. Resolving imports is what makes more than one language possible.
+// scopes is the resolved import graph: which namespaces each file can see, and
+// what its local aliases stand for. Resolving imports is what makes more than
+// one language possible: bare-name lookup across the repo works for C's single
+// global namespace, but cannot tell `layout::new` from `camera::new`.
 type scopes struct {
-	sep string
-	// nsByFile maps a file to the namespace its symbols belong to.
-	nsByFile map[string]string
-	// visible maps a file to the namespaces it can see, with a rank.
-	visible map[string]map[string]int
-	// aliases maps a file's local alias to the path it stands for.
-	aliases map[string]map[string]string
-	// moduleScoped records, per file, whether a bare name is confined to the
-	// file's own module plus its explicit imports.
-	moduleScoped map[string]bool
-	// allNS is every namespace that actually defines something.
-	allNS map[string]bool
-	// bySuffix indexes namespaces by their final segment, for matching an
-	// import path against a namespace without scanning them all.
-	bySuffix map[string][]string
+	sep          string
+	nsByFile     map[string]string            // file -> namespace its symbols belong to
+	visible      map[string]map[string]int    // file -> namespaces it can see, ranked
+	aliases      map[string]map[string]string // file -> local alias -> path
+	moduleScoped map[string]bool              // file -> are bare names confined to its module?
+	allNS        map[string]bool              // namespaces that define something
+	bySuffix     map[string][]string          // final segment -> namespaces, for import matching
 }
 
-// lastSegment takes the final component of a path, using whichever separator
-// appears last.
-//
-// Checking the language separator first was wrong for Go: the separator is "."
-// and an import path is "github.com/owner/repo/internal/x", so the last dot is
-// inside the host name and the "segment" came back as
-// "com/owner/repo/internal/x".
+// lastSegment takes the final path component, using whichever separator
+// appears last: Go's separator is "." but its import paths contain a host
+// name, so preferring the separator yields "com/owner/repo/internal/x".
 func lastSegment(p, sep string) string {
 	iSlash := strings.LastIndex(p, "/")
 	iSep := -1
@@ -76,9 +60,8 @@ func buildScopes(raw *RawExtraction) *scopes {
 		bySuffix:     make(map[string][]string),
 	}
 
-	// A single repository can hold more than one language. The separator only
-	// matters for splitting qualified references, and mixing is rare enough
-	// that the dominant language's separator is the right default.
+	// A repo can hold several languages, but the separator only splits
+	// qualified references, so the dominant language's is a fine default.
 	counts := map[string]int{}
 	for _, f := range raw.Files {
 		counts[f.Language]++
@@ -120,10 +103,8 @@ func buildScopes(raw *RawExtraction) *scopes {
 				continue
 			}
 
-			// An alias stands for the full path as written, not for whichever
-			// prefix of it happens to be a module. `use a::b::area as alias`
-			// has to remember "area", or a later bare call to `alias` has no
-			// symbol name to look up.
+			// The alias stands for the full path, not the module prefix:
+			// `use a::b::area as alias` must remember "area".
 			if imp.Alias != "" {
 				if sc.aliases[f.Path] == nil {
 					sc.aliases[f.Path] = map[string]string{}
@@ -144,15 +125,13 @@ func buildScopes(raw *RawExtraction) *scopes {
 				}
 				break // first target that matched a real namespace wins
 			}
-			// An import matching nothing is an external dependency; it simply
-			// contributes no visibility.
+			// An import matching nothing is external: no visibility.
 		}
 		sc.visible[f.Path] = vis
 	}
 
-	// Transitive reach. A C file routinely calls a function whose header it
-	// picks up through another header, so stopping at direct includes would
-	// lose real edges.
+	// Transitive reach: a C file routinely calls through a header it picks up
+	// via another header.
 	for _, f := range raw.Files {
 		vis := sc.visible[f.Path]
 		if vis == nil {
@@ -182,9 +161,9 @@ func buildScopes(raw *RawExtraction) *scopes {
 	return sc
 }
 
-// match finds the namespaces an import path refers to: exact first, then by
-// path suffix, which is what turns `#include "git2/oid.h"` into
-// `include/git2/oid.h` and leaves external crates unmatched.
+// match finds the namespaces an import refers to: exact, then by path suffix,
+// which maps `#include "git2/oid.h"` onto `include/git2/oid.h` and leaves
+// external crates unmatched.
 func (sc *scopes) match(target string) []string {
 	if target == "" {
 		return nil
@@ -197,12 +176,10 @@ func (sc *scopes) match(target string) []string {
 	for _, ns := range sc.bySuffix[seg] {
 		switch {
 		case ns == target,
-			// The import names less than the namespace: `#include "oid.h"`
-			// against `include/git2/oid.h`.
+			// Import names less than the namespace.
 			strings.HasSuffix(ns, "/"+target),
 			sc.sep != "" && strings.HasSuffix(ns, sc.sep+target),
-			// The import names more than the namespace: Go writes the whole
-			// module path where the namespace is only the directory.
+			// Import names more than it: Go writes the whole module path.
 			strings.HasSuffix(target, "/"+ns):
 			out = append(out, ns)
 		}
@@ -211,14 +188,13 @@ func (sc *scopes) match(target string) []string {
 	return out
 }
 
-// rank scores how visible a namespace is from a file.
 func (sc *scopes) rank(fromFile, ns string) int {
 	if v, ok := sc.visible[fromFile]; ok {
 		if r, ok := v[ns]; ok {
 			return r
 		}
 	}
-	// Same directory is a weak signal, but a real one in flat C projects.
+	// Weak, but real in flat C projects.
 	if own, ok := sc.nsByFile[fromFile]; ok {
 		if dirOf(own) == dirOf(ns) {
 			return visSameDir
@@ -227,11 +203,9 @@ func (sc *scopes) rank(fromFile, ns string) int {
 	return visAnywhere
 }
 
-// expand turns a written qualifier into candidate namespaces, best first.
-//
-// The final segment of a path is often a type rather than a module
-// (`Lot::area` where Lot is `crate::layout::Item`), so the parent path is
-// offered too and the caller takes whichever resolves.
+// expand turns a written qualifier into candidate namespaces, best first. The
+// final segment is often a type rather than a module (`Lot::area`), so the
+// parent path is offered too and the caller takes whichever resolves.
 func (sc *scopes) expand(qualifier, fromFile string) []string {
 	if qualifier == "" {
 		return nil
@@ -254,8 +228,8 @@ func (sc *scopes) expand(qualifier, fromFile string) []string {
 		}
 	}
 
-	// `self::` / `super::` were already expanded at import time; a bare
-	// relative qualifier is resolved against the caller's own namespace.
+	// `self::`/`super::` are expanded at import time; a bare relative
+	// qualifier resolves against the caller's own namespace.
 	if own, ok := sc.nsByFile[fromFile]; ok && sc.sep != "" {
 		if !strings.Contains(q, sc.sep) && !sc.allNS[q] {
 			if nested := own + sc.sep + q; sc.allNS[nested] {
@@ -274,20 +248,13 @@ func (sc *scopes) expand(qualifier, fromFile string) []string {
 	return out
 }
 
-// IsModuleScoped reports whether bare names in this file are confined to its
-// own module plus explicit imports.
 func (sc *scopes) IsModuleScoped(fromFile string) bool { return sc.moduleScoped[fromFile] }
 
-// OwnNamespace is the namespace a file's own symbols live in.
 func (sc *scopes) OwnNamespace(fromFile string) string { return sc.nsByFile[fromFile] }
 
-// aliasTarget resolves a local alias to the real symbol name and the
-// namespaces to look for it in.
-//
-// `use crate::shapes::circle::area as circle_area` followed by a bare
-// `circle_area(1.0)` is the case this exists for: the call site never mentions
-// either the module or the real name, so without the alias table the edge is
-// simply lost - or worse, matched against an unrelated `area` elsewhere.
+// aliasTarget resolves a local alias to the real symbol name and where to look
+// for it. A bare `circle_area(1.0)` under `use ...::area as circle_area` names
+// neither the module nor the real name, so the edge is otherwise lost.
 func (sc *scopes) aliasTarget(name, fromFile string) (string, []string) {
 	aliases := sc.aliases[fromFile]
 	if aliases == nil {
@@ -310,8 +277,8 @@ func (sc *scopes) aliasTarget(name, fromFile string) (string, []string) {
 	return real, sc.match(parent)
 }
 
-// qualifierType returns the trailing segment of a qualifier, which for a
-// method call such as `Camera::new` is the receiver's type name.
+// qualifierType returns a qualifier's trailing segment, which for `Camera::new`
+// is the receiver's type name.
 func (sc *scopes) qualifierType(qualifier, fromFile string) string {
 	if qualifier == "" {
 		return ""

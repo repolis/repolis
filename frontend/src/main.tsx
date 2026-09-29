@@ -6,9 +6,8 @@ import { routeTree } from "./routeTree.gen";
 
 import "./index.css";
 
-// WebGPU compatibility shim for modern browsers (e.g. Chrome 130+) where deprecated limits
-// like 'maxInterStageShaderComponents' have been removed from the WebGPU specification, but are
-// still requested by wgpu 0.20 (used by Bevy 0.14).
+// wgpu 0.20 (Bevy 0.14) still requests WebGPU limits such as
+// 'maxInterStageShaderComponents' that Chrome 130+ has removed.
 if (typeof window !== "undefined") {
   const sanitizeLimits = (descriptor?: any, limits?: any) => {
     if (descriptor?.requiredLimits) {

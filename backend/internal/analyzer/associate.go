@@ -18,15 +18,10 @@ const (
 
 // Association sources, weakest last.
 const (
-	// SourceSyntax means the language stated the answer outright: a Rust
-	// `impl` block, a Go receiver, a method inside a class body. Nothing to
-	// infer and nothing to verify.
-	SourceSyntax = "syntax"
-	// SourceRule means a deterministic heuristic decided it. C only.
-	SourceRule = "rule"
-	// SourceLLM means the heuristics disagreed and a model broke the tie.
-	SourceLLM  = "llm"
-	SourceNone = "none"
+	SourceSyntax = "syntax" // the language stated it: `impl` block, Go receiver
+	SourceRule   = "rule"   // a deterministic heuristic decided it; C only
+	SourceLLM    = "llm"    // the heuristics disagreed and a model broke the tie
+	SourceNone   = "none"
 )
 
 // TypeEntry is one composite-type definition, keyed by a globally unique ID.
@@ -67,8 +62,7 @@ type SymbolTable struct {
 	language   string
 }
 
-// Language is the dominant language of the repository, used to describe the
-// task accurately in prompts.
+// Language is the repository's dominant language, used to word prompts.
 func (st *SymbolTable) Language() string { return st.language }
 
 func typeID(file, name string) string { return file + "::" + name }
@@ -82,16 +76,13 @@ func dirOf(path string) string {
 	return d
 }
 
-// norm lowercases and removes underscores so that snake_case and camelCase
-// spellings of the same concept compare equal.
+// norm makes snake_case and camelCase spellings compare equal.
 func norm(s string) string {
 	return strings.ToLower(strings.ReplaceAll(s, "_", ""))
 }
 
-// detectRepoPrefix finds the dominant module prefix of a codebase's function
-// names ("git_", "sqlite3", "csv_"). Stripping it is what lets prefix matching
-// connect `sqlite3VdbeAddOp3` to the type `Vdbe`, which is otherwise invisible
-// to a plain prefix test.
+// detectRepoPrefix finds the dominant function-name prefix ("git_", "sqlite3").
+// Stripping it is what connects `sqlite3VdbeAddOp3` to the type `Vdbe`.
 func detectRepoPrefix(funcs []RawFunction) string {
 	if len(funcs) < 12 {
 		return ""
@@ -137,8 +128,8 @@ func BuildSymbolTable(raw *RawExtraction) *SymbolTable {
 		}
 	}
 
-	// 1. Types, de-duplicated by ID (an #ifdef can define the same name twice
-	//    in one file); the richest definition wins.
+	// Types, de-duplicated by ID (an #ifdef can define one name twice in a
+	// file); the richest definition wins.
 	for _, s := range raw.Structs {
 		id := typeID(s.SourceFile, s.Name)
 		if idx, ok := st.byID[id]; ok {
@@ -175,19 +166,13 @@ func BuildSymbolTable(raw *RawExtraction) *SymbolTable {
 	return st
 }
 
-// resolve maps a bare type name to a concrete definition, preferring one the
-// caller can actually see.
-//
-// The previous version ranked by "same file, then same directory". That is a
-// proxy for visibility that only works when there is one global namespace.
-// Now the import graph answers the question directly, which is both more
-// accurate for C and the only thing that works for a language with modules.
+// resolve maps a bare type name to a definition, preferring one the caller can
+// actually see according to the import graph.
 func (st *SymbolTable) resolve(name, fromFile string) string {
 	return st.resolveIn(name, fromFile, nil)
 }
 
-// resolveIn is resolve, optionally restricted to a set of namespaces (used
-// when a reference was written with a qualifier).
+// resolveIn is resolve, restricted to the namespaces a qualifier named.
 func (st *SymbolTable) resolveIn(name, fromFile string, namespaces []string) string {
 	if name == "" {
 		return ""
@@ -216,8 +201,8 @@ func (st *SymbolTable) resolveIn(name, fromFile string, namespaces []string) str
 		if best != "" {
 			return best
 		}
-		// A qualifier that matches no known namespace means an external
-		// dependency; fall through rather than inventing a local match.
+		// A qualifier matching no known namespace is external; fall through
+		// rather than inventing a local match.
 	}
 
 	if len(idxs) == 1 {
@@ -240,7 +225,7 @@ func (st *SymbolTable) resolveIn(name, fromFile string, namespaces []string) str
 // resolveRef resolves a reference that may carry a written qualifier.
 func (st *SymbolTable) resolveRef(ref lang.Ref, fromFile string) string {
 	if ref.Qualifier == "" {
-		// The name itself may be a local alias for an imported symbol.
+		// The name may itself be a local alias for an imported symbol.
 		if real, namespaces := st.scopes.aliasTarget(ref.Name, fromFile); real != "" {
 			if id := st.resolveIn(real, fromFile, namespaces); id != "" {
 				return id
@@ -252,9 +237,8 @@ func (st *SymbolTable) resolveRef(ref lang.Ref, fromFile string) string {
 }
 
 // prefixScoreIdx returns the length of type i's normalised name when the
-// function name starts with it, after optionally stripping the repo-wide
-// module prefix. Normalised type names are precomputed once, so this is a
-// pointer comparison loop rather than a per-call allocation.
+// function name starts with it, with the repo prefix optionally stripped.
+// Names are normalised once up front, so this allocates nothing.
 func (st *SymbolTable) prefixScoreIdx(fnNorm, fnStripped string, i int) int {
 	t := st.normNames[i]
 	if len(t) < 3 {
@@ -310,9 +294,9 @@ func (st *SymbolTable) bestPrefixType(fn *RawFunction) (string, int) {
 	return st.resolve(st.Types[bestIdx].Name, fn.SourceFile), bestPS
 }
 
-// candidateSet is the closed list the LLM chooses from. Keeping it small and
-// derived from the AST is what stops a small model hallucinating: it cannot
-// name a type that is not in front of it.
+// candidateSet is the closed list the LLM chooses from. Small and AST-derived
+// is what stops a small model hallucinating: it cannot name a type it was not
+// shown.
 func (st *SymbolTable) candidateSet(fn *RawFunction) []string {
 	type cand struct {
 		id    string
@@ -387,12 +371,8 @@ func (st *SymbolTable) candidateSet(fn *RawFunction) []string {
 func (st *SymbolTable) associate(fn *RawFunction) *Assoc {
 	a := &Assoc{Fn: fn, Confidence: ConfNone, Source: SourceNone}
 
-	// R0: the language already said so.
-	//
-	// Rust `impl Camera { fn frame(&self) }`, a Go receiver, a method inside a
-	// class body - the owning type is syntax, not a guess. Everything below
-	// this point exists because C has no such construct, which makes C the
-	// hardest language this tool supports rather than the easiest.
+	// R0: the language already said so. Everything below exists only because
+	// C has no such construct.
 	if fn.Receiver != "" {
 		if id := st.resolve(fn.Receiver, fn.SourceFile); id != "" {
 			a.Chosen, a.Confidence, a.Source = id, ConfHigh, SourceSyntax
@@ -400,10 +380,9 @@ func (st *SymbolTable) associate(fn *RawFunction) *Assoc {
 		return a
 	}
 
-	// No receiver in a language that has them means the function is genuinely
-	// free. Running C's heuristics here would attach `fn squarify(&[Item])`
-	// to Item purely because of its first parameter, inventing a method the
-	// language never declared.
+	// No receiver, in a language that has them, means genuinely free. C's
+	// heuristics would attach `fn squarify(&[Item])` to Item on its first
+	// parameter alone, inventing a method the language never declared.
 	if st.syntactic[fn.SourceFile] {
 		return a
 	}
@@ -446,12 +425,9 @@ func (st *SymbolTable) associate(fn *RawFunction) *Assoc {
 	case byPrefix != "" && byParam != "" && byPrefix == byParam:
 		a.Chosen, a.Confidence, a.Source = byPrefix, ConfHigh, SourceRule
 	case byPrefix != "" && byParam != "" && byPrefix != byParam:
-		// Genuine ambiguity: exactly the case a naming rule cannot settle.
-		// A tentative answer is still recorded. Leaving Chosen empty here
-		// meant that if the LLM was unavailable, slow, or out of budget the
-		// function was dropped to an orphan entirely - losing data that the
-		// rules had a reasonable opinion about. The name prefix is the better
-		// prior in C, so it wins the tie-break and the LLM may overturn it.
+		// Genuine ambiguity, but a tentative answer is still recorded so an
+		// unavailable or budgeted-out LLM does not orphan the function. The
+		// name prefix is the better prior in C; the LLM may overturn it.
 		a.Chosen, a.Confidence, a.Source = byPrefix, ConfLow, SourceRule
 	case byParam != "":
 		a.Chosen, a.Confidence, a.Source = byParam, ConfHigh, SourceRule
@@ -471,9 +447,8 @@ func (st *SymbolTable) associate(fn *RawFunction) *Assoc {
 	return a
 }
 
-// verify is the deterministic check every association must pass, including
-// ones proposed by the LLM. An attribution that no AST evidence supports is
-// discarded rather than silently inflating a building's height.
+// verify is the check every association must pass, the LLM's included: an
+// attribution no AST evidence supports would silently inflate a building.
 func (st *SymbolTable) verify(fn *RawFunction, typeID string) bool {
 	idx, ok := st.byID[typeID]
 	if !ok {
@@ -500,14 +475,10 @@ func (st *SymbolTable) verify(fn *RawFunction, typeID string) bool {
 	return false
 }
 
-// Residual returns the associations the rules could not settle, ordered so
-// that the most consequential ambiguities are adjudicated first.
-//
-// Each entry already carries a tentative answer, so a caller is free to stop
-// early: a budget then trades accuracy for latency without ever losing a
-// function. Impact is measured by how much state the competing types hold,
-// because that is what a wrong answer visibly distorts — a misattributed
-// function changes a building's height.
+// Residual returns what the rules could not settle, most consequential first.
+// Every entry already carries a tentative answer, so a caller may stop early
+// and trade accuracy for latency without losing a function. Impact is the
+// state the competing types hold, since that is what a wrong answer distorts.
 func (st *SymbolTable) Residual() []*Assoc {
 	var out []*Assoc
 	for _, a := range st.Assocs {
@@ -547,8 +518,7 @@ func (st *SymbolTable) TypeName(id string) string {
 	return ""
 }
 
-// ApplyLLM records an adjudicated choice, after the same verification the
-// rule path goes through.
+// ApplyLLM records an adjudicated choice, after the same verification.
 func (st *SymbolTable) ApplyLLM(a *Assoc, chosenID string) bool {
 	if chosenID == "" {
 		return false
@@ -568,8 +538,8 @@ func (st *SymbolTable) ApplyLLM(a *Assoc, chosenID string) bool {
 	return changed
 }
 
-// ClearTentative marks a function as unattached. Used when the model
-// explicitly answers NONE, which is a real answer rather than a failure.
+// ClearTentative unattaches a function: the model answered NONE, which is an
+// answer rather than a failure.
 func (st *SymbolTable) ClearTentative(a *Assoc) {
 	a.Chosen, a.Confidence, a.Source = "", ConfNone, SourceNone
 }

@@ -41,8 +41,7 @@ export default function RenderPage() {
   const repoUrl = `https://github.com/${owner}/${repo}`;
 
   const [phase, setPhase] = useState<Phase>("booting");
-  // Separate from `phase`: a regeneration keeps the existing city on screen
-  // rather than throwing the user back to a full-screen loading panel.
+  // Separate from `phase`: a regeneration keeps the city on screen.
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("Booting engine…");
   const [error, setError] = useState<string | null>(null);
@@ -85,9 +84,8 @@ export default function RenderPage() {
       setAnchor(null);
       setPath(null);
 
-      // Restore the linked view once, after the first city arrives. The
-      // refinement pass sends a second city; re-applying then would yank the
-      // camera back from wherever the user had moved to.
+      // Once only: the refinement pass sends a second city, and re-applying
+      // would yank the camera back from wherever the user had moved to.
       if (!restoredRef.current) {
         restoredRef.current = true;
         const v = restoreRef.current;
@@ -128,8 +126,7 @@ export default function RenderPage() {
     sourceRef.current = null;
     setBusy(true);
     setError(null);
-    // A regeneration leaves the current city on screen; only the very first
-    // load is allowed to take over with the full-screen panel.
+    // Only the first load takes over with the full-screen panel.
     if (!refresh) setPhase("working");
     setStatus(refresh ? "Regenerating\u2026" : "Contacting server\u2026");
     try {
@@ -161,10 +158,9 @@ export default function RenderPage() {
         return;
       }
 
-      // Progress arrives over SSE, and so does the draft city: the
-      // deterministic pass is published in seconds and the LLM pass replaces
-      // it when it lands, so the city is usable long before the model
-      // finishes.
+      // The draft city arrives over SSE too: the deterministic pass lands in
+      // seconds and the LLM pass replaces it, so the city is usable long
+      // before the model finishes.
       const src = new EventSource(`/api/jobs/${data.job_id}/events`, {
         withCredentials: true,
       });
@@ -290,8 +286,8 @@ export default function RenderPage() {
     setSelection({ type: "None" });
   }, []);
 
-  // Mirror the view into the fragment. replaceState, and only while the user
-  // is idle, so orbiting does not bury the back button in history entries.
+  // replaceState, and only while idle, so orbiting does not bury the back
+  // button in history entries.
   useEffect(() => {
     if (phase !== "ready") return;
     const write = () => {

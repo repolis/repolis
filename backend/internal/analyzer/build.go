@@ -11,10 +11,9 @@ import (
 	"github.com/repolis/repolis/backend/internal/models"
 )
 
-// Draft is the fully deterministic city: everything that can be derived from
-// the AST, the call graph and git history, with no LLM involvement at all.
-// It is renderable on its own, which is what lets the API stream a usable
-// city in seconds and refine it later.
+// Draft is the fully deterministic city: everything derivable from the AST,
+// the call graph and git history, with no LLM at all. It is renderable on its
+// own, which is what lets the API stream a usable city in seconds.
 type Draft struct {
 	Buildings []models.Building
 	Edges     []models.DependencyEdge
@@ -29,17 +28,15 @@ type Draft struct {
 	byID map[string]int
 }
 
-// BuildDraft assembles the deterministic city.
-//
-// The symbol table is passed in so the pipeline can assemble twice from the
-// same table: once with rule-only associations (emitted immediately) and again
-// after LLM adjudication has settled the ambiguous ones.
+// BuildDraft assembles the deterministic city. The symbol table is passed in
+// so the pipeline can assemble twice from it: once with rule-only
+// associations, again after the LLM has settled the ambiguous ones.
 func BuildDraft(raw *RawExtraction, history map[string]*git.FileHistory, st *SymbolTable) *Draft {
 	if st == nil {
 		st = BuildSymbolTable(raw)
 	}
 
-	// 1. Owner of every function: its associated type, else its file's module.
+	// Owner of every function: its associated type, else its file's module.
 	ownerOf := make(map[string]string, len(raw.Functions))
 	for _, a := range st.Assocs {
 		if a.Chosen != "" {
@@ -63,8 +60,8 @@ func BuildDraft(raw *RawExtraction, history map[string]*git.FileHistory, st *Sym
 	for i := range d.Clusters {
 		d.Clusters[i].SymbolPrefix = st.SymbolPrefix()
 	}
-	// Words and path segments shared by most districts identify none of them,
-	// so both the fallback names and the model prompts drop them.
+	// Words shared by most districts identify none of them, so neither the
+	// fallback names nor the prompts use them.
 	noise := append(CommonSymbolTokens(d.Clusters), CommonDirSegments(d.Clusters)...)
 	for i := range d.Clusters {
 		d.Clusters[i].Noise = noise
@@ -111,7 +108,7 @@ func (d *Draft) assemble(raw *RawExtraction, st *SymbolTable, ownerOf map[string
 		fileNS[f.Path] = f.Namespace
 	}
 
-	// 2. One building per concrete type definition.
+	// One building per concrete type definition.
 	for _, t := range st.Types {
 		methods := methodsOf[t.ID]
 		sort.Strings(methods)
@@ -130,11 +127,9 @@ func (d *Draft) assemble(raw *RawExtraction, st *SymbolTable, ownerOf map[string
 		})
 	}
 
-	// 3. One "module" building per file that still has unattached functions.
-	//
-	// Previously these were computed and thrown away (the orphan slice was
-	// only ever passed to a log line), so free functions — most of a C
-	// codebase — were invisible. libcsv rendered as three buildings.
+	// One "module" building per file with unattached functions left. Without
+	// these, free functions - most of a C codebase - are invisible, and
+	// libcsv renders as three buildings.
 	moduleFuncs := make(map[string][]string)
 	for _, a := range st.Assocs {
 		if a.Chosen == "" {
@@ -179,16 +174,14 @@ func nonNil(s []string) []string {
 	return s
 }
 
-// attachHistory copies git metrics onto each building and turns raw churn into
-// a percentile so the renderer has a bounded 0..1 signal regardless of how
-// active the repository is.
+// attachHistory copies git metrics onto each building, turning raw churn into
+// a percentile so the renderer gets a bounded signal whatever the repo's pace.
 func (d *Draft) attachHistory(history map[string]*git.FileHistory) {
 	now := time.Now()
 	churns := make([]int, 0, len(d.Buildings))
 
-	// The repository's own epoch. Building ages are expressed as days since
-	// this, so the timeline is a plain number line with no date handling in
-	// the renderer.
+	// The repo's own epoch: ages are days since it, so the timeline is a
+	// plain number line and the renderer handles no dates.
 	var first, last time.Time
 	for _, h := range history {
 		if h.FirstSeen.IsZero() {
@@ -285,12 +278,9 @@ func (d *Draft) computeStats(raw *RawExtraction, st *SymbolTable) {
 }
 
 // computeCoupling derives fan-in, fan-out and instability from the finished
-// edge set.
-//
-// Note what is deliberately absent: a "dead code" flag. Zero fan-in looks like
-// dead code and usually is not - every public function of a library has no
-// internal callers. The numbers are reported as facts and left for the user to
-// filter on, rather than turned into a judgement the analysis cannot support.
+// edge set. Deliberately absent: a "dead code" flag - zero fan-in usually
+// means a library's public API, not dead code, and that judgement is the
+// user's to make from the numbers.
 func (d *Draft) computeCoupling() {
 	in := make(map[string]int, len(d.Buildings))
 	out := make(map[string]int, len(d.Buildings))
@@ -310,9 +300,8 @@ func (d *Draft) computeCoupling() {
 		fanIns = append(fanIns, b.FanIn)
 	}
 
-	// A hub is defined by its own repository, not by an absolute number: what
-	// counts as heavily depended upon differs wildly between a library and an
-	// application.
+	// Relative to this repo: "heavily depended upon" differs wildly between
+	// a library and an application.
 	sort.Ints(fanIns)
 	cutoff := 0
 	if n := len(fanIns); n > 0 {
@@ -326,12 +315,9 @@ func (d *Draft) computeCoupling() {
 	}
 }
 
-// FallbackName derives a district name with no LLM.
-//
-// It has to be good, not merely present: it is what every district is called
-// before the model answers, what a district is called if the model is
-// unavailable, and what replaces a model name that turned out to be vague.
-// The dominant directory locates the code; the largest symbol says what it is.
+// FallbackName derives a district name with no LLM. It has to be good: it is
+// the name before the model answers, without a model, and after a vague model
+// answer. The dominant directory locates the code, the largest symbol names it.
 func (c Cluster) FallbackName() string {
 	banned := make(map[string]bool, len(c.Noise))
 	for _, w := range c.Noise {
@@ -369,8 +355,8 @@ func (c Cluster) FallbackName() string {
 		}
 	}
 
-	// The directory locates the code and reads as a place name; pairing it
-	// with an unrelated symbol produced labels like "Cli / Str".
+	// The directory reads as a place name on its own; pairing it with an
+	// unrelated symbol produced labels like "Cli / Str".
 	switch {
 	case dir != "":
 		return dir
@@ -420,7 +406,7 @@ func (c Cluster) FallbackSummary() string {
 	return fmt.Sprintf("%d related code entities", len(c.Buildings))
 }
 
-// BuildingByID gives the pipeline and the /api/explain handler a lookup.
+// BuildingByID gives the pipeline and /api/explain a lookup.
 func (d *Draft) BuildingByID(id string) (models.Building, bool) {
 	if i, ok := d.byID[id]; ok {
 		return d.Buildings[i], true

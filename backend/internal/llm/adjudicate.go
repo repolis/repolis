@@ -11,44 +11,31 @@ import (
 	"github.com/repolis/repolis/backend/internal/logger"
 )
 
-// adjudicateSystem frames one decision at a time.
-//
-// Batching was tried first and abandoned. Measured against qwen2.5:1.5b on the
-// residual set of tsoding/nothing, multi-item prompts silently dropped the
-// required `N.` numbering and collapsed the whole batch to a single bare word,
-// losing every answer; the failure was sensitive to unrelated details of the
-// prompt, so it could not be tuned away. One item per call is trivially
-// formatted, scored 11/11 valid on the same set, and costs 68 ms each because
-// the output is three tokens. A batch of six saves prompt overhead that the
-// decode time dwarfs anyway.
+// One decision per call. Batching was measured and abandoned: qwen2.5:1.5b
+// dropped the required numbering and collapsed a whole batch to one bare word,
+// unpredictably. One item scored 11/11 valid at 68 ms each, since the output
+// is three tokens and prompt overhead is dwarfed by decode time.
 const adjudicateSystemFmt = `You are given a %s function and a list of type names.
 Reply with exactly one name copied from the list, or NONE.
 Pick the type the function reads or modifies most: usually the one it is named after, or the type of its first pointer parameter.
 Reply with the name only. No punctuation, no explanation.`
 
-// AdjudicateAssociations resolves the associations the deterministic rules
-// could not settle.
+// AdjudicateAssociations settles what the rules could not - typically where
+// the naming and first-parameter conventions disagree, as in sqlite's
+// `vdbeCommit(sqlite3 *db, Vdbe *p)`. The rules handle 485 of nothing's 496
+// functions alone.
 //
-// Only genuinely ambiguous functions reach this point - typically where the
-// naming convention and the first-parameter convention disagree, such as
-// sqlite's `static int vdbeCommit(sqlite3 *db, Vdbe *p)`. On tsoding/nothing
-// the rules settle 485 of 496 functions for free, leaving 11 here.
-//
-// Every answer is checked twice: it must be a member of the candidate list
-// shown in the prompt, and it must survive the AST verifier. An unverifiable
-// answer becomes an orphan rather than a wrong building height.
+// Every answer must both appear in the candidate list and survive the AST
+// verifier; an unverifiable one becomes an orphan, not a wrong height.
 func (c *Client) AdjudicateAssociations(ctx context.Context, st *analyzer.SymbolTable, progress func(done, total int)) int {
 	residual := st.Residual()
 	if len(residual) == 0 {
 		return 0
 	}
 
-	// Budget. On libgit2 the rules leave ~2500 ambiguous functions; at roughly
-	// ten decisions a second that is four minutes of a user watching a city
-	// they can already use. Residual() orders by how much a wrong answer
-	// distorts the picture, and every entry already carries a tentative
-	// rule-based answer, so truncating costs accuracy on the least
-	// consequential cases rather than losing them.
+	// libgit2 leaves ~2500 ambiguous functions, four minutes at ten a second.
+	// Residual() is ordered by impact and every entry already has a tentative
+	// answer, so truncating costs accuracy only on the least consequential.
 	budget := 600
 	if v := os.Getenv("LLM_ASSOC_BUDGET"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n >= 0 {

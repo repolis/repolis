@@ -84,8 +84,7 @@ func TestGoAssociationIsSyntacticOnly(t *testing.T) {
 	}
 }
 
-// Two packages export `Area`. The call in main.go is qualified by an aliased
-// import and must reach geom, never util.
+// Two packages export `Area`; the aliased call in main.go must reach geom.
 func TestGoImportResolution(t *testing.T) {
 	d := goDraft(t)
 
@@ -100,9 +99,8 @@ func TestGoImportResolution(t *testing.T) {
 
 	const app = "main.go::App"
 
-	// geom exports nothing but Area. If `geo.Area(2.0)` had resolved to
-	// util.Area - the same bare name, a different package - this edge would
-	// not exist at all, so its presence is the disambiguation.
+	// geom exports only Area, so this edge existing at all is the proof that
+	// `geo.Area(2.0)` did not resolve to util.Area.
 	if !edge(app, "geom/geom.go::<module>") {
 		t.Error("aliased import `geo \"example.com/app/geom\"` resolved away from geom")
 	}
@@ -113,10 +111,8 @@ func TestGoImportResolution(t *testing.T) {
 		t.Error("method call a.s.Put did not reach Store")
 	}
 
-	// main.go imports "fmt" and "os" and calls into both. The standard
-	// library is not part of the repository, so neither may produce an edge -
-	// and an import of "os" must not be suffix-matched onto some unrelated
-	// local directory either.
+	// The standard library is not in the repository, so calls into "fmt" and
+	// "os" produce no edges - and "os" must not suffix-match a local dir.
 	for _, e := range d.Edges {
 		if e.Target == "" {
 			t.Errorf("edge with empty target from %s", e.Source)
@@ -165,9 +161,8 @@ func TestGoTypesAndFields(t *testing.T) {
 	}
 }
 
-// A method name is unique per type, not per file. Three stateless codecs each
-// declaring Name and Ext used to collapse onto whichever was parsed last,
-// because the function key was file+name.
+// A method name is unique per type, not per file: with a file+name key, three
+// codecs declaring Name and Ext collapse onto whichever parsed last.
 func TestGoSameMethodNameOnSeveralTypes(t *testing.T) {
 	d := goDraft(t)
 	methods := map[string][]string{}

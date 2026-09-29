@@ -21,9 +21,9 @@ func (cLang) Separator() string         { return "" }
 func (cLang) SyntacticMethods() bool { return false }
 func (cLang) ModuleScoped() bool     { return false }
 
-// Namespace: C has one global namespace, so the file itself is the scope. It
-// carries no meaning for name lookup, but it lets the resolver rank a symbol
-// the caller actually includes above an identically named one it does not.
+// Namespace: C has one global namespace, so the file is the scope. It means
+// nothing for lookup, but lets the resolver rank an included symbol above an
+// identically named one that is not included.
 func (cLang) Namespace(relPath string) string { return relPath }
 
 // ImportTargets: an #include names a file. Namespaces are file paths, so a
@@ -85,9 +85,9 @@ func cIsTypeSpecifier(t string) bool {
 	return t == "struct_specifier" || t == "union_specifier" || t == "enum_specifier"
 }
 
-// cBodyList returns the member list, or nil for a forward declaration or a
-// bare type reference. `struct Level *p;` also contains a struct_specifier;
-// recording those as definitions is what used to overwrite the real ones.
+// cBodyList returns the member list, nil for a forward declaration or a bare
+// reference: `struct Level *p;` is also a struct_specifier, and recording it
+// as a definition overwrites the real one.
 func cBodyList(n *sitter.Node) *sitter.Node {
 	if b := n.ChildByFieldName("body"); b != nil {
 		return b
@@ -140,9 +140,7 @@ func cMembers(body *sitter.Node, src []byte) ([]string, []string) {
 	Children(body, func(_ int, ch *sitter.Node) {
 		switch ch.Type() {
 		case "field_declaration":
-			// `int x, y;` is one declaration with two declarators; reading
-			// only the first undercounts the footprint of every struct that
-			// uses the comma form.
+			// `int x, y;` is one declaration with two declarators.
 			fields = append(fields, cDeclaratorNames(ch, src)...)
 			if t := cBaseType(ch.ChildByFieldName("type"), src); t != "" {
 				types = append(types, t)
@@ -238,9 +236,8 @@ func cFunc(node *sitter.Node, src []byte) *FuncDef {
 		LOC:        Lines(node),
 		Start:      node.StartByte(),
 		End:        node.EndByte(),
-		// C has no syntactic receiver. That absence is the entire reason the
-		// association ladder exists; every other supported language fills
-		// Receiver in directly.
+		// C has no syntactic receiver; that absence is the whole reason the
+		// association ladder exists.
 		Receiver: "",
 	}
 	if body := node.ChildByFieldName("body"); body != nil {
@@ -283,9 +280,8 @@ func cBodyRefs(n *sitter.Node, src []byte, fn *FuncDef) {
 				case "identifier":
 					fn.Calls = append(fn.Calls, Ref{Name: Text(f, src)})
 				case "field_expression":
-					// p->handler(...): C's vtable idiom. The member name often
-					// matches a real function, but there is no type to qualify
-					// it with, so it resolves on name alone.
+					// C's vtable idiom: the member often names a real function,
+					// but there is no type to qualify it with.
 					if fld := f.ChildByFieldName("field"); fld != nil {
 						fn.Calls = append(fn.Calls, Ref{Name: Text(fld, src), Method: true})
 					}

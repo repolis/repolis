@@ -21,14 +21,10 @@ var allowedHosts = map[string]bool{
 
 var repoPathRe = regexp.MustCompile(`^/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?(\.git)?$`)
 
-// NormalizeRepoURL validates a user-supplied repository URL and returns a
-// canonical https form.
-//
-// This is a hard security boundary, not a convenience check. `git` interprets
-// some strings as transports that execute shell commands (`ext::sh -c ...`),
-// and a leading "-" is parsed as a command-line flag. Passing unvalidated
-// input to `git clone` / `git ls-remote` on an unauthenticated endpoint is
-// remote code execution.
+// NormalizeRepoURL validates a user-supplied URL into canonical https form.
+// A security boundary, not a convenience check: git reads some strings as
+// shell-executing transports (`ext::sh -c ...`) and a leading "-" as a flag,
+// so unvalidated input to `git clone` is remote code execution.
 func NormalizeRepoURL(raw string) (string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" || len(raw) > 512 {
@@ -74,9 +70,9 @@ func gitEnv() []string {
 	)
 }
 
-// CloneRepo makes a blobless partial clone: full commit and tree history (which
-// ExtractHistory needs) but blobs fetched lazily at checkout. Much less data
-// than the previous full clone, and unlike --depth it keeps churn accurate.
+// CloneRepo makes a blobless partial clone: the full commit and tree history
+// ExtractHistory needs, blobs fetched lazily. Unlike --depth it keeps churn
+// accurate.
 func CloneRepo(repoURL string, sessionID string) (string, error) {
 	clonePath, err := os.MkdirTemp("", "repolis-session-"+sessionID+"-*")
 	if err != nil {

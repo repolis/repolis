@@ -2,13 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import type { CitySummary } from "./types";
 
 /**
- * Scrubs the city back through its own history.
- *
- * A building appears on the day its file first appeared, which comes free from
- * the `git log` pass the backend already runs. Nothing is re-parsed and no
- * commit is checked out, so scrubbing is instant. What this shows is when each
- * part of the system came into existence; it does not show buildings growing,
- * which would need metrics computed per commit.
+ * Scrubs the city back through its own history. A building appears on the day
+ * its file did, which comes free from the backend's `git log` pass: nothing is
+ * re-parsed and no commit is checked out, so scrubbing is instant. It shows
+ * when each part came into existence, not buildings growing.
  */
 export function Timeline({
   summary,
@@ -33,7 +30,7 @@ export function Timeline({
     let last = performance.now();
     let current = day ?? 0;
     const step = (now: number) => {
-      // Roughly twelve seconds for the whole history, regardless of its length.
+      // Roughly twelve seconds for the whole history, whatever its length.
       current += ((now - last) / 12000) * total;
       last = now;
       if (current >= total) {
@@ -50,7 +47,7 @@ export function Timeline({
     return () => {
       if (raf.current !== null) cancelAnimationFrame(raf.current);
     };
-    // `day` is intentionally not a dependency: it is the animation's output.
+    // `day` is the animation's output, not a dependency.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playing, total, onChange]);
 

@@ -37,8 +37,8 @@ func TestRustNamespaces(t *testing.T) {
 	}
 }
 
-// An `impl` block states the owner. Nothing should be guessed, and a free
-// function must stay free however suggestive its parameters are.
+// An `impl` block states the owner: nothing is guessed, and a free function
+// stays free however suggestive its parameters.
 func TestRustAssociationIsSyntacticOnly(t *testing.T) {
 	raw, err := ExtractRepository(rustFixture)
 	if err != nil {
@@ -72,8 +72,7 @@ func TestRustAssociationIsSyntacticOnly(t *testing.T) {
 		}
 	}
 
-	// `pub fn bounding(a: &Rect, b: &Rect) -> Rect` is a free function. C's
-	// first-parameter rule would claim it for Rect; Rust must not.
+	// C's first-parameter rule would claim `bounding` for Rect; Rust must not.
 	b := get("bounding")
 	if b.Receiver() != "" {
 		t.Fatalf("bounding has receiver %q", b.Receiver())
@@ -93,8 +92,7 @@ func TestRustAssociationIsSyntacticOnly(t *testing.T) {
 	}
 }
 
-// The point of import resolution: two functions named `area` exist, and the
-// call in lib.rs must reach the one that was actually imported.
+// Two functions named `area` exist; the call must reach the imported one.
 func TestRustImportResolutionPicksTheImportedSymbol(t *testing.T) {
 	d := rustDraft(t)
 
@@ -103,8 +101,7 @@ func TestRustImportResolutionPicksTheImportedSymbol(t *testing.T) {
 		byID[b.ID] = true
 	}
 
-	// `use crate::shapes::circle::{Circle, area as circle_area}` then
-	// `circle_area(1.0)` must land on circle.rs, never on util.rs.
+	// `area as circle_area` then `circle_area(1.0)` lands on circle.rs.
 	var hitCircle, hitUtil bool
 	for _, e := range d.Edges {
 		if e.Source != "src/lib.rs::Canvas" {
@@ -121,8 +118,8 @@ func TestRustImportResolutionPicksTheImportedSymbol(t *testing.T) {
 		t.Error("aliased import circle_area did not resolve to shapes::circle")
 	}
 	if hitUtil {
-		// util::clamp is also called, so a util edge is legitimate; this only
-		// fails if circle_area resolved there instead.
+		// A util edge is legitimate (clamp); this fails only if circle_area
+		// resolved there.
 		if !hitCircle {
 			t.Error("circle_area resolved to util::area")
 		}

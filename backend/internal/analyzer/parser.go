@@ -45,19 +45,11 @@ var binaryExts = map[string]bool{
 	".a": true, ".so": true, ".lib": true, ".dll": true, ".dylib": true, ".o": true,
 }
 
-// A self-contained build system of its own. CMakeLists.txt and Makefile.am
-// are deliberately absent: they appear in almost every subdirectory of a
-// CMake or autotools project, so treating them as evidence of vendoring
-// wrongly removed libgit2's first-party examples/ tree.
-// isVendoredDir detects a third-party tree checked into the repository.
-//
-// The only signal kept is a licence file sitting next to a pre-compiled
-// binary, because every cheaper one produced false positives on real
-// projects. A README meant libgit2 lost its examples; a nested build manifest
-// meant three of ripgrep's own crates were dropped, since a Cargo workspace
-// member owns a Cargo.toml exactly like a vendored library does. Directory
-// names that really do mean vendoring are handled by ignoredDirs above, which
-// is both accurate and cheap.
+// isVendoredDir detects a third-party tree checked into the repository. The
+// only signal left is a licence file next to a pre-compiled binary; every
+// cheaper one had false positives (a README cost libgit2 its examples, a
+// nested manifest cost ripgrep three of its own workspace crates). Directory
+// names that really do mean vendoring are handled by ignoredDirs above.
 func isVendoredDir(dirPath string) bool {
 	if firstPartyDirs[strings.ToLower(filepath.Base(dirPath))] {
 		return false
@@ -95,9 +87,8 @@ type parseOutput struct {
 	funcs   []RawFunction
 }
 
-// ExtractRepository walks the repo and extracts all structural data in
-// parallel. Parsing is pure CPU work with no shared state, so it scales
-// linearly with cores; the previous version was single-threaded.
+// ExtractRepository walks the repo and extracts everything in parallel:
+// parsing is pure CPU work with no shared state, so it scales with cores.
 func ExtractRepository(clonePath string) (*RawExtraction, error) {
 	var jobs []parseJob
 	var skipped []string
@@ -159,8 +150,8 @@ func ExtractRepository(clonePath string) (*RawExtraction, error) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			// One parser per worker: tree-sitter parsers are not goroutine safe,
-			// but creating one per file is wasteful.
+			// Per worker: tree-sitter parsers are not goroutine safe, and one
+			// per file is wasteful.
 			parsers := make(map[string]*sitter.Parser)
 			for idx := range jobCh {
 				j := jobs[idx]
@@ -204,8 +195,7 @@ func parseFile(parser *sitter.Parser, l lang.Language, fullPath, relPath string)
 	if err != nil {
 		return parseOutput{}, err
 	}
-	// Guard against generated blobs (amalgamations, tables) that blow up
-	// parse time for no analytical value.
+	// Generated blobs (amalgamations, tables) cost parse time for nothing.
 	if len(content) > 4*1024*1024 {
 		return parseOutput{}, fmt.Errorf("file too large (%d bytes)", len(content))
 	}

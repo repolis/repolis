@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use serde::Serialize;
 
-/// Lightweight payload for the cursor tooltip. Kept small because it is
-/// dispatched to JS on every hover change.
+/// Payload for the cursor tooltip, kept small: dispatched to JS on every
+/// hover change.
 #[derive(Serialize, Clone, Debug, Default)]
 pub struct HoverInfo {
     pub kind: String, // "building" | "district" | "link"
@@ -82,8 +82,8 @@ pub struct CitySummary {
     pub index: Vec<IndexEntry>,
 }
 
-/// The result of a path query, sent back so the panel can name the hops.
-/// Highlighting alone leaves the user guessing at what was found.
+/// The result of a path query: highlighting alone leaves the user guessing at
+/// what was found.
 #[derive(Serialize, Clone, Debug, Default)]
 pub struct PathInfo {
     pub from_id: String,
@@ -124,14 +124,12 @@ pub enum SelectPayload {
 pub struct Pickable {
     pub info: Box<BuildingInfo>,
     pub district_idx: usize,
-    /// Footprint in district-local space; picking rotates the ray into this
-    /// frame once per district rather than per building.
+    /// District-local footprint: picking rotates the ray once per district.
     pub local_min: Vec2,
     pub local_max: Vec2,
     pub y_min: f32,
     pub y_max: f32,
-    /// The building's colour under the typology view, kept so switching colour
-    /// mode never has to re-read the city map.
+    /// Typology colour, so switching mode never re-reads the city map.
     pub typology_rgb: [f32; 3],
 }
 

@@ -2,9 +2,8 @@ package analyzer
 
 import "strings"
 
-// Typologies is the closed set the renderer knows how to colour. It is also
-// the exact list handed to the LLM, so the model picks from an enumeration
-// rather than inventing a label.
+// Typologies is the closed set the renderer can colour, and the exact list
+// handed to the LLM so it picks rather than invents.
 var Typologies = []string{
 	"core", "data", "network", "security", "interface",
 	"utility", "config", "test", "example", "unknown",
@@ -21,9 +20,8 @@ var typologySet = func() map[string]bool {
 // IsTypology reports whether t is exactly one of the allowed values.
 func IsTypology(t string) bool { return typologySet[strings.ToLower(strings.TrimSpace(t))] }
 
-// typologyHints are ordered most-specific first. The previous fuzzy matcher
-// checked "core" (via "system"/"main"/"engine") before "test", so a typology
-// of "test system" classified as core.
+// Most-specific first: checking "core" before "test" classifies "test system"
+// as core.
 var typologyHints = []struct {
 	needles  []string
 	typology string

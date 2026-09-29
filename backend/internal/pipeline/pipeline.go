@@ -8,9 +8,8 @@
 //	Pass 2 (LLM, tens of seconds): adjudicate the ambiguous associations and
 //	        name the districts, then re-assemble.
 //
-// Publishing pass 1 immediately is what decouples "the city is usable" from
-// "the local model has finished". It also means an LLM outage degrades to
-// directory-named districts rather than to nothing.
+// Publishing pass 1 immediately decouples "the city is usable" from "the model
+// has finished", and degrades an LLM outage to directory-named districts.
 package pipeline
 
 import (
@@ -78,8 +77,8 @@ func Refine(ctx context.Context, s *State, client *llm.Client, report Reporter) 
 		report(Stage{Name: "associating", Done: done, Total: total})
 	})
 
-	// Re-assemble: adjudication moves functions between buildings, which
-	// changes heights, the call graph and therefore the clustering.
+	// Adjudication moves functions between buildings, which changes heights,
+	// the call graph and so the clustering.
 	draft := analyzer.BuildDraft(s.Raw, s.History, s.Symbols)
 
 	report(Stage{Name: "naming"})

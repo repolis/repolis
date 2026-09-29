@@ -1,18 +1,17 @@
-//! What the city currently shows: which metric drives colour, what is filtered
-//! out, and what is highlighted.
+//! What the city shows: which metric drives colour, what is filtered out, and
+//! what is highlighted.
 //!
-//! Colour is the strongest channel available and it was permanently spent on
-//! one metric (district purpose). Height, footprint, saturation, roof cap and
-//! plinth are all taken, so a seventh simultaneous channel would be
-//! unreadable. Making colour switchable gives every metric a full-strength
-//! palette when it is asked for, and nothing has to compete.
+//! Colour is the strongest channel, and height, footprint, saturation, roof cap
+//! and plinth are all already taken - a seventh simultaneous channel would be
+//! unreadable. Switching colour gives each metric a full-strength palette in
+//! turn instead.
 
 use crate::hover::BuildingInfo;
 use serde::Deserialize;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum ColorMode {
-    /// What the district is for. The default: it is the only mode that says
+    /// What the district is for. The default: the only mode that says
     /// something about every building at once.
     #[default]
     Typology,
@@ -44,9 +43,8 @@ impl ColorMode {
     }
 }
 
-/// Predicates the view is restricted to. Everything that fails becomes
-/// translucent rather than hidden, so the shape of the city is preserved and
-/// matches are read in their real context.
+/// Predicates the view is restricted to. Failures turn translucent rather than
+/// hidden, so matches are read in the context of the whole city.
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct Filter {
     #[serde(default)]
@@ -107,8 +105,8 @@ impl Filter {
         if b.churn_rank * 100.0 < self.min_churn_pct {
             return false;
         }
-        // "No callers" is a question, not a verdict: a library's whole public
-        // surface has no internal callers and is not dead.
+        // A question, not a verdict: a library's whole public surface has no
+        // internal callers.
         if self.only_no_callers && b.fan_in > 0 {
             return false;
         }
@@ -122,8 +120,8 @@ impl Filter {
     }
 }
 
-/// A sequential palette, pale to hot. Used by every numeric mode so that
-/// "more" always looks the same regardless of which metric is selected.
+/// A sequential palette, pale to hot, shared by every numeric mode so "more"
+/// always looks the same.
 fn ramp(t: f32) -> [f32; 3] {
     let t = t.clamp(0.0, 1.0);
     // pale sand -> amber -> red
@@ -154,8 +152,8 @@ fn language_rgb(lang: &str) -> [f32; 3] {
     }
 }
 
-/// Scale for the numeric modes, so one outlier does not flatten everything
-/// else. Set once per city from the data actually present.
+/// Scale for the numeric modes, set once per city, so one outlier cannot
+/// flatten the rest.
 #[derive(Clone, Copy, Debug)]
 pub struct Scales {
     pub complexity: f32,
@@ -173,8 +171,7 @@ pub fn color_for(mode: ColorMode, b: &BuildingInfo, typology_rgb: [f32; 3], s: S
     match mode {
         ColorMode::Typology => typology_rgb,
         ColorMode::Complexity => ramp(b.max_complexity as f32 / s.complexity.max(1.0)),
-        // Recent code is hot, old code is pale: the same direction as every
-        // other numeric mode, where more means hotter.
+        // Recent is hot, old is pale: the same direction as every other mode.
         ColorMode::Age => ramp(1.0 - (b.age_days as f32 / 540.0).clamp(0.0, 1.0)),
         ColorMode::Churn => ramp(b.churn_rank as f32),
         ColorMode::FanIn => ramp(b.fan_in as f32 / s.fan_in.max(1.0)),

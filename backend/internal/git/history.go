@@ -12,9 +12,8 @@ import (
 type FileHistory struct {
 	Churn        int // number of commits touching the file
 	LastModified time.Time
-	// FirstSeen is the oldest commit that touched the file, i.e. when this
-	// part of the system came into existence. It costs nothing extra: the log
-	// is already being walked, and `git log` ends at the first commit.
+	// The oldest commit touching the file: when this part came into being.
+	// Free, since `git log` is already walked to its end.
 	FirstSeen     time.Time
 	PrimaryAuthor string
 }
@@ -24,19 +23,12 @@ const (
 	fieldSep = "\x1f" // between fields of the commit header
 )
 
-// ExtractHistory walks the whole repository history exactly once.
-//
-// The previous implementation ran three `git` subprocesses *per file*
-// (`rev-list --count`, `log -1 --format=%cI`, `log --format=%an`), each of
-// which re-walked the entire history. For a repo with ~1000 source files that
-// is ~3000 processes and ~3000 full history traversals, and it was the single
-// largest cost in extraction after the LLM. This is O(commits) instead of
-// O(files x commits).
+// ExtractHistory walks the whole history exactly once: O(commits) rather than
+// the O(files x commits) of a `git log` per file.
 func ExtractHistory(repoPath string) (map[string]*FileHistory, error) {
-	// --name-only rather than --numstat: line counts would require the blob
-	// contents of every revision, which in a blobless partial clone means a
-	// network fetch per commit (measured: 9.8s on a 7-file repo). Tree diffs
-	// are already local, so churn and recency cost nothing.
+	// --name-only, not --numstat: line counts need every revision's blobs,
+	// which in a blobless clone means a fetch per commit (9.8s on 7 files).
+	// Tree diffs are already local.
 	cmd := exec.Command("git", "log",
 		"--no-merges",
 		"--name-only",
@@ -90,8 +82,7 @@ func ExtractHistory(repoPath string) (map[string]*FileHistory, error) {
 			authorCounts[path] = make(map[string]int)
 		}
 		h.Churn++
-		// git log walks newest-first, so the first sighting is the latest
-		// commit and the last one seen is the oldest.
+		// Newest-first, so the first sighting is the latest commit.
 		if h.LastModified.IsZero() && !when.IsZero() {
 			h.LastModified = when
 		}
@@ -117,7 +108,7 @@ func ExtractHistory(repoPath string) (map[string]*FileHistory, error) {
 		for name, n := range counts {
 			list = append(list, ac{name, n})
 		}
-		// Sort by count then name so the result is deterministic.
+		// By count then name, for determinism.
 		sort.Slice(list, func(i, j int) bool {
 			if list[i].n != list[j].n {
 				return list[i].n > list[j].n

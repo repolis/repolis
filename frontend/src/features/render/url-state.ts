@@ -1,12 +1,9 @@
 import { EMPTY_FILTER, type FilterState } from "./view-controls";
 
 /**
- * The part of the view worth putting in a link: what you are looking at, how
- * it is coloured, what is filtered, and what is selected.
- *
- * Encoded in the fragment rather than the query string so it never reaches the
- * server, and written with replaceState so panning does not fill the back
- * button with history.
+ * The part of the view worth putting in a link. Encoded in the fragment so it
+ * never reaches the server, and written with replaceState so panning does not
+ * fill the back button.
  */
 export interface ViewURL {
   mode: string;
@@ -83,8 +80,7 @@ export function decodeView(hash: string): ViewURL {
   const raw = hash.startsWith("#") ? hash.slice(1) : hash;
   const p = new URLSearchParams(raw);
 
-  // A hand-edited or truncated link must degrade to a sane view rather than
-  // producing NaN camera coordinates or an empty colour mode.
+  // A truncated link degrades to a sane view, not NaN coordinates.
   const str = (k: string): string | null => {
     const v = p.get(k);
     return v === null || v === "" ? null : v;

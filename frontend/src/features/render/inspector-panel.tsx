@@ -15,10 +15,8 @@ interface Props {
   anchorId: string | null;
 }
 
-/**
- * Pinned inspector: it appears on click and stays until dismissed, so a long
- * field list or a dependency can actually be read and clicked.
- */
+/** Pinned inspector: appears on click, stays until dismissed, so a long field
+ * list or a dependency can be read and clicked. */
 export function InspectorPanel({
   selection,
   repoUrl,
@@ -126,8 +124,8 @@ function BuildingInspector({
     setError(null);
   }, [info.id]);
 
-  // The larger model runs here and only here: one entity, on request, with
-  // real source context. Nothing in the render path waits on it.
+  // The larger model runs here and only here; nothing in the render path
+  // waits on it.
   async function explain() {
     setLoading(true);
     setError(null);

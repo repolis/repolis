@@ -13,8 +13,7 @@ func TestRustNamespace(t *testing.T) {
 		"src/shapes/rect.rs":   "crate::shapes::rect",
 		"tests/integration.rs": "crate::integration",
 
-		// Cargo workspace: each crate is its own root, so their modules must
-		// not collide. ripgrep has ten of these.
+		// Each crate is its own root, so modules must not collide.
 		"crates/printer/src/lib.rs":   "printer",
 		"crates/printer/src/color.rs": "printer::color",
 		"crates/core/flags/defs.rs":   "core::flags::defs",
@@ -54,8 +53,8 @@ func TestRustImportTargets(t *testing.T) {
 		t.Errorf("parent module not offered: %v", got)
 	}
 
-	// A workspace sibling is written with the Cargo package name, which is
-	// conventionally <project>_<crate> while the directory is just <crate>.
+	// A sibling is written as the package name, by convention
+	// <project>_<crate>, while the directory is just <crate>.
 	got = l.ImportTargets(Import{Path: "grep_printer::Standard"}, "core")
 	if !has(got, "printer") {
 		t.Errorf("workspace sibling grep_printer did not offer %q: %v", "printer", got)

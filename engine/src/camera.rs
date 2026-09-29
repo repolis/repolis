@@ -66,13 +66,10 @@ impl CityCamera {
         self.mode = CameraMode::Orbit;
     }
 
-    /// Frames an object of the given overall size so that it fills roughly
-    /// FOCUS_FILL of the viewport height.
-    ///
-    /// The previous version scaled only by the footprint diagonal, so a tall
-    /// tower - exactly the buildings worth clicking - was framed as if it were
-    /// its own base, putting the camera inside it with the roof off screen.
-    /// `size` must therefore be the larger of the footprint and the height.
+    /// Frames an object so it fills roughly FOCUS_FILL of the viewport height.
+    /// `size` must be the larger of footprint and height: scaling by the
+    /// footprint alone frames a tall tower as its own base and puts the camera
+    /// inside it.
     pub fn frame_object(&mut self, center: Vec3, size: f32) {
         // Half the object subtends half of FOCUS_FILL of the vertical FOV.
         let half_angle = (CAMERA_FOV * 0.5 * FOCUS_FILL).max(0.01);
@@ -116,10 +113,8 @@ pub fn camera_controls(
             drag += ev.delta;
         }
     }
-    // Browsers report wheel events in pixels, roughly 100 per notch, while a
-    // desktop mouse reports lines, one per notch. Summing `ev.y` without
-    // looking at the unit made one notch in the browser zoom about a hundred
-    // times further than intended.
+    // Browsers report wheel deltas in pixels, ~100 per notch; a desktop mouse
+    // reports one line per notch. Summing `ev.y` blind is a 100x difference.
     let mut scroll = 0.0;
     for ev in wheel.read() {
         scroll += match ev.unit {
@@ -154,9 +149,8 @@ pub fn camera_controls(
                     cam.beta = (cam.beta + drag.y * 0.005).clamp(0.06, 1.52);
                 }
 
-                // WASD pans the orbit centre. Previously these keys did nothing
-                // unless the user first discovered the F toggle, which made the
-                // default camera feel stuck.
+                // WASD pans the orbit centre, without needing the F toggle
+                // to be discovered first.
                 let mut pan = Vec2::ZERO;
                 if keys.pressed(KeyCode::KeyW) || keys.pressed(KeyCode::ArrowUp) {
                     pan.y += 1.0;
@@ -185,17 +179,14 @@ pub fn camera_controls(
                 }
 
                 if scroll != 0.0 {
-                    // Purely proportional, so one notch always covers the same
-                    // fraction of the distance. The old flat 2.0 floor meant a
-                    // single notch moved 20% of the way at close range and the
-                    // camera jumped straight through whatever you were
-                    // inspecting.
+                    // Purely proportional, so a notch always covers the same
+                    // fraction of the distance. A flat floor makes one notch
+                    // jump straight through whatever is being inspected.
                     let factor = (1.0 - scroll * 0.12).clamp(0.45, 2.2);
                     cam.target_radius = (cam.target_radius * factor).clamp(2.5, 20000.0);
                 }
 
-                // Critically damped-ish approach so focusing reads as a move
-                // rather than a teleport.
+                // Damped, so focusing reads as a move rather than a teleport.
                 let k = (1.0 - (-12.0 * dt).exp()).clamp(0.0, 1.0);
                 let focus_delta = (cam.target_focus - cam.focus) * k;
                 let radius_delta = (cam.target_radius - cam.radius) * k;

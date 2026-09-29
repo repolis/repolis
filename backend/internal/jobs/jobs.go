@@ -1,9 +1,6 @@
-// Package jobs runs analyses in the background and streams progress.
-//
-// The previous handler did everything synchronously on the request context, so
-// a client disconnect aborted minutes of work and discarded the partial
-// result, and two tabs on the same repository did all the work twice with a
-// non-atomic race on the cache file.
+// Package jobs runs analyses in the background and streams progress, so a
+// client disconnect cannot abort minutes of work and two tabs on one
+// repository share a single run.
 package jobs
 
 import (
@@ -54,8 +51,8 @@ func newJob(id, repoURL, commit string) *Job {
 // Emit records an event and fans it out to every subscriber.
 func (j *Job) Emit(e Event) {
 	j.mu.Lock()
-	// Only the most recent city of each kind is worth replaying; stage events
-	// are transient. This keeps the replay buffer small and bounded.
+	// Only the latest city of each kind is worth replaying; stages are
+	// transient. Keeps the replay buffer bounded.
 	if e.Type == EventCity {
 		filtered := j.history[:0]
 		for _, h := range j.history {
@@ -88,8 +85,8 @@ func (j *Job) Emit(e Event) {
 
 func (j *Job) Stage(s pipeline.Stage) { j.Emit(Event{Type: EventStage, Stage: &s}) }
 
-// Subscribe returns a channel pre-loaded with the events so far, so a client
-// that connects late still receives the draft city.
+// Subscribe pre-loads the events so far, so a late client still gets the
+// draft city.
 func (j *Job) Subscribe() (<-chan Event, func()) {
 	ch := make(chan Event, 32)
 	j.mu.Lock()
@@ -124,8 +121,8 @@ func (j *Job) Done() bool {
 	return j.done
 }
 
-// Manager provides single-flight: concurrent requests for the same repo and
-// commit attach to one running analysis instead of starting another.
+// Manager single-flights: concurrent requests for one repo and commit attach
+// to the running analysis.
 type Manager struct {
 	mu     sync.Mutex
 	byKey  map[string]*Job
@@ -142,8 +139,8 @@ func NewManager() *Manager {
 	return m
 }
 
-// GetOrStart returns the existing job for key, or starts a new one. The second
-// return value reports whether this call created it.
+// GetOrStart returns the existing job for key or starts one, reporting whether
+// this call created it.
 func (m *Manager) GetOrStart(key, id, repoURL, commit string, run func(*Job)) (*Job, bool) {
 	m.mu.Lock()
 	if j, ok := m.byKey[key]; ok && !j.Done() {
@@ -191,8 +188,8 @@ func (m *Manager) reap() {
 	}
 }
 
-// MarshalSSE renders an event as a single SSE frame. JSON is compact so the
-// payload never contains a newline, which would break the framing.
+// MarshalSSE renders one SSE frame. Compact JSON, since a newline in the
+// payload breaks the framing.
 func MarshalSSE(e Event) ([]byte, error) {
 	b, err := json.Marshal(e)
 	if err != nil {

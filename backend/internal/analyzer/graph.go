@@ -7,15 +7,8 @@ import (
 	"github.com/repolis/repolis/backend/internal/models"
 )
 
-// maxOutPerBuilding caps each building's outgoing edges.
-//
-// The original implementation expanded every #include into the full cartesian
-// product of (buildings in the including file) x (buildings in the included
-// file), then kept a global top-500 by weight. One header holding 104 types
-// produced 520 edges from a single directive, so the surviving edges were the
-// densest cartesian products rather than the most meaningful relationships.
-// Capping per building keeps local structure everywhere instead of
-// concentrating on hub headers.
+// Per building, not globally: a global top-K keeps only the densest hubs and
+// drops local structure everywhere else.
 const maxOutPerBuilding = 8
 
 type edgeKey struct {
@@ -23,15 +16,12 @@ type edgeKey struct {
 	kind     string
 }
 
-// BuildDependencies derives call-site-accurate edges.
-//
-// A call is attributed to the specific function containing it, and that
-// function to its owning building, so `foo()` called three times from inside
-// a method of Vdbe produces exactly one edge Vdbe -> <owner of foo> weight 3.
+// BuildDependencies attributes each call to the function containing it and
+// that function to its building, so three calls to `foo()` from one method of
+// Vdbe give one edge Vdbe -> owner of foo, weight 3.
 func BuildDependencies(raw *RawExtraction, st *SymbolTable, ownerOf map[string]string) []models.DependencyEdge {
-	// Index every defined function by name, and by (receiver, name) so that a
-	// qualified call such as Rust's `Camera::new` resolves to the right one of
-	// several same-named associated functions.
+	// By (receiver, name) too, so `Camera::new` picks the right one of several
+	// same-named associated functions.
 	byName := make(map[string][]*RawFunction)
 	byRecv := make(map[string][]*RawFunction)
 	for i := range raw.Functions {
@@ -44,12 +34,10 @@ func BuildDependencies(raw *RawExtraction, st *SymbolTable, ownerOf map[string]s
 
 	counts := make(map[edgeKey]int)
 
-	// In a module-scoped language a symbol that was never imported cannot be
-	// called, so a candidate at zero visibility is not a weak match - it is
-	// not a match at all. Accepting those produced edges that ran backwards
-	// through ripgrep's crate graph (searcher -> core, regex -> globset),
-	// which Cargo could never have compiled, and those false edges were what
-	// fused a third of the city into one "cycle".
+	// In a module-scoped language an unimported symbol cannot be called, so
+	// zero visibility is no match at all. Accepting those invented edges that
+	// ran backwards through ripgrep's crate graph and fused a third of the
+	// city into one "cycle".
 	pick := func(defs []*RawFunction, fromFile string) string {
 		if len(defs) == 0 {
 			return ""
@@ -78,8 +66,8 @@ func BuildDependencies(raw *RawExtraction, st *SymbolTable, ownerOf map[string]s
 				}
 			}
 		}
-		// A name defined in several equally invisible places carries no
-		// information; a wrong edge is worse than a missing one.
+		// Several equally invisible definitions carry no information, and a
+		// wrong edge is worse than a missing one.
 		if strict && bestRank < visImported {
 			return ""
 		}
@@ -106,14 +94,10 @@ func BuildDependencies(raw *RawExtraction, st *SymbolTable, ownerOf map[string]s
 		return pick(defs, fromFile)
 	}
 
-	// A method call gives us the name but never the receiver's type, so the
-	// only honest resolution is an unambiguous one.
-	//
-	// Without this, `x.len()` or `x.new()` linked whatever definition happened
-	// to rank highest, and those false edges fused 126 of ripgrep's 355
-	// buildings into a single strongly connected component - a "cycle" that
-	// was entirely an artefact. A missing edge is a smaller lie than an
-	// invented one, especially once cycles are reported as a finding.
+	// A method call gives the name but never the receiver's type, so only an
+	// unambiguous resolution is honest. Linking `x.len()` to whichever
+	// definition ranked highest fused 126 of ripgrep's 355 buildings into one
+	// bogus component.
 	pickUnambiguous := func(name, fromFile string) string {
 		defs := byName[name]
 		if len(defs) == 0 {
@@ -163,10 +147,8 @@ func BuildDependencies(raw *RawExtraction, st *SymbolTable, ownerOf map[string]s
 				return owner
 			}
 		}
-		// A bare name. In a module-scoped language it can only mean something
-		// declared here or explicitly imported; searching every visible
-		// namespace would resolve a common helper into whichever dependency
-		// happened to rank highest.
+		// A bare name in a module-scoped language can only mean something
+		// declared here or explicitly imported.
 		if st.scopes.IsModuleScoped(fromFile) {
 			own := st.scopes.OwnNamespace(fromFile)
 			var local []*RawFunction
@@ -243,17 +225,10 @@ func BuildDependencies(raw *RawExtraction, st *SymbolTable, ownerOf map[string]s
 	return out
 }
 
-// funcKey identifies one function definition.
-//
-// The receiver is part of the key because a method name is only unique per
-// type, not per file. `func (formBinding) Name()` and
-// `func (formPostBinding) Name()` sit side by side in one gin source file, and
-// Rust's `fn new()` appears in every `impl` block; keying on file and name
-// alone made them collide, so a single type silently absorbed every
-// same-named method in the file and its siblings showed none.
-//
-// C cannot produce this collision - it has neither methods nor overloading -
-// which is why the bug only surfaced once a second language existed.
+// funcKey identifies one function definition. The receiver belongs in the key
+// because a method name is unique per type, not per file: without it the two
+// `Name()` methods in one gin file collide and one type absorbs both. C, having
+// no methods, cannot produce the collision.
 func funcKey(f *RawFunction) string {
 	return f.SourceFile + "::" + f.Receiver + "#" + f.Name
 }

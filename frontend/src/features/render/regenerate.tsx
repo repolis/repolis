@@ -29,8 +29,7 @@ export function Regenerate({
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
-  // Close when clicking anywhere else, so the menu never sits over the canvas
-  // swallowing orbit drags.
+  // Otherwise the menu sits over the canvas swallowing orbit drags.
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {

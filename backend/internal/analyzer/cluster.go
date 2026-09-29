@@ -20,10 +20,8 @@ type Cluster struct {
 	Buildings []string // building IDs
 	TopDirs   []string
 	TopNames  []string
-	// SymbolPrefix is the codebase-wide symbol prefix ("git_", "sqlite3").
-	// It is stripped before the symbol list is shown to the model: with it
-	// present every cluster of libgit2 looked like "git_*" and the model
-	// named all sixteen districts "Git Something".
+	// Codebase-wide symbol prefix ("git_"), stripped before the model sees
+	// the symbols: with it, every libgit2 district was named "Git Something".
 	SymbolPrefix string
 	// Noise holds the words every district here shares.
 	Noise []string
@@ -31,8 +29,8 @@ type Cluster struct {
 	Language string
 }
 
-// DistinctDirs returns the directory segments that actually separate this
-// cluster from the rest, dropping the path components every cluster shares.
+// DistinctDirs returns the directory segments that separate this cluster from
+// the rest, dropping path components every cluster shares.
 func (c Cluster) DistinctDirs(common []string) []string {
 	out := make([]string, 0, len(c.TopDirs))
 	for _, d := range c.TopDirs {
@@ -59,8 +57,7 @@ func (c Cluster) DistinctDirs(common []string) []string {
 	return out
 }
 
-// SplitIdentifier breaks a C identifier into lower-case words, handling both
-// snake_case and camelCase.
+// SplitIdentifier breaks an identifier into lower-case words.
 func SplitIdentifier(name string) []string {
 	var words []string
 	var cur []rune
@@ -76,8 +73,7 @@ func SplitIdentifier(name string) []string {
 		case r == '_' || r == '-' || r == ' ':
 			flush()
 		case r >= 'A' && r <= 'Z':
-			// Start a new word at a lower->upper transition only, so that
-			// acronyms such as ODB stay together.
+			// Only at a lower->upper transition, so acronyms stay together.
 			if i > 0 && runes[i-1] >= 'a' && runes[i-1] <= 'z' {
 				flush()
 			}
@@ -90,14 +86,10 @@ func SplitIdentifier(name string) []string {
 	return words
 }
 
-// CommonSymbolTokens finds the words that appear in most clusters' symbol
-// names and therefore identify none of them.
-//
-// Detecting this from the clusters rather than from a global function-name
-// prefix is what makes it work on real repositories: libgit2's test suite
-// dilutes the "git_" prefix below any sensible global threshold, yet "git"
-// still appears in every single district and swamped every name the model
-// produced.
+// CommonSymbolTokens finds words appearing in most clusters' symbols, which
+// therefore identify none of them. Measured per cluster, not as a global
+// prefix: libgit2's test suite dilutes "git_" below any global threshold, yet
+// "git" is still in every district and swamped every name the model produced.
 func CommonSymbolTokens(clusters []Cluster) []string {
 	if len(clusters) < 3 {
 		return nil
@@ -168,15 +160,11 @@ type clEdge struct {
 	w  float64
 }
 
-// ClusterBuildings partitions buildings into districts using weighted label
-// propagation over the call graph plus directory affinity.
-//
-// Partitioning stays deterministic on purpose. The previous design asked the
-// LLM to emit an ID partition over 35 buildings at a time; on sqlite that
-// failed for every chunk, and because the reducer merged districts by name,
-// the failures collapsed into a single 221-building "src" district — which is
-// also what broke the spatial layout downstream. Community detection is a
-// graph problem with a correct answer; a 4B model is the wrong tool for it.
+// ClusterBuildings partitions buildings into districts by weighted label
+// propagation over the call graph plus directory affinity. Deterministic on
+// purpose: community detection is a graph problem with a correct answer, and
+// asking a 4B model to emit the partition collapsed sqlite into one
+// 221-building district.
 func ClusterBuildings(buildings []models.Building, edges []models.DependencyEdge) []Cluster {
 	if len(buildings) == 0 {
 		return nil
@@ -211,9 +199,8 @@ func ClusterBuildings(buildings []models.Building, edges []models.DependencyEdge
 		addEdge(a, b, w)
 	}
 
-	// Directory affinity as a sparse small-world graph rather than a clique:
-	// each building links to the next few in its directory, giving fast label
-	// propagation inside a folder at O(n) edges instead of O(n^2).
+	// Sparse small-world rather than a clique: linking each building to the
+	// next few in its directory propagates labels fast at O(n) edges.
 	byDir := make(map[string][]int)
 	for i, n := range nodes {
 		byDir[n.dir] = append(byDir[n.dir], i)
@@ -256,9 +243,8 @@ func ClusterBuildings(buildings []models.Building, edges []models.DependencyEdge
 		sizes[l]++
 	}
 
-	// Weighted label propagation with a size penalty. Plain propagation on a
-	// dense call graph collapses everything into one community; dividing by
-	// sqrt(size) keeps large communities from swallowing their neighbours.
+	// The sqrt(size) penalty stops large communities swallowing their
+	// neighbours; plain propagation collapses a dense graph into one.
 	for iter := 0; iter < lpIterations; iter++ {
 		changed := 0
 		for _, i := range order {
@@ -405,7 +391,7 @@ func splitLarge(groups [][]int, nodes []clNode) [][]int {
 			out = append(out, g)
 			continue
 		}
-		// Split by directory first — the most legible sub-structure available.
+		// By directory first: the most legible sub-structure available.
 		byDir := make(map[string][]int)
 		for _, n := range g {
 			byDir[nodes[n].dir] = append(byDir[nodes[n].dir], n)
@@ -453,7 +439,7 @@ func capCount(groups [][]int, nodes []clNode, _ map[string]int, adj [][]clEdge) 
 		}
 		target := strongestNeighbour(groups[smallest], groupOf, adj, smallest)
 		if target == -1 || len(groups[target])+len(groups[smallest]) > maxDistrictSize*2 {
-			// Fall back to the next-smallest group so we always make progress.
+			// Next-smallest, so we always make progress.
 			target = -1
 			for gi := range groups {
 				if gi == smallest {

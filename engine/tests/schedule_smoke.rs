@@ -1,11 +1,8 @@
 //! Boots the real schedule headlessly and runs frames.
 //!
-//! Bevy validates system parameters the first time a schedule runs, so
-//! conflicting queries are a runtime panic rather than a compile error. Every
-//! system in this app touches several overlapping queries (buildings,
-//! materials, meshes, two views of the camera), which is exactly the shape
-//! that trips that check - and in a wasm build the only symptom would be a
-//! blank canvas.
+//! Bevy validates system parameters on a schedule's first run, so conflicting
+//! queries panic at runtime rather than failing to compile - and in a wasm
+//! build the only symptom is a blank canvas.
 
 use bevy::asset::AssetPlugin;
 use bevy::prelude::*;

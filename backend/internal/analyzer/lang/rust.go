@@ -27,11 +27,9 @@ func (rustLang) ModuleScoped() bool        { return true }
 //	crates/printer/src/lib.rs    -> printer
 //	crates/printer/src/color.rs  -> printer::color
 //
-// A Cargo workspace holds many crates, each with its own root. Treating the
-// whole tree as one module path made every crate a sibling under `crate::`,
-// so `printer::color` and `matcher::color` would have been distinguishable
-// only by accident. The last source root in the path separates the crate from
-// the module.
+// The last source root in the path separates crate from module. Treating a
+// workspace as one module path makes every crate a sibling under `crate::`,
+// where `printer::color` and `matcher::color` collide.
 func (rustLang) Namespace(relPath string) string {
 	p := strings.TrimSuffix(path.Clean(relPath), ".rs")
 	parts := strings.Split(p, "/")
@@ -54,8 +52,7 @@ func (rustLang) Namespace(relPath string) string {
 		}
 		mod = parts[root+1:]
 	default:
-		// Not every workspace member has a src/ directory; ripgrep's core
-		// crate puts its modules directly under crates/core/.
+		// Not every member has src/; ripgrep's core crate does not.
 		mod = parts
 		for i, seg := range parts {
 			if (seg == "crates" || seg == "packages") && i+1 < len(parts) {
@@ -80,9 +77,8 @@ func (rustLang) Namespace(relPath string) string {
 	return crate + "::" + strings.Join(mod, "::")
 }
 
-// ImportTargets expands a `use`. The last segment of a path is often a type or
-// function rather than a module, so both the full path and its parent are
-// offered; the resolver takes whichever matches a real namespace.
+// ImportTargets expands a `use`. The last segment is often a type rather than
+// a module, so the parent path is offered too and the resolver picks.
 func (rustLang) ImportTargets(imp Import, from string) []string {
 	p := imp.Path
 	if p == "" {
@@ -104,17 +100,14 @@ func (rustLang) ImportTargets(imp Import, from string) []string {
 	case p == "self":
 		p = from
 	case !strings.HasPrefix(p, "crate::") && p != "crate":
-		// A bare `use foo::bar` inside a 2015-style crate, or an external
-		// crate. Offer the crate-relative reading too; an external crate
-		// simply will not match any known namespace and is dropped.
+		// A 2015-style bare `use foo::bar`, or an external crate: offer the
+		// crate-relative reading too, since an external one matches nothing.
 		out := []string{p}
 		if parent := trimLast(p); parent != "" {
 			out = append(out, parent)
 		}
-		// A workspace sibling is written with its Cargo package name, which
-		// is conventionally <project>_<crate> while the directory - and so
-		// the namespace - is just <crate>. Offer that reading too, or every
-		// cross-crate edge in a workspace is lost.
+		// A workspace sibling is written as its package name, by convention
+		// <project>_<crate>, while its namespace is just <crate>.
 		if head, rest := splitHead(p); strings.Contains(head, "_") {
 			if i := strings.Index(head, "_"); i > 0 && i+1 < len(head) {
 				short := head[i+1:]
@@ -162,9 +155,8 @@ func trimLast(p string) string {
 func (rustLang) Parse(root *sitter.Node, src []byte) FileFacts {
 	var out FileFacts
 
-	// `impl Camera { fn frame(&self) }` — the enclosing impl names the
-	// receiver. This is the whole reason Rust needs no association heuristics:
-	// what C guesses at with three rules and an LLM is here a field lookup.
+	// The enclosing impl names the receiver: what C guesses at with three
+	// rules and an LLM is a field lookup here.
 	var scan func(n *sitter.Node, receiver string)
 	scan = func(n *sitter.Node, receiver string) {
 		Children(n, func(_ int, ch *sitter.Node) {
@@ -203,9 +195,8 @@ func (rustLang) Parse(root *sitter.Node, src []byte) FileFacts {
 				return
 
 			case "mod_item":
-				// Inline `mod x { ... }`. Its contents still live in this file;
-				// treating them as this file's namespace keeps resolution
-				// simple and is right for the common one-module-per-file case.
+				// Inline `mod x { ... }`: its contents live in this file, so
+				// this file's namespace is the right answer for the common case.
 				if body := ch.ChildByFieldName("body"); body != nil {
 					scan(body, receiver)
 				}
@@ -234,8 +225,8 @@ func rustUse(n *sitter.Node, src []byte, prefix string, out *[]Import) {
 	switch n.Type() {
 	case "identifier", "scoped_identifier", "crate", "super", "self":
 		full := join(prefix, Text(n, src))
-		// `use a::b::c` brings the name `c` into scope; recording it as an
-		// implicit alias is what lets a later bare `c()` find it.
+		// `use a::b::c` brings `c` into scope; the implicit alias is what
+		// lets a later bare `c()` find it.
 		*out = append(*out, Import{Path: full, Alias: lastRustSegment(full)})
 
 	case "use_as_clause":
@@ -278,8 +269,7 @@ func rustTypeDef(n *sitter.Node, src []byte) *TypeDef {
 	}
 	body := n.ChildByFieldName("body")
 	if body == nil {
-		// `struct Marker;` or `type Alias = ...` declare no members. Recording
-		// them would reproduce C's forward-declaration problem.
+		// No members: recording these repeats C's forward-declaration bug.
 		return nil
 	}
 
@@ -369,8 +359,7 @@ func rustBodyRefs(n *sitter.Node, src []byte, fn *FuncDef) {
 						Name:      Text(f.ChildByFieldName("name"), src),
 					})
 				case "field_expression":
-					// `x.foo()` — the receiver's type needs inference we do
-					// not do, so this resolves on name alone.
+					// The receiver's type needs inference we do not do.
 					if fld := f.ChildByFieldName("field"); fld != nil {
 						fn.Calls = append(fn.Calls, Ref{Name: Text(fld, src), Method: true})
 					}

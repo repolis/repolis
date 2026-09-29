@@ -1,13 +1,7 @@
-// Package llm is the thin, bounded LLM layer.
-//
-// Design rules, enforced throughout:
-//   - The model is never asked to partition, count or enumerate. It picks one
-//     item from a closed list that is already in its prompt.
-//   - Every prompt is small and self-contained. No source snippets, no
-//     repo-wide symbol dumps.
-//   - Every response is bounded by MaxTokens and validated against the closed
-//     set; anything unrecognised is discarded, never guessed at.
-//   - Every result is cached by content hash, so re-analysis costs nothing.
+// Package llm is the thin, bounded LLM layer. The model only ever picks one
+// item from a closed list already in its prompt; prompts carry no source or
+// repo-wide dumps, replies are capped by MaxTokens and validated against that
+// list, and every result is cached by content hash.
 package llm
 
 import (
@@ -29,13 +23,11 @@ import (
 type Client struct {
 	api *openai.Client
 
-	// fastModel handles closed-set selection (association, district naming).
-	// A 1.5B model is sufficient once the candidate list is short and
-	// AST-verified, and it is several times faster than a 12B one.
+	// Closed-set selection: a 1.5B model suffices once candidates are short
+	// and AST-verified, and beats a 12B one several times over on speed.
 	fastModel string
-	// richModel is used only for on-demand building explanations, where the
-	// prompt can afford real source context and the user is waiting for one
-	// answer rather than thousands.
+	// On-demand building explanations only, where the prompt can afford real
+	// source context and one user waits for one answer.
 	richModel string
 
 	concurrency int
@@ -44,13 +36,11 @@ type Client struct {
 
 	calls     atomic.Int64
 	cacheHits atomic.Int64
-	// bypassCache makes this run ignore stored answers. Writes still happen,
-	// so a forced regeneration refreshes the cache rather than disabling it.
+	// Ignore stored answers for this run. Writes still happen, so a forced
+	// regeneration refreshes the cache rather than disabling it.
 	bypassCache atomic.Bool
 }
 
-// SetCacheBypass forces every question to go to the model, ignoring any
-// answer already stored for the same prompt.
 func (c *Client) SetCacheBypass(v bool) { c.bypassCache.Store(v) }
 
 func NewClient(cache *Cache) (*Client, error) {
@@ -143,9 +133,8 @@ func (c *Client) complete(ctx context.Context, r request) (string, error) {
 	resp, err := c.api.CreateChatCompletion(callCtx, openai.ChatCompletionRequest{
 		Model:    r.model,
 		Messages: msgs,
-		// Deterministic, and bounded. The previous code set no MaxTokens at
-		// all, so a small model could emit hundreds of tokens of restated
-		// reasoning on every one of ~1000 per-file calls.
+		// Bounded: unbounded, a small model restates its reasoning for
+		// hundreds of tokens on every call.
 		Temperature: 0.0,
 		TopP:        1.0,
 		MaxTokens:   r.maxTokens,
@@ -194,8 +183,7 @@ func runBatch[T any](ctx context.Context, concurrency int, n int, fn func(i int)
 	return results
 }
 
-// stripThinking removes <think>...</think> blocks that reasoning-tuned local
-// models emit before their answer.
+// stripThinking removes the <think> blocks reasoning-tuned models emit.
 func stripThinking(s string) string {
 	for {
 		start := strings.Index(s, "<think>")
