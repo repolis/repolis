@@ -1,32 +1,71 @@
+// Package llm is the thin, bounded LLM layer.
+//
+// Design rules, enforced throughout:
+//   - The model is never asked to partition, count or enumerate. It picks one
+//     item from a closed list that is already in its prompt.
+//   - Every prompt is small and self-contained. No source snippets, no
+//     repo-wide symbol dumps.
+//   - Every response is bounded by MaxTokens and validated against the closed
+//     set; anything unrecognised is discarded, never guessed at.
+//   - Every result is cached by content hash, so re-analysis costs nothing.
 package llm
 
 import (
 	"context"
-	"encoding/json"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
-	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
 
-	"github.com/repolis/repolis/backend/internal/analyzer"
-	"github.com/repolis/repolis/backend/internal/models"
+	"github.com/repolis/repolis/backend/internal/logger"
 	openai "github.com/sashabaranov/go-openai"
 )
 
 type Client struct {
-	api   *openai.Client
-	model string
+	api *openai.Client
+
+	// fastModel handles closed-set selection (association, district naming).
+	// A 1.5B model is sufficient once the candidate list is short and
+	// AST-verified, and it is several times faster than a 12B one.
+	fastModel string
+	// richModel is used only for on-demand building explanations, where the
+	// prompt can afford real source context and the user is waiting for one
+	// answer rather than thousands.
+	richModel string
+
+	concurrency int
+	timeout     time.Duration
+	cache       *Cache
+
+	calls     atomic.Int64
+	cacheHits atomic.Int64
+	// bypassCache makes this run ignore stored answers. Writes still happen,
+	// so a forced regeneration refreshes the cache rather than disabling it.
+	bypassCache atomic.Bool
 }
 
-func NewClient() (*Client, error) {
+// SetCacheBypass forces every question to go to the model, ignoring any
+// answer already stored for the same prompt.
+func (c *Client) SetCacheBypass(v bool) { c.bypassCache.Store(v) }
+
+func NewClient(cache *Cache) (*Client, error) {
 	baseURL := os.Getenv("LLM_BASE_URL")
 	if baseURL == "" {
 		return nil, fmt.Errorf("LLM_BASE_URL is not set")
 	}
 
-	model := os.Getenv("LLM_MODEL")
-	if model == "" {
+	rich := os.Getenv("LLM_MODEL")
+	if rich == "" {
 		return nil, fmt.Errorf("LLM_MODEL is not set")
+	}
+	fast := os.Getenv("LLM_MODEL_FAST")
+	if fast == "" {
+		fast = rich
 	}
 
 	apiKey := os.Getenv("LLM_API_KEY")
@@ -34,138 +73,141 @@ func NewClient() (*Client, error) {
 		apiKey = "ollama"
 	}
 
-	config := openai.DefaultConfig(apiKey)
-	config.BaseURL = baseURL
+	cfg := openai.DefaultConfig(apiKey)
+	cfg.BaseURL = baseURL
 
+	concurrency := 2
+	if v := os.Getenv("LLM_CONCURRENCY"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 16 {
+			concurrency = n
+		}
+	}
+
+	timeout := 90 * time.Second
+	if v := os.Getenv("LLM_TIMEOUT_SECONDS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			timeout = time.Duration(n) * time.Second
+		}
+	}
+
+	logger.Log(logger.InfoLevel, "LLM ready: fast=%s rich=%s concurrency=%d", fast, rich, concurrency)
 	return &Client{
-		api:   openai.NewClientWithConfig(config),
-		model: model,
+		api:         openai.NewClientWithConfig(cfg),
+		fastModel:   fast,
+		richModel:   rich,
+		concurrency: concurrency,
+		timeout:     timeout,
+		cache:       cache,
 	}, nil
 }
 
-func (c *Client) CategorizeCity(ctx context.Context, clonePath string, city *models.CityMap) {
-	fmt.Println("[LOG] Starting 2-Pass LLM Typology & Summary Analysis...")
-	for i := range city.Files {
-		err := c.categorizeFile(ctx, clonePath, &city.Files[i])
-		if err != nil {
-			fmt.Printf("[WARNING] LLM failed to categorize %s: %v\n", city.Files[i].Path, err)
-			city.Files[i].Typology = "unknown"
-			city.Files[i].Summary = "Analysis failed"
-			city.Files[i].Tags = []string{}
-		}
-	}
-	fmt.Println("[LOG] LLM Analysis Complete.")
+func (c *Client) Calls() int64     { return c.calls.Load() }
+func (c *Client) CacheHits() int64 { return c.cacheHits.Load() }
+
+type request struct {
+	model     string
+	system    string
+	user      string
+	maxTokens int
+	stop      []string
+	kind      string
 }
 
-func (c *Client) categorizeFile(ctx context.Context, clonePath string, file *models.FileMetrics) error {
-	var crucialSymbols []string
-	if len(file.FunctionNames) > 0 || len(file.StructNames) > 0 {
-		prompt1 := fmt.Sprintf(
-			"Identify the 1 to 3 most important functions OR structs that define the core logic of this file.\n"+
-				"Output ONLY a comma-separated list of names. No conversational text, no markdown. Example output: main,UserConfig\n\n"+
-				"File: %s\nFunctions: %v\nStructs: %v",
-			file.Path, file.FunctionNames, file.StructNames,
-		)
+func (r request) hash() string {
+	h := sha256.New()
+	h.Write([]byte(r.kind + "\x00" + r.model + "\x00" + r.system + "\x00" + r.user))
+	fmt.Fprintf(h, "\x00%d", r.maxTokens)
+	return hex.EncodeToString(h.Sum(nil))
+}
 
-		resp1, err := c.api.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
-			Model: c.model,
-			Messages: []openai.ChatCompletionMessage{
-				{Role: openai.ChatMessageRoleUser, Content: prompt1},
-			},
-			MaxTokens:   30,
-			Temperature: 0.1,
-		})
-
-		if err == nil && len(resp1.Choices) > 0 {
-			for name := range strings.SplitSeq(resp1.Choices[0].Message.Content, ",") {
-				name = strings.TrimSpace(name)
-				if name != "" {
-					crucialSymbols = append(crucialSymbols, name)
-				}
-			}
+// complete runs one bounded completion, returning cached output when available.
+func (c *Client) complete(ctx context.Context, r request) (string, error) {
+	key := r.hash()
+	if c.cache != nil && !c.bypassCache.Load() {
+		if v, ok := c.cache.Get(key); ok {
+			c.cacheHits.Add(1)
+			return v, nil
 		}
 	}
 
-	var symbolBodies string
-	if len(crucialSymbols) > 0 {
-		fullPath := filepath.Join(clonePath, file.Path)
-		symbolBodies = analyzer.ExtractSymbols(fullPath, crucialSymbols)
+	callCtx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+
+	msgs := make([]openai.ChatCompletionMessage, 0, 2)
+	if r.system != "" {
+		msgs = append(msgs, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleSystem, Content: r.system})
 	}
+	msgs = append(msgs, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleUser, Content: r.user})
 
-	systemPrompt := `You are an AI code analyzer evaluating files from an unknown software repository.
-You must output a strictly valid JSON object matching this schema:
-{
-  "typology": "...",
-  "summary": "5 to 10 word plain-English explanation of what this specific file does.",
-  "tags": ["tag1", "tag2", "tag3"]
-}
-
-The "typology" MUST be EXACTLY ONE of these strings: core, data, network, security, interface, utility, config, test, example, unknown.
-
-RULES:
-1. "summary" must describe the actual code (e.g. "Mathematical expression parser and evaluator"). Do NOT mention that you are an AI or an analyzer.
-2. "tags" should be 3 short technical keywords (e.g. ["math", "parser", "ast"]).
-3. If the file path contains "test", "bench", "smoke", "spec", or "mock", the typology MUST be "test".
-4. If the file path contains "example" or "demo", the typology MUST be "example".
-5. Output ONLY raw valid JSON. No markdown formatting, no backticks, no explanations.`
-
-	prompt2 := fmt.Sprintf(
-		"File Path: %s\nFunctions: %v\nStructs: %v\nIncludes: %v\nStrings: %v\n\nCrucial Code Context (minified):\n%s\n\nBased on the above, provide the JSON analysis.",
-		file.Path, file.FunctionNames, file.StructNames, file.Includes, file.StringLiterals, symbolBodies,
-	)
-
-	resp2, err := c.api.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
-		Model: c.model,
-		Messages: []openai.ChatCompletionMessage{
-			{Role: openai.ChatMessageRoleSystem, Content: systemPrompt},
-			{Role: openai.ChatMessageRoleUser, Content: prompt2},
-		},
-		ResponseFormat: &openai.ChatCompletionResponseFormat{
-			Type: openai.ChatCompletionResponseFormatTypeJSONObject,
-		},
+	c.calls.Add(1)
+	resp, err := c.api.CreateChatCompletion(callCtx, openai.ChatCompletionRequest{
+		Model:    r.model,
+		Messages: msgs,
+		// Deterministic, and bounded. The previous code set no MaxTokens at
+		// all, so a small model could emit hundreds of tokens of restated
+		// reasoning on every one of ~1000 per-file calls.
 		Temperature: 0.0,
+		TopP:        1.0,
+		MaxTokens:   r.maxTokens,
+		Stop:        r.stop,
 	})
-
 	if err != nil {
-		return err
+		return "", err
+	}
+	if len(resp.Choices) == 0 {
+		return "", fmt.Errorf("empty completion")
 	}
 
-	if len(resp2.Choices) > 0 {
-		content := strings.TrimSpace(resp2.Choices[0].Message.Content)
-
-		if content, ok := strings.CutPrefix(content, "```json"); ok {
-			content = strings.TrimSuffix(content, "```")
-			content = strings.TrimSpace(content)
-		} else if content, ok := strings.CutPrefix(content, "```"); ok {
-			content = strings.TrimSuffix(content, "```")
-			content = strings.TrimSpace(content)
-		}
-
-		var result struct {
-			Typology string   `json:"typology"`
-			Summary  string   `json:"summary"`
-			Tags     []string `json:"tags"`
-		}
-
-		if jsonErr := json.Unmarshal([]byte(content), &result); jsonErr == nil {
-			validEnums := map[string]bool{
-				"core": true, "data": true, "network": true, "security": true,
-				"interface": true, "utility": true, "config": true, "test": true,
-				"example": true, "unknown": true,
-			}
-
-			if validEnums[result.Typology] {
-				file.Typology = result.Typology
-			} else {
-				file.Typology = "unknown"
-			}
-			file.Summary = result.Summary
-			file.Tags = result.Tags
-		} else {
-			file.Typology = "unknown"
-			file.Summary = "Failed to parse JSON"
-			file.Tags = []string{}
-		}
+	out := strings.TrimSpace(resp.Choices[0].Message.Content)
+	if c.cache != nil {
+		c.cache.Put(key, out)
 	}
-	return nil
+	return out, nil
+}
+
+// runBatch executes jobs with bounded concurrency, preserving input order.
+func runBatch[T any](ctx context.Context, concurrency int, n int, fn func(i int) T) []T {
+	results := make([]T, n)
+	if n == 0 {
+		return results
+	}
+	if concurrency < 1 {
+		concurrency = 1
+	}
+
+	sem := make(chan struct{}, concurrency)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				return
+			}
+			defer func() { <-sem }()
+			results[i] = fn(i)
+		}(i)
+	}
+	wg.Wait()
+	return results
+}
+
+// stripThinking removes <think>...</think> blocks that reasoning-tuned local
+// models emit before their answer.
+func stripThinking(s string) string {
+	for {
+		start := strings.Index(s, "<think>")
+		if start == -1 {
+			break
+		}
+		end := strings.Index(s, "</think>")
+		if end == -1 || end < start {
+			s = s[:start]
+			break
+		}
+		s = s[:start] + s[end+len("</think>"):]
+	}
+	return strings.TrimSpace(s)
 }

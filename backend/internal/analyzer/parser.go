@@ -6,264 +6,266 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"runtime"
+	"sort"
 	"strings"
-	"time"
+	"sync"
 
-	"github.com/repolis/repolis/backend/internal/models"
+	"github.com/repolis/repolis/backend/internal/logger"
+
+	"github.com/repolis/repolis/backend/internal/analyzer/lang"
 	sitter "github.com/smacker/go-tree-sitter"
-	"github.com/smacker/go-tree-sitter/c"
 )
 
-func AnalyzeRepository(clonePath string) (*models.CityMap, error) {
-	city := &models.CityMap{
-		Files: []models.FileMetrics{},
+// Directories that are never first-party source.
+var ignoredDirs = map[string]bool{
+	".git": true, "node_modules": true, "vendor": true, ".github": true,
+	"build": true, "dist": true, "target": true, "cmake-build-debug": true,
+	"third_party": true, "thirdparty": true, "3rdparty": true,
+	"external": true, "extern": true, "deps": true, "depends": true,
+	"subprojects": true, "contrib": true, ".deps": true, "m4": true,
+}
+
+var licenseNames = map[string]bool{
+	"LICENSE": true, "LICENSE.md": true, "LICENSE.txt": true,
+	"LICENCE": true, "LICENCE.md": true, "LICENCE.txt": true,
+	"COPYING": true, "COPYING.txt": true, "COPYRIGHT": true,
+}
+
+// firstPartyDirs are never vendored, whatever they contain.
+var firstPartyDirs = map[string]bool{
+	"src": true, "lib": true, "include": true, "examples": true, "example": true,
+	"test": true, "tests": true, "demo": true, "demos": true, "tools": true,
+	"tool": true, "cmd": true, "app": true, "apps": true, "samples": true,
+	"crates": true, "packages": true, "internal": true, "pkg": true,
+}
+
+var binaryExts = map[string]bool{
+	".a": true, ".so": true, ".lib": true, ".dll": true, ".dylib": true, ".o": true,
+}
+
+// A self-contained build system of its own. CMakeLists.txt and Makefile.am
+// are deliberately absent: they appear in almost every subdirectory of a
+// CMake or autotools project, so treating them as evidence of vendoring
+// wrongly removed libgit2's first-party examples/ tree.
+// isVendoredDir detects a third-party tree checked into the repository.
+//
+// The only signal kept is a licence file sitting next to a pre-compiled
+// binary, because every cheaper one produced false positives on real
+// projects. A README meant libgit2 lost its examples; a nested build manifest
+// meant three of ripgrep's own crates were dropped, since a Cargo workspace
+// member owns a Cargo.toml exactly like a vendored library does. Directory
+// names that really do mean vendoring are handled by ignoredDirs above, which
+// is both accurate and cheap.
+func isVendoredDir(dirPath string) bool {
+	if firstPartyDirs[strings.ToLower(filepath.Base(dirPath))] {
+		return false
+	}
+	entries, err := os.ReadDir(dirPath)
+	if err != nil {
+		return false
 	}
 
-	ignoredDirs := map[string]bool{
-		".git":         true,
-		"node_modules": true,
-		"vendor":       true,
-		".github":      true,
-		"build":        true,
+	hasLicense, hasBinary := false, false
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if licenseNames[strings.ToUpper(name)] {
+			hasLicense = true
+		}
+		if binaryExts[filepath.Ext(name)] {
+			hasBinary = true
+		}
 	}
+	return hasLicense && hasBinary
+}
+
+type parseJob struct {
+	fullPath string
+	relPath  string
+	lang     lang.Language
+}
+
+type parseOutput struct {
+	file    FileInfo
+	structs []RawStruct
+	funcs   []RawFunction
+}
+
+// ExtractRepository walks the repo and extracts all structural data in
+// parallel. Parsing is pure CPU work with no shared state, so it scales
+// linearly with cores; the previous version was single-threaded.
+func ExtractRepository(clonePath string) (*RawExtraction, error) {
+	var jobs []parseJob
+	var skipped []string
 
 	err := filepath.WalkDir(clonePath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-
 		if d.IsDir() {
-			if ignoredDirs[d.Name()] {
+			if path != clonePath && ignoredDirs[d.Name()] {
+				rel, _ := filepath.Rel(clonePath, path)
+				skipped = append(skipped, rel)
+				return filepath.SkipDir
+			}
+			if path != clonePath && isVendoredDir(path) {
+				rel, _ := filepath.Rel(clonePath, path)
+				logger.Log(logger.WarnLevel, "Skipping vendored dir (licence + build/binary): %s", rel)
+				skipped = append(skipped, rel)
 				return filepath.SkipDir
 			}
 			return nil
 		}
 
-		ext := filepath.Ext(d.Name())
-		if ext != ".c" && ext != ".h" {
+		l := lang.ForFile(d.Name())
+		if l == nil {
 			return nil
 		}
-
-		metrics, parseErr := parseCFile(path, clonePath)
-		if parseErr != nil {
-			fmt.Printf("[WARNING] Failed to parse %s: %v\n", path, parseErr)
-			return nil
-		}
-
-		city.Files = append(city.Files, metrics)
+		rel, _ := filepath.Rel(clonePath, path)
+		jobs = append(jobs, parseJob{
+			fullPath: path,
+			relPath:  filepath.ToSlash(rel),
+			lang:     l,
+		})
 		return nil
 	})
-
 	if err != nil {
 		return nil, fmt.Errorf("failed to walk directory: %w", err)
 	}
 
-	return city, nil
-}
+	sort.Slice(jobs, func(i, j int) bool { return jobs[i].relPath < jobs[j].relPath })
 
-func parseCFile(fullPath, basePath string) (models.FileMetrics, error) {
-	content, err := os.ReadFile(fullPath)
-	if err != nil {
-		return models.FileMetrics{}, err
+	workers := runtime.NumCPU()
+	if workers > 8 {
+		workers = 8
+	}
+	if workers < 1 {
+		workers = 1
 	}
 
-	parser := sitter.NewParser()
-	parser.SetLanguage(c.GetLanguage())
+	outputs := make([]parseOutput, len(jobs))
+	var wg sync.WaitGroup
+	jobCh := make(chan int, len(jobs))
+	for i := range jobs {
+		jobCh <- i
+	}
+	close(jobCh)
+
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			// One parser per worker: tree-sitter parsers are not goroutine safe,
+			// but creating one per file is wasteful.
+			parsers := make(map[string]*sitter.Parser)
+			for idx := range jobCh {
+				j := jobs[idx]
+				p, ok := parsers[j.lang.Name()]
+				if !ok {
+					p = sitter.NewParser()
+					p.SetLanguage(j.lang.Grammar())
+					parsers[j.lang.Name()] = p
+				}
+				out, perr := parseFile(p, j.lang, j.fullPath, j.relPath)
+				if perr != nil {
+					logger.Log(logger.WarnLevel, "Failed to parse %s: %v", j.relPath, perr)
+					continue
+				}
+				outputs[idx] = out
+			}
+		}()
+	}
+	wg.Wait()
+
+	result := &RawExtraction{SkippedDirs: skipped, Languages: map[string]int{}}
+	for _, out := range outputs {
+		if out.file.Path == "" {
+			continue
+		}
+		result.Files = append(result.Files, out.file)
+		result.Structs = append(result.Structs, out.structs...)
+		result.Functions = append(result.Functions, out.funcs...)
+		result.Languages[out.file.Language]++
+	}
+
+	logger.Log(logger.InfoLevel,
+		"Extracted %d files, %d type definitions, %d functions (%d workers, %d dirs skipped, languages: %v)",
+		len(result.Files), len(result.Structs), len(result.Functions), workers, len(skipped), result.Languages)
+	return result, nil
+}
+
+// parseFile runs one file through whichever language claims it.
+func parseFile(parser *sitter.Parser, l lang.Language, fullPath, relPath string) (parseOutput, error) {
+	content, err := os.ReadFile(fullPath)
+	if err != nil {
+		return parseOutput{}, err
+	}
+	// Guard against generated blobs (amalgamations, tables) that blow up
+	// parse time for no analytical value.
+	if len(content) > 4*1024*1024 {
+		return parseOutput{}, fmt.Errorf("file too large (%d bytes)", len(content))
+	}
 
 	tree, err := parser.ParseCtx(context.Background(), nil, content)
 	if err != nil {
-		return models.FileMetrics{}, err
+		return parseOutput{}, err
+	}
+	defer tree.Close()
+
+	dir := filepath.ToSlash(filepath.Dir(relPath))
+	if dir == "." || dir == "/" {
+		dir = "root"
+	}
+	ns := l.Namespace(relPath)
+
+	facts := l.Parse(tree.RootNode(), content)
+
+	out := parseOutput{
+		file: FileInfo{
+			Path:          relPath,
+			Dir:           dir,
+			Extension:     filepath.Ext(relPath),
+			Language:      l.Name(),
+			Namespace:     ns,
+			Depth:         strings.Count(relPath, "/"),
+			LinesOfCode:   bytes.Count(content, []byte("\n")) + 1,
+			FileScopeVars: facts.ScopeVar,
+			Imports:       facts.Imports,
+		},
 	}
 
-	rootNode := tree.RootNode()
-	linesOfCode := bytes.Count(content, []byte("\n")) + 1
-	relPath, _ := filepath.Rel(basePath, fullPath)
-	depth := strings.Count(relPath, string(filepath.Separator))
-
-	metrics := models.FileMetrics{
-		Path:        relPath,
-		Extension:   filepath.Ext(fullPath),
-		Depth:       depth,
-		LinesOfCode: linesOfCode,
+	for _, t := range facts.Types {
+		out.structs = append(out.structs, RawStruct{
+			Name: t.Name, Namespace: ns, SourceFile: relPath,
+			Fields: t.Fields, FieldTypes: t.FieldTypes, LinesOfCode: t.LOC,
+		})
 	}
-
-	extractASTData(rootNode, content, &metrics)
-
-	metrics.CommitChurn = getGitChurn(basePath, relPath)
-	metrics.LastModified = getGitLastModified(basePath, relPath)
-	metrics.PrimaryAuthor = getGitPrimaryAuthor(basePath, relPath)
-
-	return metrics, nil
+	for _, f := range facts.Funcs {
+		out.funcs = append(out.funcs, RawFunction{
+			Name: f.Name, Namespace: ns, Receiver: f.Receiver, SourceFile: relPath,
+			Signature: f.Signature, ReturnType: f.ReturnType, ParamTypes: f.ParamTypes,
+			TypesUsed: f.TypesUsed, Calls: f.Calls, Complexity: f.Complexity,
+			LinesOfCode: f.LOC,
+		})
+	}
+	return out, nil
 }
 
-func extractASTData(node *sitter.Node, content []byte, metrics *models.FileMetrics) {
-	nodeType := node.Type()
-
-	switch nodeType {
-	case "function_definition":
-		metrics.FunctionCount++
-
-		name := findFirstIdentifier(node, content)
-		if name != "" {
-			metrics.FunctionNames = append(metrics.FunctionNames, name)
-		}
-
-	case "struct_specifier", "type_definition":
-		metrics.StructCount++
-
-		name := findFirstIdentifier(node, content)
-		if name != "" {
-			metrics.StructNames = append(metrics.StructNames, name)
-		}
-
-	case "preproc_include":
-		inc := extractNodeContent(node, content)
-		if inc != "" {
-			metrics.Includes = append(metrics.Includes, inc)
-		}
-
-	case "string_literal":
-		str := extractNodeContent(node, content)
-		if str != "" {
-			metrics.StringLiterals = append(metrics.StringLiterals, str)
-		}
-
-	case "comment":
-		comment := strings.ToUpper(extractNodeContent(node, content))
-		if strings.Contains(comment, "TODO") ||
-			strings.Contains(comment, "FIXME") ||
-			strings.Contains(comment, "HACK") {
-			metrics.TodoCount++
-		}
+func nodeContent(node *sitter.Node, content []byte) string {
+	if node == nil {
+		return ""
 	}
-
-	for i := 0; i < int(node.ChildCount()); i++ {
-		child := node.Child(i)
-		if child != nil {
-			extractASTData(child, content, metrics)
-		}
-	}
-}
-
-func findFirstIdentifier(node *sitter.Node, content []byte) string {
-	if node.Type() == "identifier" || node.Type() == "type_identifier" {
-		return extractNodeContent(node, content)
-	}
-	for i := 0; i < int(node.ChildCount()); i++ {
-		if res := findFirstIdentifier(node.Child(i), content); res != "" {
-			return res
-		}
-	}
-	return ""
-}
-
-func extractNodeContent(node *sitter.Node, content []byte) string {
-	start := node.StartByte()
-	end := node.EndByte()
-	if start < uint32(len(content)) && end <= uint32(len(content)) && start <= end {
+	start, end := node.StartByte(), node.EndByte()
+	if start <= end && end <= uint32(len(content)) {
 		return string(content[start:end])
 	}
 	return ""
 }
 
-func getGitChurn(basePath, relPath string) int {
-	cmd := exec.Command("git", "rev-list", "--count", "HEAD", "--", relPath)
-	cmd.Dir = basePath
-	out, err := cmd.Output()
-	if err != nil {
-		return 0
-	}
-	var count int
-	fmt.Sscanf(strings.TrimSpace(string(out)), "%d", &count)
-	return count
-}
-
-func getGitLastModified(basePath, relPath string) time.Time {
-	cmd := exec.Command("git", "log", "-1", "--format=%cI", "--", relPath)
-	cmd.Dir = basePath
-	out, err := cmd.Output()
-	if err != nil {
-		return time.Now()
-	}
-	t, _ := time.Parse(time.RFC3339, strings.TrimSpace(string(out)))
-	return t
-}
-
-func getGitPrimaryAuthor(basePath, relPath string) string {
-	cmd := exec.Command("git", "log", "--format=%an", "--", relPath)
-	cmd.Dir = basePath
-	out, err := cmd.Output()
-	if err != nil {
-		return ""
-	}
-
-	authors := strings.Split(strings.TrimSpace(string(out)), "\n")
-	counts := make(map[string]int)
-	maxCount := 0
-	primary := ""
-
-	for _, a := range authors {
-		a = strings.TrimSpace(a)
-		if a == "" {
-			continue
-		}
-		counts[a]++
-		if counts[a] > maxCount {
-			maxCount = counts[a]
-			primary = a
-		}
-	}
-	return primary
-}
-
-func ExtractSymbols(fullPath string, symbolNames []string) string {
-	content, err := os.ReadFile(fullPath)
-	if err != nil {
-		return ""
-	}
-
-	parser := sitter.NewParser()
-	parser.SetLanguage(c.GetLanguage())
-	tree, err := parser.ParseCtx(context.Background(), nil, content)
-	if err != nil {
-		return ""
-	}
-
-	targets := make(map[string]bool)
-	for _, f := range symbolNames {
-		targets[strings.TrimSpace(f)] = true
-	}
-
-	var extracted bytes.Buffer
-	extractTargetSymbols(tree.RootNode(), content, targets, &extracted)
-
-	res := extracted.String()
-	res = strings.ReplaceAll(res, "\t", " ")
-	for strings.Contains(res, "  ") {
-		res = strings.ReplaceAll(res, "  ", " ")
-	}
-
-	if len(res) > 1000 {
-		return res[:400] + "\n...[truncated]...\n" + res[len(res)-400:]
-	}
-	return res
-}
-
-func extractTargetSymbols(node *sitter.Node, content []byte, targets map[string]bool, out *bytes.Buffer) {
-	nodeType := node.Type()
-	if nodeType == "function_definition" || nodeType == "struct_specifier" || nodeType == "type_definition" {
-		name := findFirstIdentifier(node, content)
-		if targets[name] {
-			out.WriteString(extractNodeContent(node, content))
-			out.WriteString("\n")
-		}
-	}
-	for i := 0; i < int(node.ChildCount()); i++ {
-		child := node.Child(i)
-		if child != nil {
-			extractTargetSymbols(child, content, targets, out)
-		}
-	}
+func collapseSpaces(s string) string {
+	return strings.Join(strings.Fields(strings.ReplaceAll(s, "\n", " ")), " ")
 }
