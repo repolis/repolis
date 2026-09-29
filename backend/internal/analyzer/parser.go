@@ -6,588 +6,266 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"runtime"
+	"sort"
 	"strings"
-	"time"
+	"sync"
 
 	"github.com/repolis/repolis/backend/internal/logger"
 
+	"github.com/repolis/repolis/backend/internal/analyzer/lang"
 	sitter "github.com/smacker/go-tree-sitter"
-	"github.com/smacker/go-tree-sitter/c"
 )
 
-// RawStruct is a struct/type extracted from the AST before LLM enrichment.
-type RawStruct struct {
-	Name        string   `json:"name"`
-	SourceFile  string   `json:"source_file"`
-	Fields      []string `json:"fields"`
-	LinesOfCode int      `json:"lines_of_code"`
-	BodySnippet string   `json:"body_snippet"` // minified source for LLM context
-}
-
-// RawFunction is a function extracted from the AST before LLM association.
-type RawFunction struct {
-	Name        string `json:"name"`
-	SourceFile  string `json:"source_file"`
-	Signature   string `json:"signature"`    // return type + params
-	BodySnippet string `json:"body_snippet"` // minified source for LLM context
-	LinesOfCode int    `json:"lines_of_code"`
-}
-
-// FileInfo holds per-file metadata used to construct Roads and provide git context.
-type FileInfo struct {
-	Path          string    `json:"path"`
-	Extension     string    `json:"extension"`
-	Depth         int       `json:"depth"`
-	LinesOfCode   int       `json:"lines_of_code"`
-	CommitChurn   int       `json:"commit_churn"`
-	LastModified  time.Time `json:"last_modified"`
-	PrimaryAuthor string    `json:"primary_author"`
-	Includes      []string  `json:"includes"`
-}
-
-// RawExtraction is the full output of the AST parsing phase,
-// before any LLM processing.
-type RawExtraction struct {
-	Files     []FileInfo    `json:"files"`
-	Structs   []RawStruct   `json:"structs"`
-	Functions []RawFunction `json:"functions"`
-}
-
-// Always ignored — these are never source code.
+// Directories that are never first-party source.
 var ignoredDirs = map[string]bool{
-	".git": true, "node_modules": true, "vendor": true,
-	".github": true, "build": true, "dist": true, "target": true,
+	".git": true, "node_modules": true, "vendor": true, ".github": true,
+	"build": true, "dist": true, "target": true, "cmake-build-debug": true,
 	"third_party": true, "thirdparty": true, "3rdparty": true,
-	"external": true, "extern": true,
+	"external": true, "extern": true, "deps": true, "depends": true,
+	"subprojects": true, "contrib": true, ".deps": true, "m4": true,
 }
 
-// isVendoredDir detects third-party directories by checking for
-// their own LICENSE/README, or pre-compiled binary artifacts (.a, .so, .lib)
-// which are a strong signal of vendored code.
-func isVendoredDir(dirPath string) bool {
-	// Check for LICENSE/README at this level
-	indicators := []string{"LICENSE", "LICENSE.md", "LICENSE.txt", "README.md", "README"}
-	for _, f := range indicators {
-		if _, err := os.Stat(filepath.Join(dirPath, f)); err == nil {
-			return true
-		}
-	}
+var licenseNames = map[string]bool{
+	"LICENSE": true, "LICENSE.md": true, "LICENSE.txt": true,
+	"LICENCE": true, "LICENCE.md": true, "LICENCE.txt": true,
+	"COPYING": true, "COPYING.txt": true, "COPYRIGHT": true,
+}
 
-	// Check for pre-compiled binaries (max 1 level deep)
-	binaryExts := map[string]bool{".a": true, ".so": true, ".lib": true, ".dll": true, ".dylib": true}
+// firstPartyDirs are never vendored, whatever they contain.
+var firstPartyDirs = map[string]bool{
+	"src": true, "lib": true, "include": true, "examples": true, "example": true,
+	"test": true, "tests": true, "demo": true, "demos": true, "tools": true,
+	"tool": true, "cmd": true, "app": true, "apps": true, "samples": true,
+	"crates": true, "packages": true, "internal": true, "pkg": true,
+}
+
+var binaryExts = map[string]bool{
+	".a": true, ".so": true, ".lib": true, ".dll": true, ".dylib": true, ".o": true,
+}
+
+// A self-contained build system of its own. CMakeLists.txt and Makefile.am
+// are deliberately absent: they appear in almost every subdirectory of a
+// CMake or autotools project, so treating them as evidence of vendoring
+// wrongly removed libgit2's first-party examples/ tree.
+// isVendoredDir detects a third-party tree checked into the repository.
+//
+// The only signal kept is a licence file sitting next to a pre-compiled
+// binary, because every cheaper one produced false positives on real
+// projects. A README meant libgit2 lost its examples; a nested build manifest
+// meant three of ripgrep's own crates were dropped, since a Cargo workspace
+// member owns a Cargo.toml exactly like a vendored library does. Directory
+// names that really do mean vendoring are handled by ignoredDirs above, which
+// is both accurate and cheap.
+func isVendoredDir(dirPath string) bool {
+	if firstPartyDirs[strings.ToLower(filepath.Base(dirPath))] {
+		return false
+	}
 	entries, err := os.ReadDir(dirPath)
 	if err != nil {
 		return false
 	}
+
+	hasLicense, hasBinary := false, false
 	for _, e := range entries {
-		if !e.IsDir() {
-			if binaryExts[filepath.Ext(e.Name())] {
-				return true
-			}
-		} else {
-			// Check one level of subdirectories (e.g., raylib/lib/libraylib.a)
-			subEntries, err := os.ReadDir(filepath.Join(dirPath, e.Name()))
-			if err != nil {
-				continue
-			}
-			for _, se := range subEntries {
-				if !se.IsDir() && binaryExts[filepath.Ext(se.Name())] {
-					return true
-				}
-			}
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if licenseNames[strings.ToUpper(name)] {
+			hasLicense = true
+		}
+		if binaryExts[filepath.Ext(name)] {
+			hasBinary = true
 		}
 	}
-	return false
+	return hasLicense && hasBinary
 }
 
-// ExtractRepository walks the repo and extracts all raw structural data.
+type parseJob struct {
+	fullPath string
+	relPath  string
+	lang     lang.Language
+}
+
+type parseOutput struct {
+	file    FileInfo
+	structs []RawStruct
+	funcs   []RawFunction
+}
+
+// ExtractRepository walks the repo and extracts all structural data in
+// parallel. Parsing is pure CPU work with no shared state, so it scales
+// linearly with cores; the previous version was single-threaded.
 func ExtractRepository(clonePath string) (*RawExtraction, error) {
-	result := &RawExtraction{}
+	var jobs []parseJob
+	var skipped []string
 
 	err := filepath.WalkDir(clonePath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if d.IsDir() {
-			if ignoredDirs[d.Name()] {
-				logger.Log(logger.InfoLevel, "Skipping ignored dir: %s", d.Name())
+			if path != clonePath && ignoredDirs[d.Name()] {
+				rel, _ := filepath.Rel(clonePath, path)
+				skipped = append(skipped, rel)
 				return filepath.SkipDir
 			}
 			if path != clonePath && isVendoredDir(path) {
-				relDir, _ := filepath.Rel(clonePath, path)
-				logger.Log(logger.InfoLevel, "Skipping vendored dir: %s", relDir)
+				rel, _ := filepath.Rel(clonePath, path)
+				logger.Log(logger.WarnLevel, "Skipping vendored dir (licence + build/binary): %s", rel)
+				skipped = append(skipped, rel)
 				return filepath.SkipDir
 			}
 			return nil
 		}
 
-		ext := filepath.Ext(d.Name())
-		if ext != ".c" && ext != ".h" {
+		l := lang.ForFile(d.Name())
+		if l == nil {
 			return nil
 		}
-
-		fileInfo, structs, funcs, parseErr := parseCFile(path, clonePath)
-		if parseErr != nil {
-			logger.Log(logger.WarnLevel, "Failed to parse %s: %v", path, parseErr)
-			return nil
-		}
-
-		result.Files = append(result.Files, fileInfo)
-		result.Structs = append(result.Structs, structs...)
-		result.Functions = append(result.Functions, funcs...)
+		rel, _ := filepath.Rel(clonePath, path)
+		jobs = append(jobs, parseJob{
+			fullPath: path,
+			relPath:  filepath.ToSlash(rel),
+			lang:     l,
+		})
 		return nil
 	})
-
 	if err != nil {
 		return nil, fmt.Errorf("failed to walk directory: %w", err)
 	}
 
-	logger.Log(logger.InfoLevel, "Extracted %d files, %d structs, %d functions",
-		len(result.Files), len(result.Structs), len(result.Functions))
+	sort.Slice(jobs, func(i, j int) bool { return jobs[i].relPath < jobs[j].relPath })
+
+	workers := runtime.NumCPU()
+	if workers > 8 {
+		workers = 8
+	}
+	if workers < 1 {
+		workers = 1
+	}
+
+	outputs := make([]parseOutput, len(jobs))
+	var wg sync.WaitGroup
+	jobCh := make(chan int, len(jobs))
+	for i := range jobs {
+		jobCh <- i
+	}
+	close(jobCh)
+
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			// One parser per worker: tree-sitter parsers are not goroutine safe,
+			// but creating one per file is wasteful.
+			parsers := make(map[string]*sitter.Parser)
+			for idx := range jobCh {
+				j := jobs[idx]
+				p, ok := parsers[j.lang.Name()]
+				if !ok {
+					p = sitter.NewParser()
+					p.SetLanguage(j.lang.Grammar())
+					parsers[j.lang.Name()] = p
+				}
+				out, perr := parseFile(p, j.lang, j.fullPath, j.relPath)
+				if perr != nil {
+					logger.Log(logger.WarnLevel, "Failed to parse %s: %v", j.relPath, perr)
+					continue
+				}
+				outputs[idx] = out
+			}
+		}()
+	}
+	wg.Wait()
+
+	result := &RawExtraction{SkippedDirs: skipped, Languages: map[string]int{}}
+	for _, out := range outputs {
+		if out.file.Path == "" {
+			continue
+		}
+		result.Files = append(result.Files, out.file)
+		result.Structs = append(result.Structs, out.structs...)
+		result.Functions = append(result.Functions, out.funcs...)
+		result.Languages[out.file.Language]++
+	}
+
+	logger.Log(logger.InfoLevel,
+		"Extracted %d files, %d type definitions, %d functions (%d workers, %d dirs skipped, languages: %v)",
+		len(result.Files), len(result.Structs), len(result.Functions), workers, len(skipped), result.Languages)
 	return result, nil
 }
 
-func parseCFile(fullPath, basePath string) (FileInfo, []RawStruct, []RawFunction, error) {
+// parseFile runs one file through whichever language claims it.
+func parseFile(parser *sitter.Parser, l lang.Language, fullPath, relPath string) (parseOutput, error) {
 	content, err := os.ReadFile(fullPath)
 	if err != nil {
-		return FileInfo{}, nil, nil, err
+		return parseOutput{}, err
 	}
-
-	parser := sitter.NewParser()
-	parser.SetLanguage(c.GetLanguage())
+	// Guard against generated blobs (amalgamations, tables) that blow up
+	// parse time for no analytical value.
+	if len(content) > 4*1024*1024 {
+		return parseOutput{}, fmt.Errorf("file too large (%d bytes)", len(content))
+	}
 
 	tree, err := parser.ParseCtx(context.Background(), nil, content)
 	if err != nil {
-		return FileInfo{}, nil, nil, err
+		return parseOutput{}, err
+	}
+	defer tree.Close()
+
+	dir := filepath.ToSlash(filepath.Dir(relPath))
+	if dir == "." || dir == "/" {
+		dir = "root"
+	}
+	ns := l.Namespace(relPath)
+
+	facts := l.Parse(tree.RootNode(), content)
+
+	out := parseOutput{
+		file: FileInfo{
+			Path:          relPath,
+			Dir:           dir,
+			Extension:     filepath.Ext(relPath),
+			Language:      l.Name(),
+			Namespace:     ns,
+			Depth:         strings.Count(relPath, "/"),
+			LinesOfCode:   bytes.Count(content, []byte("\n")) + 1,
+			FileScopeVars: facts.ScopeVar,
+			Imports:       facts.Imports,
+		},
 	}
 
-	rootNode := tree.RootNode()
-	relPath, _ := filepath.Rel(basePath, fullPath)
-	depth := strings.Count(relPath, string(filepath.Separator))
-
-	fileInfo := FileInfo{
-		Path:          relPath,
-		Extension:     filepath.Ext(fullPath),
-		Depth:         depth,
-		LinesOfCode:   bytes.Count(content, []byte("\n")) + 1,
-		CommitChurn:   getGitChurn(basePath, relPath),
-		LastModified:  getGitLastModified(basePath, relPath),
-		PrimaryAuthor: getGitPrimaryAuthor(basePath, relPath),
+	for _, t := range facts.Types {
+		out.structs = append(out.structs, RawStruct{
+			Name: t.Name, Namespace: ns, SourceFile: relPath,
+			Fields: t.Fields, FieldTypes: t.FieldTypes, LinesOfCode: t.LOC,
+		})
 	}
-
-	var structs []RawStruct
-	var funcs []RawFunction
-
-	// Track nodes already processed via typedef to avoid double-counting
-	seenNodes := make(map[uint32]bool)
-
-	var walk func(*sitter.Node)
-	walk = func(n *sitter.Node) {
-		if seenNodes[n.StartByte()] {
-			return
-		}
-
-		switch n.Type() {
-		case "struct_specifier":
-			s := extractStruct(n, content, relPath)
-			if s != nil {
-				structs = append(structs, *s)
-			}
-
-		case "type_definition":
-			// A typedef wrapping a struct, e.g. typedef struct { ... } MyType;
-			s := extractTypedefStruct(n, content, relPath)
-			if s != nil {
-				structs = append(structs, *s)
-				// Mark inner struct_specifier as seen to prevent duplicate
-				for i := 0; i < int(n.ChildCount()); i++ {
-					child := n.Child(i)
-					if child != nil && child.Type() == "struct_specifier" {
-						seenNodes[child.StartByte()] = true
-					}
-				}
-			}
-
-		case "function_definition":
-			f := extractFunction(n, content, relPath)
-			if f != nil {
-				funcs = append(funcs, *f)
-			}
-
-		case "preproc_include":
-			if inc := nodeContent(n, content); inc != "" {
-				fileInfo.Includes = append(fileInfo.Includes, inc)
-			}
-		}
-
-		for i := 0; i < int(n.ChildCount()); i++ {
-			if child := n.Child(i); child != nil {
-				walk(child)
-			}
-		}
+	for _, f := range facts.Funcs {
+		out.funcs = append(out.funcs, RawFunction{
+			Name: f.Name, Namespace: ns, Receiver: f.Receiver, SourceFile: relPath,
+			Signature: f.Signature, ReturnType: f.ReturnType, ParamTypes: f.ParamTypes,
+			TypesUsed: f.TypesUsed, Calls: f.Calls, Complexity: f.Complexity,
+			LinesOfCode: f.LOC,
+		})
 	}
-	walk(rootNode)
-
-	logger.Log(logger.InfoLevel, "Parsed %s: %d structs, %d functions", relPath, len(structs), len(funcs))
-	return fileInfo, structs, funcs, nil
-}
-
-// extractStruct pulls a named struct with its field list.
-func extractStruct(node *sitter.Node, content []byte, filePath string) *RawStruct {
-	name := ""
-	var fields []string
-
-	for i := 0; i < int(node.ChildCount()); i++ {
-		child := node.Child(i)
-		if child == nil {
-			continue
-		}
-		switch child.Type() {
-		case "type_identifier":
-			name = nodeContent(child, content)
-		case "field_declaration_list":
-			fields = extractFieldNames(child, content)
-		}
-	}
-
-	if name == "" {
-		return nil
-	}
-
-	loc := int(node.EndPoint().Row-node.StartPoint().Row) + 1
-	return &RawStruct{
-		Name:        name,
-		SourceFile:  filePath,
-		Fields:      fields,
-		LinesOfCode: loc,
-		BodySnippet: minifySnippet(nodeContent(node, content), 500),
-	}
-}
-
-// extractTypedefStruct handles: typedef struct { int x; } MyName;
-func extractTypedefStruct(node *sitter.Node, content []byte, filePath string) *RawStruct {
-	var innerStruct *sitter.Node
-	typedefName := ""
-
-	for i := 0; i < int(node.ChildCount()); i++ {
-		child := node.Child(i)
-		if child == nil {
-			continue
-		}
-		switch child.Type() {
-		case "struct_specifier":
-			innerStruct = child
-		case "type_identifier":
-			typedefName = nodeContent(child, content)
-		}
-	}
-
-	if innerStruct == nil {
-		return nil // Not a struct typedef
-	}
-
-	// Try to get fields from the inner struct
-	var fields []string
-	for i := 0; i < int(innerStruct.ChildCount()); i++ {
-		child := innerStruct.Child(i)
-		if child != nil && child.Type() == "field_declaration_list" {
-			fields = extractFieldNames(child, content)
-		}
-	}
-
-	// Prefer typedef name, fall back to inner struct name
-	name := typedefName
-	if name == "" {
-		for i := 0; i < int(innerStruct.ChildCount()); i++ {
-			child := innerStruct.Child(i)
-			if child != nil && child.Type() == "type_identifier" {
-				name = nodeContent(child, content)
-			}
-		}
-	}
-	if name == "" {
-		return nil
-	}
-
-	loc := int(node.EndPoint().Row-node.StartPoint().Row) + 1
-	return &RawStruct{
-		Name:        name,
-		SourceFile:  filePath,
-		Fields:      fields,
-		LinesOfCode: loc,
-		BodySnippet: minifySnippet(nodeContent(node, content), 500),
-	}
-}
-
-func extractFieldNames(fieldList *sitter.Node, content []byte) []string {
-	var fields []string
-	for i := 0; i < int(fieldList.ChildCount()); i++ {
-		child := fieldList.Child(i)
-		if child == nil || child.Type() != "field_declaration" {
-			continue
-		}
-		// The declarator usually contains the field name
-		name := findDeclaratorName(child, content)
-		if name != "" {
-			fields = append(fields, name)
-		}
-	}
-	return fields
-}
-
-func findDeclaratorName(node *sitter.Node, content []byte) string {
-	// Look for field_identifier or identifier within declarators
-	for i := 0; i < int(node.ChildCount()); i++ {
-		child := node.Child(i)
-		if child == nil {
-			continue
-		}
-		switch child.Type() {
-		case "field_identifier":
-			return nodeContent(child, content)
-		case "pointer_declarator", "array_declarator":
-			if name := findDeclaratorName(child, content); name != "" {
-				return name
-			}
-		}
-	}
-	return ""
-}
-
-func extractFunction(node *sitter.Node, content []byte, filePath string) *RawFunction {
-	name := ""
-	signature := ""
-
-	for i := 0; i < int(node.ChildCount()); i++ {
-		child := node.Child(i)
-		if child == nil {
-			continue
-		}
-		switch child.Type() {
-		case "function_declarator":
-			// Get function name from declarator
-			for j := 0; j < int(child.ChildCount()); j++ {
-				gc := child.Child(j)
-				if gc == nil {
-					continue
-				}
-				switch gc.Type() {
-				case "identifier":
-					name = nodeContent(gc, content)
-				case "parameter_list":
-					signature = nodeContent(gc, content)
-				}
-			}
-		case "pointer_declarator":
-			// Handle: int *myFunc(...)
-			if n := findFuncDeclInPointer(child, content); n != "" {
-				name = n
-			}
-		}
-	}
-
-	if name == "" {
-		return nil
-	}
-
-	loc := int(node.EndPoint().Row-node.StartPoint().Row) + 1
-	return &RawFunction{
-		Name:        name,
-		SourceFile:  filePath,
-		Signature:   signature,
-		LinesOfCode: loc,
-		BodySnippet: minifySnippet(nodeContent(node, content), 600),
-	}
-}
-
-func findFuncDeclInPointer(node *sitter.Node, content []byte) string {
-	for i := 0; i < int(node.ChildCount()); i++ {
-		child := node.Child(i)
-		if child == nil {
-			continue
-		}
-		if child.Type() == "function_declarator" {
-			for j := 0; j < int(child.ChildCount()); j++ {
-				gc := child.Child(j)
-				if gc != nil && gc.Type() == "identifier" {
-					return nodeContent(gc, content)
-				}
-			}
-		}
-		if child.Type() == "pointer_declarator" {
-			if n := findFuncDeclInPointer(child, content); n != "" {
-				return n
-			}
-		}
-	}
-	return ""
-}
-
-// ExtractSymbols extracts full source of named symbols for LLM context.
-func ExtractSymbols(fullPath string, symbolNames []string) string {
-	content, err := os.ReadFile(fullPath)
-	if err != nil {
-		return ""
-	}
-
-	parser := sitter.NewParser()
-	parser.SetLanguage(c.GetLanguage())
-	tree, err := parser.ParseCtx(context.Background(), nil, content)
-	if err != nil {
-		return ""
-	}
-
-	targets := make(map[string]bool)
-	for _, f := range symbolNames {
-		targets[strings.TrimSpace(f)] = true
-	}
-
-	var extracted bytes.Buffer
-	extractTargetSymbols(tree.RootNode(), content, targets, &extracted)
-
-	res := extracted.String()
-	res = strings.ReplaceAll(res, "\t", " ")
-	for strings.Contains(res, "  ") {
-		res = strings.ReplaceAll(res, "  ", " ")
-	}
-
-	if len(res) > 1000 {
-		return res[:400] + "\n...[truncated]...\n" + res[len(res)-400:]
-	}
-	return res
-}
-
-func extractTargetSymbols(node *sitter.Node, content []byte, targets map[string]bool, out *bytes.Buffer) {
-	nodeType := node.Type()
-	if nodeType == "function_definition" || nodeType == "struct_specifier" || nodeType == "type_definition" {
-		name := findFirstIdentifier(node, content)
-		if targets[name] {
-			if nodeType == "function_definition" {
-				out.WriteString(extractFunctionSignatureAndVars(node, content))
-			} else {
-				out.WriteString(nodeContent(node, content))
-			}
-			out.WriteString("\n")
-		}
-	}
-	for i := 0; i < int(node.ChildCount()); i++ {
-		child := node.Child(i)
-		if child != nil {
-			extractTargetSymbols(child, content, targets, out)
-		}
-	}
-}
-
-func extractFunctionSignatureAndVars(node *sitter.Node, content []byte) string {
-	var out bytes.Buffer
-	for i := 0; i < int(node.ChildCount()); i++ {
-		child := node.Child(i)
-		if child == nil {
-			continue
-		}
-		if child.Type() == "compound_statement" {
-			out.WriteString(" {\n")
-			for j := 0; j < int(child.ChildCount()); j++ {
-				gc := child.Child(j)
-				if gc != nil && gc.Type() == "declaration" {
-					out.WriteString("  ")
-					out.WriteString(nodeContent(gc, content))
-					out.WriteString("\n")
-				}
-			}
-			out.WriteString("  // body stripped...\n}")
-		} else {
-			out.WriteString(nodeContent(child, content))
-			out.WriteString(" ")
-		}
-	}
-	return out.String()
-}
-
-func findFirstIdentifier(node *sitter.Node, content []byte) string {
-	if node.Type() == "identifier" || node.Type() == "type_identifier" {
-		return nodeContent(node, content)
-	}
-	for i := 0; i < int(node.ChildCount()); i++ {
-		if res := findFirstIdentifier(node.Child(i), content); res != "" {
-			return res
-		}
-	}
-	return ""
+	return out, nil
 }
 
 func nodeContent(node *sitter.Node, content []byte) string {
-	start := node.StartByte()
-	end := node.EndByte()
-	if start < uint32(len(content)) && end <= uint32(len(content)) && start <= end {
+	if node == nil {
+		return ""
+	}
+	start, end := node.StartByte(), node.EndByte()
+	if start <= end && end <= uint32(len(content)) {
 		return string(content[start:end])
 	}
 	return ""
 }
 
-func minifySnippet(s string, maxLen int) string {
-	s = strings.ReplaceAll(s, "\t", " ")
-	for strings.Contains(s, "  ") {
-		s = strings.ReplaceAll(s, "  ", " ")
-	}
-	s = strings.ReplaceAll(s, "\n\n", "\n")
-	if len(s) > maxLen {
-		half := maxLen / 2
-		return s[:half] + "\n...[truncated]...\n" + s[len(s)-half:]
-	}
-	return s
-}
-
-// ---- Git helpers ----
-
-func getGitChurn(basePath, relPath string) int {
-	cmd := exec.Command("git", "rev-list", "--count", "HEAD", "--", relPath)
-	cmd.Dir = basePath
-	out, err := cmd.Output()
-	if err != nil {
-		return 0
-	}
-	var count int
-	fmt.Sscanf(strings.TrimSpace(string(out)), "%d", &count)
-	return count
-}
-
-func getGitLastModified(basePath, relPath string) time.Time {
-	cmd := exec.Command("git", "log", "-1", "--format=%cI", "--", relPath)
-	cmd.Dir = basePath
-	out, err := cmd.Output()
-	if err != nil {
-		return time.Now()
-	}
-	t, _ := time.Parse(time.RFC3339, strings.TrimSpace(string(out)))
-	return t
-}
-
-func getGitPrimaryAuthor(basePath, relPath string) string {
-	cmd := exec.Command("git", "log", "--format=%an", "--", relPath)
-	cmd.Dir = basePath
-	out, err := cmd.Output()
-	if err != nil {
-		return ""
-	}
-
-	authors := strings.Split(strings.TrimSpace(string(out)), "\n")
-	counts := make(map[string]int)
-	maxCount := 0
-	primary := ""
-
-	for _, a := range authors {
-		a = strings.TrimSpace(a)
-		if a == "" {
-			continue
-		}
-		counts[a]++
-		if counts[a] > maxCount {
-			maxCount = counts[a]
-			primary = a
-		}
-	}
-	return primary
+func collapseSpaces(s string) string {
+	return strings.Join(strings.Fields(strings.ReplaceAll(s, "\n", " ")), " ")
 }
