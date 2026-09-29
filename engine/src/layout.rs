@@ -1,676 +1,879 @@
 use crate::data::CityMap;
+use crate::treemap::{squarify, Item, Rect};
 use std::collections::HashMap;
 use voronoice::{BoundingBox, Point, VoronoiBuilder};
 
 const MIN_FOOTPRINT: f64 = 4.0;
-const MIN_HEIGHT: f64 = 4.0;
-const LOT_MARGIN: f64 = 1.5;
-const LOCAL_STREET_WIDTH: f64 = 8.0;
-const MAX_ROAD_WIDTH: f64 = 8.0;
-const MIN_ROAD_WIDTH: f64 = 1.0;
+const MIN_HEIGHT: f64 = 3.0;
+/// Gap left around each building lot; becomes the alley between buildings.
+const LOT_MARGIN: f64 = 1.1;
+/// Gap left around each directory block; becomes a street.
+const STREET_WIDTH: f64 = 4.5;
+/// Gap between a district's outer boundary and its built-up area.
+const DISTRICT_PADDING: f64 = 7.0;
 
 pub struct PlacedBuilding {
+    pub id: String,
     pub name: String,
-    pub pos_x: f64,
-    pub pos_z: f64,
+    pub kind: String,
+    /// World-space centre of the footprint.
+    pub center_x: f64,
+    pub center_z: f64,
+    /// Footprint centre in district-local (unrotated) space, used for picking.
+    pub local_x: f64,
+    pub local_z: f64,
     pub width: f64,
     pub height: f64,
     pub depth: f64,
-    pub num_fields: u32,
-    pub num_methods: u32,
+    pub district_idx: usize,
+    pub churn_rank: f64,
+    pub age_days: u32,
+}
+
+pub struct Street {
+    pub local_x: f64,
+    pub local_z: f64,
+    pub width: f64,
+    pub depth: f64,
+    pub district_idx: usize,
 }
 
 pub struct PlacedDistrict {
     pub name: String,
     pub typology: String,
-    pub pos_x: f64,
-    pub pos_z: f64,
-    pub width: f64,
-    pub depth: f64,
+    /// Convex Voronoi cell, world space.
     pub polygon: Vec<(f64, f64)>,
-    pub buildings: Vec<PlacedBuilding>,
-}
-
-pub struct RoadSegment {
-    pub start_x: f64,
-    pub start_z: f64,
-    pub end_x: f64,
-    pub end_z: f64,
-    pub points: Vec<(f64, f64)>,
-    pub width: f64,
-    pub road_type: String,
-    pub source: String,
-    pub target: String,
-    pub weight: u32,
-    pub name: String,
-}
-
-pub struct Platform {
-    pub pos_x: f64,
-    pub pos_z: f64,
-    pub width: f64,
-    pub depth: f64,
-    pub polygon: Vec<(f64, f64)>,
-    pub typology: String,
-    pub district_idx: usize,
-}
-
-pub struct LayoutResult {
-    pub districts: Vec<PlacedDistrict>,
-    pub roads: Vec<RoadSegment>,
-    pub platforms: Vec<Platform>,
-}
-
-struct RawBuilding {
-    name: String,
-    width: f64,
-    height: f64,
-    depth: f64,
-    num_fields: u32,
-    num_methods: u32,
-    district_idx: usize,
-    pos_x: f64,
-    pos_z: f64,
-}
-
-pub struct DistrictLayoutInfo {
-    pub idx: usize,
-    pub seed_x: f64,
-    pub seed_z: f64,
+    /// Rotation of the built-up area about `origin`.
+    pub rot: f64,
+    pub origin_x: f64,
+    pub origin_z: f64,
+    pub label_x: f64,
+    pub label_z: f64,
     pub min_x: f64,
     pub min_z: f64,
     pub max_x: f64,
     pub max_z: f64,
-    pub polygon: Vec<(f64, f64)>,
-    pub raw_polygon: Vec<(f64, f64)>,
+    pub building_count: usize,
 }
 
-struct DepEdge {
-    source_idx: usize,
-    target_idx: usize,
-    weight: f64,
+/// A dependency drawn as an elevated arc rather than a ground road.
+pub struct Link {
+    pub points: Vec<(f64, f64, f64)>,
+    pub width: f64,
+    pub weight: u32,
+    /// Weight in the source -> target direction, and the reverse. Reciprocal
+    /// edges share one piece of geometry but keep their direction so the
+    /// inspector can still distinguish callers from callees.
+    pub fwd: u32,
+    pub rev: u32,
+    pub kind: String,
+    /// Both ends sit in the same reported dependency cycle.
+    pub in_cycle: bool,
+    pub source: String,
+    pub target: String,
+    pub source_name: String,
+    pub target_name: String,
+    pub inter_district: bool,
 }
 
-fn hash_str(name: &str, seed: u64) -> f64 {
-    let mut hash: u64 = seed;
-    for byte in name.bytes() {
-        hash = hash.wrapping_mul(33).wrapping_add(byte as u64);
+pub struct LayoutResult {
+    pub districts: Vec<PlacedDistrict>,
+    pub buildings: Vec<PlacedBuilding>,
+    pub streets: Vec<Street>,
+    pub links: Vec<Link>,
+    pub radius: f64,
+    pub center_x: f64,
+    pub center_z: f64,
+}
+
+struct Sized {
+    idx_in_city: usize,
+    district_idx: usize,
+    width: f64,
+    depth: f64,
+    height: f64,
+    dir: String,
+}
+
+fn hash01(name: &str, seed: u64) -> f64 {
+    let mut h: u64 = seed;
+    for b in name.bytes() {
+        h = h.wrapping_mul(1099511628211).wrapping_add(b as u64);
     }
-    (hash % 1000) as f64 / 1000.0
+    ((h >> 11) % 100_000) as f64 / 100_000.0
 }
 
 pub fn compute_layout(city: &CityMap) -> LayoutResult {
-    let mut raw_buildings = compute_dimensions(city);
-
-    if raw_buildings.is_empty() {
+    let sized = compute_dimensions(city);
+    if sized.is_empty() {
         return LayoutResult {
-            districts: city.districts.iter().map(|district| PlacedDistrict {
-                name: district.name.clone(),
-                typology: district.typology.clone(),
-                pos_x: 0.0,
-                pos_z: 0.0,
-                width: 0.0,
-                depth: 0.0,
-                polygon: Vec::new(),
-                buildings: Vec::new(),
-            }).collect(),
-            roads: Vec::new(),
-            platforms: Vec::new(),
+            districts: Vec::new(),
+            buildings: Vec::new(),
+            streets: Vec::new(),
+            links: Vec::new(),
+            radius: 60.0,
+            center_x: 0.0,
+            center_z: 0.0,
         };
     }
 
-    let district_infos = layout_districts_voronoi(&mut raw_buildings, city);
-    let edges = resolve_dependencies(city, &raw_buildings);
-    let roads = route_dependencies_agent(&raw_buildings, &edges, &district_infos, city);
-    let platforms = generate_platforms(&raw_buildings, city, &district_infos);
+    // Area each district must accommodate, including its streets and padding.
+    let n_districts = city.districts.len();
+    let mut needed = vec![0.0_f64; n_districts];
+    for s in &sized {
+        needed[s.district_idx] += (s.width + LOT_MARGIN * 2.0) * (s.depth + LOT_MARGIN * 2.0);
+    }
+    for (i, a) in needed.iter_mut().enumerate() {
+        let count = city.districts[i].buildings.len().max(1) as f64;
+        // Streets and block gutters are real area; budget for them up front so
+        // the Voronoi cell is sized for the city, not just for the footprints.
+        *a = (*a * 1.45 + count * STREET_WIDTH * STREET_WIDTH).max(400.0);
+    }
 
-    package_result(city, &raw_buildings, &district_infos, roads, platforms)
+    let seeds = place_seeds(city, &needed);
+    let mut cells = voronoi_cells(&seeds, &needed);
+    fit_cells(&mut cells, &needed);
+
+    let mut districts = Vec::with_capacity(n_districts);
+    let mut buildings = Vec::new();
+    let mut streets = Vec::new();
+
+    for (i, district) in city.districts.iter().enumerate() {
+        let polygon = cells[i].clone();
+        let (cx, cz) = polygon_centroid(&polygon);
+        let rot = principal_angle(&polygon, cx, cz);
+
+        // The built-up area is the largest rectangle that fits inside the cell
+        // at the cell's own principal orientation. Rotating each district
+        // independently is what keeps the result organic instead of a grid.
+        let raw_plot = inscribed_rect(&polygon, cx, cz, rot);
+        // Padding scales with the district: a fixed inset consumed the whole
+        // plot of a one-building district and silently dropped its buildings.
+        let pad = (raw_plot.w.min(raw_plot.d) * 0.07).clamp(0.5, DISTRICT_PADDING);
+        let plot = raw_plot.inset(pad);
+
+        let mine: Vec<&Sized> = sized.iter().filter(|s| s.district_idx == i).collect();
+        pack_district(&mine, &plot, rot, cx, cz, i, city, &mut buildings, &mut streets);
+
+        let (min_x, min_z, max_x, max_z) = polygon_bounds(&polygon);
+        districts.push(PlacedDistrict {
+            name: district.name.clone(),
+            typology: district.typology.clone(),
+            polygon,
+            rot,
+            origin_x: cx,
+            origin_z: cz,
+            label_x: cx,
+            label_z: cz,
+            min_x,
+            min_z,
+            max_x,
+            max_z,
+            building_count: district.buildings.len(),
+        });
+    }
+
+    let links = build_links(city, &buildings, &districts);
+
+    let (min_x, min_z, max_x, max_z) = districts.iter().fold(
+        (f64::MAX, f64::MAX, f64::MIN, f64::MIN),
+        |(a, b, c, d), p| (a.min(p.min_x), b.min(p.min_z), c.max(p.max_x), d.max(p.max_z)),
+    );
+    let center_x = (min_x + max_x) * 0.5;
+    let center_z = (min_z + max_z) * 0.5;
+    let radius = ((max_x - min_x).max(max_z - min_z) * 0.5).max(50.0);
+
+    LayoutResult {
+        districts,
+        buildings,
+        streets,
+        links,
+        radius,
+        center_x,
+        center_z,
+    }
 }
 
-fn compute_dimensions(city: &CityMap) -> Vec<RawBuilding> {
-    let mut buildings = Vec::new();
+fn compute_dimensions(city: &CityMap) -> Vec<Sized> {
+    let mut out = Vec::new();
+    for (d_idx, district) in city.districts.iter().enumerate() {
+        for (b_idx, b) in district.buildings.iter().enumerate() {
+            // Footprint encodes state (fields); height encodes behaviour
+            // (methods). Both now carry real signal: before the extraction
+            // fixes, num_methods was zero for essentially every building.
+            let raw_side = MIN_FOOTPRINT + (b.num_fields as f64).powf(0.58) * 2.4;
+            let side = if raw_side > 26.0 {
+                26.0 + (raw_side - 26.0).powf(0.5)
+            } else {
+                raw_side
+            };
 
-    for (district_idx, district) in city.districts.iter().enumerate() {
-        for building in &district.buildings {
-            let raw_side = MIN_FOOTPRINT + (building.num_fields as f64).powf(0.55) * 2.2;
-            let side = if raw_side > 24.0 { 24.0 + (raw_side - 24.0).powf(0.5) } else { raw_side };
-
-            let raw_height = if building.num_methods > 0 {
-                MIN_HEIGHT + (building.num_methods as f64).powf(0.72) * 3.6
-            } else if building.lines_of_code > 0 {
-                MIN_HEIGHT + (building.lines_of_code as f64).powf(0.55) * 0.3
+            let raw_height = if b.num_methods > 0 {
+                MIN_HEIGHT + (b.num_methods as f64).powf(0.72) * 3.4
+            } else if b.lines_of_code > 1 {
+                MIN_HEIGHT + (b.lines_of_code as f64).powf(0.5) * 0.35
             } else {
                 MIN_HEIGHT
             };
-            let height = if raw_height > 55.0 { 55.0 + (raw_height - 55.0).powf(0.55) } else { raw_height };
+            let height = if raw_height > 60.0 {
+                60.0 + (raw_height - 60.0).powf(0.55)
+            } else {
+                raw_height
+            };
 
-            let min_side = height * 0.22 + 2.5;
-            let final_side = if side < min_side { min_side } else { side };
+            // Keep towers from becoming needles.
+            let final_side = side.max(height * 0.2 + 2.2);
+            let aspect = 0.78 + hash01(&b.id, 10) * 0.44;
 
-            let hash = hash_str(&building.name, 10);
-            let aspect = 0.7 + (hash * 0.6);
-            let width = final_side * aspect;
-            let depth = final_side / aspect;
-
-            buildings.push(RawBuilding {
-                name: building.name.clone(),
-                width,
+            out.push(Sized {
+                idx_in_city: b_idx,
+                district_idx: d_idx,
+                width: final_side * aspect,
+                depth: final_side / aspect,
                 height,
-                depth,
-                num_fields: building.num_fields,
-                num_methods: building.num_methods,
-                district_idx,
-                pos_x: 0.0,
-                pos_z: 0.0,
+                dir: if b.dir.is_empty() { "root".to_string() } else { b.dir.clone() },
             });
         }
     }
-    buildings
+    out
 }
 
-/// Computes organic seeds, generates Voronoi cells, and places building footprints
-/// organically inside the Voronoi polygon of each district.
-fn layout_districts_voronoi(buildings: &mut [RawBuilding], city: &CityMap) -> Vec<DistrictLayoutInfo> {
-    let num_districts = city.districts.len();
-    let mut district_to_buildings: HashMap<usize, Vec<usize>> = HashMap::new();
-    for (idx, building) in buildings.iter().enumerate() {
-        district_to_buildings.entry(building.district_idx).or_default().push(idx);
-    }
-
-    // 1. Calculate estimated radius for each district based on building footprints
-    let mut district_radii = Vec::with_capacity(num_districts);
-    for district_idx in 0..num_districts {
-        let building_indices = district_to_buildings.get(&district_idx);
-        let total_area: f64 = match building_indices {
-            Some(indices) if !indices.is_empty() => {
-                indices.iter().map(|&idx| {
-                    let b = &buildings[idx];
-                    (b.width + LOCAL_STREET_WIDTH) * (b.depth + LOCAL_STREET_WIDTH)
-                }).sum()
-            }
-            _ => 120.0,
-        };
-        let radius = (total_area / std::f64::consts::PI).sqrt() * 0.95 + 6.0;
-        district_radii.push(radius);
-    }
-
-    // 2. Generate organic seed points using golden spiral with tight spacing
-    let mut seeds: Vec<(f64, f64)> = Vec::with_capacity(num_districts);
-    let avg_radius = district_radii.iter().sum::<f64>() / (num_districts.max(1) as f64);
-    for i in 0..num_districts {
-        if i == 0 {
-            seeds.push((0.0, 0.0));
-        } else {
-            let hash = hash_str(&city.districts[i].name, 42);
-            let angle = (i as f64) * 2.399963229728653 + hash * 0.35;
-            let dist = (i as f64).sqrt() * (avg_radius * 1.05) + hash * 3.0;
-            seeds.push((dist * angle.cos(), dist * angle.sin()));
-        }
-    }
-
-    // 3. Relaxation pass: prevent seed crowding while keeping districts tight
-    if num_districts > 1 {
-        for _ in 0..30 {
-            for i in 0..num_districts {
-                for j in (i + 1)..num_districts {
-                    let dx = seeds[j].0 - seeds[i].0;
-                    let dz = seeds[j].1 - seeds[i].1;
-                    let dist = (dx * dx + dz * dz).sqrt().max(0.1);
-                    let min_dist = (district_radii[i] + district_radii[j]) * 0.92;
-                    if dist < min_dist {
-                        let overlap = min_dist - dist;
-                        let nx = dx / dist;
-                        let nz = dz / dist;
-                        seeds[i].0 -= nx * overlap * 0.45;
-                        seeds[i].1 -= nz * overlap * 0.45;
-                        seeds[j].0 += nx * overlap * 0.45;
-                        seeds[j].1 += nz * overlap * 0.45;
-                    }
-                }
-            }
-        }
-    }
-
-    // 4. Compute Voronoi cells using voronoice
-    let max_extent = seeds.iter().enumerate()
-        .map(|(i, (x, z))| (x * x + z * z).sqrt() + district_radii[i])
-        .fold(0.0_f64, f64::max);
-    let box_size = (max_extent * 2.2).max(120.0);
-
-    // Anchor sites outside the district cluster guarantee closed cells for all districts
-    let mut sites: Vec<Point> = seeds.iter()
-        .map(|&(x, z)| Point { x, y: z })
+/// Places district seeds by dependency attraction, then enforces the spacing a
+/// Voronoi diagram actually needs.
+fn place_seeds(city: &CityMap, needed: &[f64]) -> Vec<(f64, f64)> {
+    let n = city.districts.len();
+    let radii: Vec<f64> = needed
+        .iter()
+        .map(|a| (a / std::f64::consts::PI).sqrt())
         .collect();
 
-    let anchor_count = 10;
-    let anchor_radius = (max_extent * 1.35).max(box_size * 0.45);
-    for k in 0..anchor_count {
-        let a = (k as f64) * 2.0 * std::f64::consts::PI / (anchor_count as f64);
+    // Inter-district coupling, summed from the building-level call graph.
+    let mut owner: HashMap<&str, usize> = HashMap::new();
+    for (i, d) in city.districts.iter().enumerate() {
+        for b in &d.buildings {
+            owner.insert(b.id.as_str(), i);
+        }
+    }
+    let mut coupling = vec![0.0_f64; n * n];
+    for e in &city.dependencies {
+        if let (Some(&a), Some(&b)) = (owner.get(e.source.as_str()), owner.get(e.target.as_str())) {
+            if a != b {
+                coupling[a * n + b] += e.weight as f64;
+                coupling[b * n + a] += e.weight as f64;
+            }
+        }
+    }
+    let max_coupling = coupling.iter().cloned().fold(1.0_f64, f64::max);
+
+    // Deterministic start: a golden-angle spiral scaled by district size.
+    let avg_r = radii.iter().sum::<f64>() / (n.max(1) as f64);
+    let mut seeds: Vec<(f64, f64)> = (0..n)
+        .map(|i| {
+            if i == 0 {
+                (0.0, 0.0)
+            } else {
+                let h = hash01(&city.districts[i].id, 42);
+                let angle = i as f64 * 2.399963229728653 + h * 0.4;
+                let dist = (i as f64).sqrt() * avg_r * 2.1;
+                (dist * angle.cos(), dist * angle.sin())
+            }
+        })
+        .collect();
+
+    if n <= 1 {
+        return seeds;
+    }
+
+    for pass in 0..140 {
+        // Attraction: districts that call each other pull together, so spatial
+        // proximity in the finished city means coupling. Previously seeds were
+        // laid out in alphabetical district order, making adjacency meaningless.
+        let cool = 1.0 - (pass as f64 / 140.0);
+        for i in 0..n {
+            for j in (i + 1)..n {
+                let c = coupling[i * n + j];
+                if c <= 0.0 {
+                    continue;
+                }
+                let dx = seeds[j].0 - seeds[i].0;
+                let dz = seeds[j].1 - seeds[i].1;
+                let dist = (dx * dx + dz * dz).sqrt().max(1e-3);
+                let pull = (c / max_coupling) * cool * dist * 0.02;
+                let (nx, nz) = (dx / dist, dz / dist);
+                seeds[i].0 += nx * pull;
+                seeds[i].1 += nz * pull;
+                seeds[j].0 -= nx * pull;
+                seeds[j].1 -= nz * pull;
+            }
+        }
+        separate(&mut seeds, &radii);
+    }
+
+    seeds
+}
+
+/// Shrinks each cell about its centroid until its area matches what the
+/// district actually needs.
+///
+/// Seed placement alone cannot do this. A Voronoi boundary is the
+/// perpendicular bisector of two seeds, so it is equidistant from both: giving
+/// a large cell the radius it needs (separation >= 2*max(r_i, r_j)) hands its
+/// small neighbour exactly the same radius. The separation rule guarantees
+/// every cell is big ENOUGH; this step removes the surplus, so the ground area
+/// a district occupies is proportional to the code it contains. The land
+/// between districts becomes open ground, which also gives the boundaries
+/// somewhere to breathe.
+fn fit_cells(cells: &mut [Vec<(f64, f64)>], needed: &[f64]) {
+    for (i, poly) in cells.iter_mut().enumerate() {
+        let area = polygon_area(poly);
+        if area <= 1e-6 {
+            continue;
+        }
+        // Never shrink below a floor: a two-building district still has to be
+        // findable and clickable.
+        let scale = (needed[i] / area).sqrt().clamp(0.28, 1.0);
+        if scale >= 0.999 {
+            continue;
+        }
+        let (cx, cz) = polygon_centroid(poly);
+        for v in poly.iter_mut() {
+            v.0 = cx + (v.0 - cx) * scale;
+            v.1 = cz + (v.1 - cz) * scale;
+        }
+    }
+}
+
+
+fn separate(seeds: &mut [(f64, f64)], radii: &[f64]) {
+    let n = seeds.len();
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let dx = seeds[j].0 - seeds[i].0;
+            let dz = seeds[j].1 - seeds[i].1;
+            let dist = (dx * dx + dz * dz).sqrt().max(1e-3);
+            // 2 * max(r_i, r_j) is the separation a bisector needs to give the
+            // larger cell its radius; 0.93 tolerates non-circular cells.
+            let min_dist = 2.0 * radii[i].max(radii[j]) * 1.02;
+            if dist < min_dist {
+                let push = (min_dist - dist) * 0.5;
+                let (nx, nz) = (dx / dist, dz / dist);
+                seeds[i].0 -= nx * push;
+                seeds[i].1 -= nz * push;
+                seeds[j].0 += nx * push;
+                seeds[j].1 += nz * push;
+            }
+        }
+    }
+}
+
+fn voronoi_cells(seeds: &[(f64, f64)], needed: &[f64]) -> Vec<Vec<(f64, f64)>> {
+    let n = seeds.len();
+    let fallback = |i: usize| -> Vec<(f64, f64)> {
+        let r = (needed[i] / std::f64::consts::PI).sqrt().max(12.0);
+        (0..10)
+            .map(|k| {
+                let a = k as f64 * std::f64::consts::TAU / 10.0;
+                (seeds[i].0 + r * a.cos(), seeds[i].1 + r * a.sin())
+            })
+            .collect()
+    };
+
+    if n == 0 {
+        return Vec::new();
+    }
+    if n == 1 {
+        return vec![fallback(0)];
+    }
+
+    let max_r = needed
+        .iter()
+        .map(|a| (a / std::f64::consts::PI).sqrt())
+        .fold(0.0_f64, f64::max);
+    let extent = seeds
+        .iter()
+        .map(|(x, z)| x.hypot(*z))
+        .fold(0.0_f64, f64::max)
+        + max_r;
+
+    // The bounding box must comfortably contain every site. voronoice's default
+    // ClipBehavior removes sites that fall outside it, so the previous anchor
+    // ring at 1.35x the extent inside a box of half-extent 1.1x silently lost
+    // the anchors nearest the axes and skewed the outer cells.
+    let box_size = (extent * 3.2).max(200.0);
+    let anchor_radius = extent * 1.28 + max_r * 0.5;
+
+    let mut sites: Vec<Point> = seeds.iter().map(|&(x, z)| Point { x, y: z }).collect();
+    let anchors = 16;
+    for k in 0..anchors {
+        let a = k as f64 * std::f64::consts::TAU / anchors as f64;
         sites.push(Point {
             x: anchor_radius * a.cos(),
             y: anchor_radius * a.sin(),
         });
     }
 
-    let voronoi = VoronoiBuilder::default()
+    let built = VoronoiBuilder::default()
         .set_sites(sites)
         .set_bounding_box(BoundingBox::new_centered(box_size, box_size))
-        .set_lloyd_relaxation_iterations(1)
+        // No Lloyd relaxation: it relocates every site to its cell centroid and
+        // rebuilds, so the seeds this code reasons about would no longer be the
+        // sites of the cells it reads back. It also equalises cell areas, which
+        // is the opposite of what size-proportional districts need.
         .build();
 
-    let mut district_infos = Vec::with_capacity(num_districts);
+    (0..n)
+        .map(|i| match built {
+            Some(ref v) => {
+                let mut poly: Vec<(f64, f64)> =
+                    v.cell(i).iter_vertices().map(|p| (p.x, p.y)).collect();
+                if poly.len() < 3 {
+                    return fallback(i);
+                }
+                if polygon_signed_area(&poly) < 0.0 {
+                    poly.reverse();
+                }
+                poly
+            }
+            None => fallback(i),
+        })
+        .collect()
+}
 
-    for i in 0..num_districts {
-        let (sx, sz) = seeds[i];
-        let mut poly: Vec<(f64, f64)> = if let Some(ref v) = voronoi {
-            v.cell(i).iter_vertices().map(|p| (p.x, p.y)).collect()
-        } else {
-            let r = district_radii[i];
-            (0..8).map(|k| {
-                let a = (k as f64) * 2.0 * std::f64::consts::PI / 8.0;
-                (sx + r * a.cos(), sz + r * a.sin())
-            }).collect()
-        };
+#[allow(clippy::too_many_arguments)]
+fn pack_district(
+    mine: &[&Sized],
+    plot: &Rect,
+    rot: f64,
+    cx: f64,
+    cz: f64,
+    district_idx: usize,
+    city: &CityMap,
+    buildings: &mut Vec<PlacedBuilding>,
+    streets: &mut Vec<Street>,
+) {
+    if mine.is_empty() || plot.area() <= 1.0 {
+        return;
+    }
 
-        // Ensure CCW orientation around seed
-        poly.sort_by(|a, b| {
-            let angle_a = (a.1 - sz).atan2(a.0 - sx);
-            let angle_b = (b.1 - sz).atan2(b.0 - sx);
-            angle_a.partial_cmp(&angle_b).unwrap_or(std::cmp::Ordering::Equal)
+    // Level 1: one block per source directory, sized by its total footprint.
+    // This gives the city visible blocks that correspond to real folders.
+    let mut by_dir: HashMap<&str, Vec<&Sized>> = HashMap::new();
+    for s in mine {
+        by_dir.entry(s.dir.as_str()).or_default().push(s);
+    }
+    let mut dir_keys: Vec<&str> = by_dir.keys().copied().collect();
+    dir_keys.sort_unstable();
+
+    let dir_items: Vec<Item> = dir_keys
+        .iter()
+        .enumerate()
+        .map(|(i, d)| Item {
+            key: i,
+            area: by_dir[d]
+                .iter()
+                .map(|s| (s.width + LOT_MARGIN * 2.0) * (s.depth + LOT_MARGIN * 2.0))
+                .sum::<f64>()
+                .max(1.0),
+        })
+        .collect();
+
+    let (sin_r, cos_r) = rot.sin_cos();
+    let to_world = |lx: f64, lz: f64| -> (f64, f64) {
+        let dx = lx - cx;
+        let dz = lz - cz;
+        (cx + dx * cos_r - dz * sin_r, cz + dx * sin_r + dz * cos_r)
+    };
+
+    for (dir_key, block) in squarify(&dir_items, *plot) {
+        let dir = dir_keys[dir_key];
+        // The band removed here is the street between blocks. Its width is
+        // proportional so that a block never disappears into its own gutter.
+        let street = (block.w.min(block.d) * 0.09).clamp(0.25, STREET_WIDTH * 0.5);
+        let inner = block.inset(street);
+        if inner.area() <= 1e-6 {
+            continue;
+        }
+        let (bcx, bcz) = block.center();
+        streets.push(Street {
+            local_x: bcx,
+            local_z: bcz,
+            width: block.w,
+            depth: block.d,
+            district_idx,
         });
 
-        let raw_poly = poly.clone();
+        // Level 2: one lot per building inside its directory's block.
+        let items: Vec<Item> = by_dir[dir]
+            .iter()
+            .enumerate()
+            .map(|(i, s)| Item {
+                key: i,
+                area: (s.width + LOT_MARGIN * 2.0) * (s.depth + LOT_MARGIN * 2.0),
+            })
+            .collect();
 
-        // 5. Organic Polygon Lot Packing (dense and compact)
-        // Place building footprints inside the Voronoi polygon along concentric arcs
-        if let Some(building_indices) = district_to_buildings.get(&i) {
-            let mut sorted_b = building_indices.clone();
-            sorted_b.sort_by(|&a, &b| {
-                let score_a = (buildings[a].num_methods * 3 + buildings[a].num_fields) as f64 + buildings[a].height;
-                let score_b = (buildings[b].num_methods * 3 + buildings[b].num_fields) as f64 + buildings[b].height;
-                score_b.partial_cmp(&score_a).unwrap_or(std::cmp::Ordering::Equal)
-            });
-
-            let mut placed_lots: Vec<(f64, f64, f64, f64)> = Vec::new();
-
-            for &b_idx in &sorted_b {
-                let bw = buildings[b_idx].width;
-                let bd = buildings[b_idx].depth;
-                let lot_w = bw + LOT_MARGIN * 2.0;
-                let lot_d = bd + LOT_MARGIN * 2.0;
-
-                let mut placed = false;
-
-                // Center spot for the primary building
-                if placed_lots.is_empty() && is_rect_in_polygon(sx, sz, lot_w, lot_d, &poly) {
-                    buildings[b_idx].pos_x = sx - bw / 2.0;
-                    buildings[b_idx].pos_z = sz - bd / 2.0;
-                    placed_lots.push((sx, sz, lot_w, lot_d));
-                    placed = true;
-                }
-
-                if !placed {
-                    let r_step = (bw.max(bd) + LOCAL_STREET_WIDTH) * 0.95;
-                    let mut ring_r = 10.0;
-                    let max_r = district_radii[i] * 1.6;
-
-                    while ring_r <= max_r && !placed {
-                        let circumference = 2.0 * std::f64::consts::PI * ring_r;
-                        let count = ((circumference / (bw.max(bd) + LOCAL_STREET_WIDTH)).floor() as usize).max(6);
-                        let ring_idx = (ring_r / r_step).floor() as usize;
-                        let phase = (ring_idx as f64) * 0.61803398875 * 2.0 * std::f64::consts::PI;
-
-                        for step in 0..count {
-                            let theta = phase + (step as f64) * 2.0 * std::f64::consts::PI / (count as f64);
-                            let cx = sx + ring_r * theta.cos();
-                            let cz = sz + ring_r * theta.sin();
-
-                            if !is_rect_in_polygon(cx, cz, lot_w, lot_d, &poly) {
-                                continue;
-                            }
-
-                            let mut collides = false;
-                            for &(px, pz, pw, pd) in &placed_lots {
-                                if (cx - px).abs() < (lot_w + pw) * 0.5 && (cz - pz).abs() < (lot_d + pd) * 0.5 {
-                                    collides = true;
-                                    break;
-                                }
-                            }
-
-                            if !collides {
-                                buildings[b_idx].pos_x = cx - bw / 2.0;
-                                buildings[b_idx].pos_z = cz - bd / 2.0;
-                                placed_lots.push((cx, cz, lot_w, lot_d));
-                                placed = true;
-                                break;
-                            }
-                        }
-                        ring_r += r_step;
-                    }
-                }
-
-                // Fallback placement if cell is dense: place with reduced radius near seed
-                if !placed {
-                    let hash = hash_str(&buildings[b_idx].name, 88);
-                    let angle = hash * 2.0 * std::f64::consts::PI;
-                    let dist = 6.0 + (hash * 0.4) * district_radii[i];
-                    let cx = sx + dist * angle.cos();
-                    let cz = sz + dist * angle.sin();
-                    buildings[b_idx].pos_x = cx - bw / 2.0;
-                    buildings[b_idx].pos_z = cz - bd / 2.0;
-                    placed_lots.push((cx, cz, lot_w, lot_d));
-                }
+        for (k, lot) in squarify(&items, inner) {
+            let s = by_dir[dir][k];
+            let b = &city.districts[district_idx].buildings[s.idx_in_city];
+            let margin = (lot.w.min(lot.d) * 0.12).clamp(0.05, LOT_MARGIN);
+            let cell = lot.inset(margin);
+            if cell.w <= 1e-4 || cell.d <= 1e-4 {
+                continue;
             }
+
+            // Keep the designed footprint when the lot allows it, otherwise
+            // shrink to fit. Either way the building stays inside its lot, so
+            // no two buildings can touch.
+            let w = s.width.min(cell.w).max(0.4);
+            let d = s.depth.min(cell.d).max(0.4);
+            let (lx, lz) = cell.center();
+            let (wx, wz) = to_world(lx, lz);
+
+            buildings.push(PlacedBuilding {
+                id: b.id.clone(),
+                name: b.name.clone(),
+                kind: b.kind.clone(),
+                center_x: wx,
+                center_z: wz,
+                local_x: lx,
+                local_z: lz,
+                width: w,
+                height: s.height,
+                depth: d,
+                district_idx,
+                churn_rank: b.churn_rank,
+                age_days: b.age_days,
+            });
+        }
+    }
+}
+
+/// Dependency links are drawn as arcs above the rooftops.
+///
+/// Ground routing was the original design, but every road ran centre-to-centre
+/// at a fixed height, so it began underneath its source building, ended
+/// underneath its target, and crossed everything between. An arc cannot
+/// intersect the city, reads unambiguously as a connection rather than as
+/// street furniture, and leaves the ground plane to the street grid.
+fn build_links(city: &CityMap, buildings: &[PlacedBuilding], districts: &[PlacedDistrict]) -> Vec<Link> {
+    let mut index: HashMap<&str, usize> = HashMap::new();
+    for (i, b) in buildings.iter().enumerate() {
+        index.insert(b.id.as_str(), i);
+    }
+
+    // Collapse reciprocal edges: A->B and B->A were previously two overlapping
+    // pieces of geometry.
+    struct Merged {
+        fwd: u32,
+        rev: u32,
+        kind: String,
+        in_cycle: bool,
+    }
+    let mut merged: HashMap<(usize, usize), Merged> = HashMap::new();
+    for e in &city.dependencies {
+        let (Some(&a), Some(&b)) = (index.get(e.source.as_str()), index.get(e.target.as_str())) else {
+            continue;
+        };
+        if a == b {
+            continue;
+        }
+        let forward = a < b;
+        let key = if forward { (a, b) } else { (b, a) };
+        let slot = merged.entry(key).or_insert(Merged {
+            fwd: 0,
+            rev: 0,
+            kind: e.kind.clone(),
+            in_cycle: false,
+        });
+        slot.in_cycle |= e.in_cycle;
+        if forward {
+            slot.fwd += e.weight.max(1);
+        } else {
+            slot.rev += e.weight.max(1);
+        }
+    }
+
+    let mut keys: Vec<(&(usize, usize), &Merged)> = merged.iter().collect();
+    keys.sort_by(|x, y| {
+        (y.1.fwd + y.1.rev)
+            .cmp(&(x.1.fwd + x.1.rev))
+            .then(x.0.cmp(y.0))
+    });
+
+    let mut links = Vec::with_capacity(keys.len());
+    for (&(a, b), m) in keys {
+        let weight = &(m.fwd + m.rev);
+        let src = &buildings[a];
+        let tgt = &buildings[b];
+        let inter = src.district_idx != tgt.district_idx;
+
+        let sx = src.center_x;
+        let sz = src.center_z;
+        let tx = tgt.center_x;
+        let tz = tgt.center_z;
+        let span = (tx - sx).hypot(tz - sz);
+
+        let base = src.height.max(tgt.height) + 4.0;
+        let lift = base + span * if inter { 0.18 } else { 0.28 };
+
+        // Quadratic arc, sampled just densely enough to read as a curve.
+        let steps = if inter { 20 } else { 12 };
+        let mut points = Vec::with_capacity(steps + 1);
+        for i in 0..=steps {
+            let t = i as f64 / steps as f64;
+            let inv = 1.0 - t;
+            let x = inv * inv * sx + 2.0 * inv * t * ((sx + tx) * 0.5) + t * t * tx;
+            let z = inv * inv * sz + 2.0 * inv * t * ((sz + tz) * 0.5) + t * t * tz;
+            let y = inv * inv * (src.height + 1.0)
+                + 2.0 * inv * t * lift
+                + t * t * (tgt.height + 1.0);
+            points.push((x, y, z));
         }
 
-        // 6. District platform polygon extends to the magistral boundaries (no gap)
-        let mut min_x = f64::MAX;
-        let mut min_z = f64::MAX;
-        let mut max_x = f64::MIN;
-        let mut max_z = f64::MIN;
-        for &(vx, vz) in &poly {
-            if vx < min_x { min_x = vx; }
-            if vz < min_z { min_z = vz; }
-            if vx > max_x { max_x = vx; }
-            if vz > max_z { max_z = vz; }
-        }
-
-        district_infos.push(DistrictLayoutInfo {
-            idx: i,
-            seed_x: sx,
-            seed_z: sz,
-            min_x,
-            min_z,
-            max_x,
-            max_z,
-            polygon: poly,
-            raw_polygon: raw_poly,
+        let d_src = districts.get(src.district_idx);
+        let d_tgt = districts.get(tgt.district_idx);
+        links.push(Link {
+            points,
+            width: (0.45 + (*weight as f64).ln_1p() * 0.5).min(3.0),
+            weight: *weight,
+            fwd: m.fwd,
+            rev: m.rev,
+            kind: m.kind.clone(),
+            in_cycle: m.in_cycle,
+            source: src.id.clone(),
+            target: tgt.id.clone(),
+            source_name: src.name.clone(),
+            target_name: tgt.name.clone(),
+            inter_district: inter
+                && d_src.map(|d| d.building_count).unwrap_or(0) > 0
+                && d_tgt.map(|d| d.building_count).unwrap_or(0) > 0,
         });
     }
 
-    district_infos
+    links
 }
 
-fn is_point_in_convex_poly(px: f64, pz: f64, poly: &[(f64, f64)]) -> bool {
+// ---- polygon helpers ----
+
+pub fn polygon_signed_area(poly: &[(f64, f64)]) -> f64 {
     let n = poly.len();
     if n < 3 {
-        return true;
+        return 0.0;
+    }
+    let mut a = 0.0;
+    for i in 0..n {
+        let (x1, z1) = poly[i];
+        let (x2, z2) = poly[(i + 1) % n];
+        a += x1 * z2 - x2 * z1;
+    }
+    a * 0.5
+}
+
+pub fn polygon_area(poly: &[(f64, f64)]) -> f64 {
+    polygon_signed_area(poly).abs()
+}
+
+pub fn polygon_centroid(poly: &[(f64, f64)]) -> (f64, f64) {
+    let n = poly.len();
+    if n == 0 {
+        return (0.0, 0.0);
+    }
+    let a = polygon_signed_area(poly);
+    if a.abs() < 1e-9 {
+        let sx: f64 = poly.iter().map(|p| p.0).sum();
+        let sz: f64 = poly.iter().map(|p| p.1).sum();
+        return (sx / n as f64, sz / n as f64);
+    }
+    let (mut cx, mut cz) = (0.0, 0.0);
+    for i in 0..n {
+        let (x1, z1) = poly[i];
+        let (x2, z2) = poly[(i + 1) % n];
+        let cross = x1 * z2 - x2 * z1;
+        cx += (x1 + x2) * cross;
+        cz += (z1 + z2) * cross;
+    }
+    (cx / (6.0 * a), cz / (6.0 * a))
+}
+
+pub fn polygon_bounds(poly: &[(f64, f64)]) -> (f64, f64, f64, f64) {
+    poly.iter().fold(
+        (f64::MAX, f64::MAX, f64::MIN, f64::MIN),
+        |(a, b, c, d), &(x, z)| (a.min(x), b.min(z), c.max(x), d.max(z)),
+    )
+}
+
+/// Orientation of the cell's dominant axis, from the covariance of its
+/// vertices. Each district is built along its own axis, which is what stops
+/// the city looking like a circuit board.
+fn principal_angle(poly: &[(f64, f64)], cx: f64, cz: f64) -> f64 {
+    if poly.len() < 3 {
+        return 0.0;
+    }
+    let (mut sxx, mut szz, mut sxz) = (0.0, 0.0, 0.0);
+    for &(x, z) in poly {
+        let dx = x - cx;
+        let dz = z - cz;
+        sxx += dx * dx;
+        szz += dz * dz;
+        sxz += dx * dz;
+    }
+    0.5 * (2.0 * sxz).atan2(sxx - szz)
+}
+
+pub fn point_in_convex(px: f64, pz: f64, poly: &[(f64, f64)]) -> bool {
+    let n = poly.len();
+    if n < 3 {
+        // A degenerate cell contains nothing. Returning true here (as the
+        // previous version did) let every candidate rectangle "fit", so
+        // buildings scattered with no boundary at all.
+        return false;
     }
     for i in 0..n {
         let (x1, z1) = poly[i];
         let (x2, z2) = poly[(i + 1) % n];
-        let cross = (x2 - x1) * (pz - z1) - (z2 - z1) * (px - x1);
-        if cross < -0.01 {
+        if (x2 - x1) * (pz - z1) - (z2 - z1) * (px - x1) < -1e-6 {
             return false;
         }
     }
     true
 }
 
-fn is_rect_in_polygon(cx: f64, cz: f64, w: f64, d: f64, poly: &[(f64, f64)]) -> bool {
-    let hw = w * 0.5;
-    let hd = d * 0.5;
-    is_point_in_convex_poly(cx - hw, cz - hd, poly)
-        && is_point_in_convex_poly(cx + hw, cz - hd, poly)
-        && is_point_in_convex_poly(cx + hw, cz + hd, poly)
-        && is_point_in_convex_poly(cx - hw, cz + hd, poly)
-}
+/// Largest axis-aligned-at-angle-`rot` rectangle centred on the cell centroid
+/// that fits inside the polygon, found by bisection on scale.
+fn inscribed_rect(poly: &[(f64, f64)], cx: f64, cz: f64, rot: f64) -> Rect {
+    let (sin_r, cos_r) = rot.sin_cos();
+    // Work in the rotated frame: rotate the polygon by -rot about the centroid.
+    let local: Vec<(f64, f64)> = poly
+        .iter()
+        .map(|&(x, z)| {
+            let dx = x - cx;
+            let dz = z - cz;
+            (dx * cos_r + dz * sin_r, -dx * sin_r + dz * cos_r)
+        })
+        .collect();
 
-fn resolve_dependencies(city: &CityMap, _buildings: &[RawBuilding]) -> Vec<DepEdge> {
-    let mut name_to_idx = HashMap::new();
-    let mut file_to_idx = HashMap::new();
-    let mut flat_idx = 0;
+    let (min_x, min_z, max_x, max_z) = polygon_bounds(&local);
+    let half_w = ((max_x - min_x) * 0.5).max(1.0);
+    let half_d = ((max_z - min_z) * 0.5).max(1.0);
 
-    for district in &city.districts {
-        for building in &district.buildings {
-            name_to_idx.insert(&building.name, flat_idx);
-            if !building.source_file.is_empty() {
-                file_to_idx.insert(&building.source_file, flat_idx);
+    let fits = |s: f64| -> bool {
+        let hw = half_w * s;
+        let hd = half_d * s;
+        point_in_convex(-hw, -hd, &local)
+            && point_in_convex(hw, -hd, &local)
+            && point_in_convex(hw, hd, &local)
+            && point_in_convex(-hw, hd, &local)
+    };
+
+    let (mut lo, mut hi) = (0.0_f64, 1.0_f64);
+    if fits(hi) {
+        lo = hi;
+    } else {
+        for _ in 0..28 {
+            let mid = (lo + hi) * 0.5;
+            if fits(mid) {
+                lo = mid;
+            } else {
+                hi = mid;
             }
-            flat_idx += 1;
         }
     }
 
-    let mut edges = Vec::new();
-    for dep in &city.dependencies {
-        let src_idx = name_to_idx.get(&dep.source).or_else(|| file_to_idx.get(&dep.source));
-        let tgt_idx = name_to_idx.get(&dep.target).or_else(|| file_to_idx.get(&dep.target));
+    let w = half_w * lo * 2.0;
+    let d = half_d * lo * 2.0;
+    // Returned in the rotated frame, centred on the centroid.
+    Rect::new(cx - w * 0.5, cz - d * 0.5, w, d)
+}
 
-        if let (Some(&source_idx), Some(&target_idx)) = (src_idx, tgt_idx) {
-            if source_idx != target_idx {
-                edges.push(DepEdge {
-                    source_idx,
-                    target_idx,
-                    weight: (dep.weight as f64).max(1.0),
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::data::{Building, District};
+
+    fn city(sizes: &[(&str, usize)]) -> CityMap {
+        let mut c = CityMap::default();
+        for (di, (name, n)) in sizes.iter().enumerate() {
+            let mut d = District {
+                id: format!("d{di}"),
+                name: name.to_string(),
+                typology: "core".into(),
+                ..Default::default()
+            };
+            for i in 0..*n {
+                d.buildings.push(Building {
+                    id: format!("{name}/f{}.c::T{i}", i % 4),
+                    name: format!("T{i}"),
+                    kind: "type".into(),
+                    dir: format!("{name}/sub{}", i % 3),
+                    num_fields: (i % 17) as u32,
+                    num_methods: (i % 11) as u32,
+                    lines_of_code: 10 + i as u32,
+                    ..Default::default()
                 });
             }
+            c.districts.push(d);
         }
-    }
-    edges
-}
-
-/// Agent-based pathfinding: dependency traffic navigates between Voronoi boundaries
-/// and within organic districts, forming continuous curved splines.
-fn route_dependencies_agent(
-    buildings: &[RawBuilding],
-    edges: &[DepEdge],
-    district_infos: &[DistrictLayoutInfo],
-    city: &CityMap,
-) -> Vec<RoadSegment> {
-    let mut roads = Vec::with_capacity(edges.len() + district_infos.len());
-
-    // 1. Dependency-driven roads
-    for edge in edges {
-        let src = &buildings[edge.source_idx];
-        let tgt = &buildings[edge.target_idx];
-
-        let p_src = (src.pos_x + src.width * 0.5, src.pos_z + src.depth * 0.5);
-        let p_tgt = (tgt.pos_x + tgt.width * 0.5, tgt.pos_z + tgt.depth * 0.5);
-
-        let d_src = src.district_idx;
-        let d_tgt = tgt.district_idx;
-
-        let mut waypoints: Vec<(f64, f64)> = Vec::new();
-        waypoints.push(p_src);
-
-        if d_src == d_tgt && d_src < district_infos.len() {
-            // Intra-district curve around the central district seed
-            let seed = (district_infos[d_src].seed_x, district_infos[d_src].seed_z);
-            let mid_x = (p_src.0 + p_tgt.0) * 0.5;
-            let mid_z = (p_src.1 + p_tgt.1) * 0.5;
-            let vx = mid_x - seed.0;
-            let vz = mid_z - seed.1;
-            let len = (vx * vx + vz * vz).sqrt().max(1.0);
-            let curved_mid = (mid_x + (vx / len) * 6.0, mid_z + (vz / len) * 6.0);
-            waypoints.push(curved_mid);
-        } else if d_src < district_infos.len() && d_tgt < district_infos.len() {
-            // Inter-district navigation along the Voronoi boundary corridor
-            let s_src = (district_infos[d_src].seed_x, district_infos[d_src].seed_z);
-            let s_tgt = (district_infos[d_tgt].seed_x, district_infos[d_tgt].seed_z);
-
-            // Boundary corridor midpoint between the two district seeds
-            let b_mid = ((s_src.0 + s_tgt.0) * 0.5, (s_src.1 + s_tgt.1) * 0.5);
-
-            // Intermediate feeder waypoints heading out to and coming in from the boundary
-            let w_src = (p_src.0 * 0.45 + b_mid.0 * 0.55, p_src.1 * 0.45 + b_mid.1 * 0.55);
-            let w_tgt = (b_mid.0 * 0.55 + p_tgt.0 * 0.45, b_mid.1 * 0.55 + p_tgt.1 * 0.45);
-
-            waypoints.push(w_src);
-            waypoints.push(b_mid);
-            waypoints.push(w_tgt);
-        } else {
-            let mid = ((p_src.0 + p_tgt.0) * 0.5, (p_src.1 + p_tgt.1) * 0.5);
-            waypoints.push(mid);
-        }
-
-        waypoints.push(p_tgt);
-
-        // Smooth waypoints into a continuous organic curved spline using Chaikin's algorithm
-        let smooth_curve = smooth_path(&waypoints, 3);
-        let width = (MIN_ROAD_WIDTH + edge.weight.ln().max(0.0) * 1.5).min(MAX_ROAD_WIDTH);
-
-        let src_name = src.name.clone();
-        let tgt_name = tgt.name.clone();
-        roads.push(RoadSegment {
-            start_x: p_src.0,
-            start_z: p_src.1,
-            end_x: p_tgt.0,
-            end_z: p_tgt.1,
-            points: smooth_curve,
-            width,
-            road_type: "dependency".to_string(),
-            source: src_name.clone(),
-            target: tgt_name.clone(),
-            weight: edge.weight as u32,
-            name: format!("{} ➔ {}", src_name, tgt_name),
-        });
+        c
     }
 
-    // 2. Shared Voronoi boundary boulevards (arterial streets outlining the European districts)
-    for i in 0..district_infos.len() {
-        for j in (i + 1)..district_infos.len() {
-            let poly_i = &district_infos[i].raw_polygon;
-            let poly_j = &district_infos[j].raw_polygon;
+    /// The invariant that the previous layout could not hold: no two buildings
+    /// may overlap, whatever the relative district sizes.
+    #[test]
+    fn no_building_overlaps_even_with_extreme_size_spread() {
+        let c = city(&[("huge", 221), ("mid", 40), ("tiny", 2), ("small", 7), ("m2", 60)]);
+        let r = compute_layout(&c);
+        assert_eq!(r.buildings.len(), c.building_count());
 
-            for e_i in 0..poly_i.len() {
-                let p1 = poly_i[e_i];
-                let p2 = poly_i[(e_i + 1) % poly_i.len()];
-
-                for e_j in 0..poly_j.len() {
-                    let q1 = poly_j[e_j];
-                    let q2 = poly_j[(e_j + 1) % poly_j.len()];
-
-                    let d1 = (p1.0 - q2.0).hypot(p1.1 - q2.1) + (p2.0 - q1.0).hypot(p2.1 - q1.1);
-                    let d2 = (p1.0 - q1.0).hypot(p1.1 - q1.1) + (p2.0 - q2.0).hypot(p2.1 - q2.1);
-
-                    if d1 < 2.0 || d2 < 2.0 {
-                        let mid_x = (p1.0 + p2.0) * 0.5;
-                        let mid_z = (p1.1 + p2.1) * 0.5;
-                        let s_i = (district_infos[i].seed_x, district_infos[i].seed_z);
-                        let s_j = (district_infos[j].seed_x, district_infos[j].seed_z);
-                        let d_i = (mid_x - s_i.0).hypot(mid_z - s_i.1);
-                        let d_j = (mid_x - s_j.0).hypot(mid_z - s_j.1);
-
-                        let max_d = (district_infos[i].max_x - district_infos[i].min_x)
-                            .max(district_infos[j].max_x - district_infos[j].min_x) * 0.85 + 15.0;
-                        if d_i <= max_d || d_j <= max_d {
-                            let d1_name = if i < city.districts.len() { city.districts[i].name.clone() } else { format!("District {}", i) };
-                            let d2_name = if j < city.districts.len() { city.districts[j].name.clone() } else { format!("District {}", j) };
-                            roads.push(RoadSegment {
-                                start_x: p1.0,
-                                start_z: p1.1,
-                                end_x: p2.0,
-                                end_z: p2.1,
-                                points: vec![p1, p2],
-                                width: 3.5,
-                                road_type: "arterial".to_string(),
-                                source: d1_name.clone(),
-                                target: d2_name.clone(),
-                                weight: 1,
-                                name: format!("Boulevard: {} — {}", d1_name, d2_name),
-                            });
-                        }
-                    }
+        let mut per_district: HashMap<usize, Vec<&PlacedBuilding>> = HashMap::new();
+        for b in &r.buildings {
+            per_district.entry(b.district_idx).or_default().push(b);
+        }
+        // Compare in district-local space, where footprints are axis aligned.
+        for (_, list) in per_district {
+            for i in 0..list.len() {
+                for j in (i + 1)..list.len() {
+                    let (a, b) = (list[i], list[j]);
+                    let dx = (a.local_x - b.local_x).abs();
+                    let dz = (a.local_z - b.local_z).abs();
+                    let overlap = dx < (a.width + b.width) * 0.5 - 1e-6
+                        && dz < (a.depth + b.depth) * 0.5 - 1e-6;
+                    assert!(!overlap, "{} overlaps {}", a.name, b.name);
                 }
             }
         }
     }
 
-    roads
-}
-
-/// Chaikin's corner-cutting subdivision algorithm for organic curved roads
-fn smooth_path(points: &[(f64, f64)], iterations: usize) -> Vec<(f64, f64)> {
-    if points.len() < 3 {
-        return points.to_vec();
-    }
-    let mut current = points.to_vec();
-    for _ in 0..iterations {
-        let mut next = Vec::with_capacity(current.len() * 2);
-        next.push(current[0]);
-        for i in 0..(current.len() - 1) {
-            let p0 = current[i];
-            let p1 = current[i + 1];
-            let q = (0.75 * p0.0 + 0.25 * p1.0, 0.75 * p0.1 + 0.25 * p1.1);
-            let r = (0.25 * p0.0 + 0.75 * p1.0, 0.25 * p0.1 + 0.75 * p1.1);
-            next.push(q);
-            next.push(r);
-        }
-        next.push(*current.last().unwrap());
-        current = next;
-    }
-    current
-}
-
-fn generate_platforms(
-    buildings: &[RawBuilding],
-    city: &CityMap,
-    district_infos: &[DistrictLayoutInfo],
-) -> Vec<Platform> {
-    let mut platforms: Vec<Platform> = buildings.iter().map(|building| {
-        Platform {
-            pos_x: building.pos_x - LOT_MARGIN,
-            pos_z: building.pos_z - LOT_MARGIN,
-            width: building.width + LOT_MARGIN * 2.0,
-            depth: building.depth + LOT_MARGIN * 2.0,
-            polygon: Vec::new(),
-            typology: city.districts[building.district_idx].typology.clone(),
-            district_idx: building.district_idx,
-        }
-    }).collect();
-
-    for info in district_infos {
-        if !info.polygon.is_empty() {
-            platforms.push(Platform {
-                pos_x: info.min_x,
-                pos_z: info.min_z,
-                width: info.max_x - info.min_x,
-                depth: info.max_z - info.min_z,
-                polygon: info.polygon.clone(),
-                typology: "district_base".to_string(),
-                district_idx: info.idx,
-            });
+    #[test]
+    fn every_building_sits_inside_its_district_cell() {
+        let c = city(&[("a", 30), ("b", 12), ("c", 80)]);
+        let r = compute_layout(&c);
+        for b in &r.buildings {
+            let d = &r.districts[b.district_idx];
+            assert!(
+                point_in_convex(b.center_x, b.center_z, &d.polygon),
+                "{} escaped district {}",
+                b.name,
+                d.name
+            );
         }
     }
 
-    platforms
-}
-
-fn package_result(
-    city: &CityMap,
-    buildings: &[RawBuilding],
-    district_infos: &[DistrictLayoutInfo],
-    roads: Vec<RoadSegment>,
-    platforms: Vec<Platform>,
-) -> LayoutResult {
-    let mut district_buildings: Vec<Vec<PlacedBuilding>> = city.districts.iter().map(|_| Vec::new()).collect();
-
-    for building in buildings {
-        district_buildings[building.district_idx].push(PlacedBuilding {
-            name: building.name.clone(),
-            pos_x: building.pos_x,
-            pos_z: building.pos_z,
-            width: building.width,
-            height: building.height,
-            depth: building.depth,
-            num_fields: building.num_fields,
-            num_methods: building.num_methods,
-        });
+    /// Cell area must track district size; this is what the old
+    /// 0.92*(r_i+r_j) spacing got wrong.
+    #[test]
+    fn district_cell_area_scales_with_content() {
+        let c = city(&[("big", 150), ("small", 6)]);
+        let r = compute_layout(&c);
+        let big = polygon_area(&r.districts[0].polygon);
+        let small = polygon_area(&r.districts[1].polygon);
+        assert!(big > small * 4.0, "big={big} small={small}");
     }
 
-    let districts = city.districts.iter().enumerate().map(|(index, district)| {
-        let info = &district_infos[index];
-        PlacedDistrict {
-            name: district.name.clone(),
-            typology: district.typology.clone(),
-            pos_x: info.min_x,
-            pos_z: info.min_z,
-            width: info.max_x - info.min_x,
-            depth: info.max_z - info.min_z,
-            polygon: info.polygon.clone(),
-            buildings: std::mem::take(&mut district_buildings[index]),
-        }
-    }).collect();
-
-    LayoutResult { districts, roads, platforms }
+    #[test]
+    fn handles_degenerate_input() {
+        let empty = CityMap::default();
+        assert!(compute_layout(&empty).buildings.is_empty());
+        let one = city(&[("solo", 1)]);
+        assert_eq!(compute_layout(&one).buildings.len(), 1);
+    }
 }
