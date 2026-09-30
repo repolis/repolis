@@ -71,13 +71,13 @@ export function Legend({
   const used = new Set(summary.districts.map((d) => d.typology));
 
   return (
-    <div className="hud-dim absolute right-[3.75rem] bottom-[3.75rem] z-[45]">
+    <div className="hud-dim absolute right-[3.75rem] bottom-[3.75rem] z-[45] max-md:right-4 max-md:bottom-4">
       <Popover
         open={open}
         onClose={() => setOpen(false)}
         side="top"
         align="right"
-        className="w-[23rem] p-5"
+        className="w-[23rem] p-5 max-md:w-[calc(100vw-2rem)]"
         trigger={
           <GlassButton
             size="lg"
@@ -87,7 +87,7 @@ export function Legend({
             aria-expanded={open}
             className="text-[1rem]"
           >
-            Legend
+            <span className="max-md:hidden">Legend</span>
           </GlassButton>
         }
       >

@@ -71,7 +71,7 @@ export function Timeline({
   const pct = total > 0 ? (at / total) * 100 : 100;
 
   return (
-    <div className="hud-dim glass absolute bottom-[3.75rem] left-1/2 z-40 flex h-12 w-[26rem] max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-3 rounded-full pr-5 pl-1.5 max-[90rem]:bottom-[8rem]">
+    <div className="hud-dim glass absolute bottom-[3.75rem] left-1/2 z-40 flex h-12 w-[26rem] max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-3 rounded-full pr-5 pl-1.5 max-[90rem]:bottom-[8rem] max-md:right-20 max-md:bottom-4 max-md:left-4 max-md:w-auto max-md:translate-x-0">
       <motion.button
         type="button"
         onClick={() => {

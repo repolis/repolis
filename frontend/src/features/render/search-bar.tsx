@@ -96,11 +96,13 @@ export function SearchPalette({
         whileHover={{ scale: 1.02 }}
         whileTap={{ scale: 0.97 }}
         transition={spring.snappy}
-        className="glass flex h-12 w-[17rem] items-center gap-2.5 rounded-full pr-2 pl-4 text-left text-[1rem] font-semibold text-white/60 hover:text-white/85 max-md:w-12 max-md:justify-center max-md:p-0"
+        className="glass flex h-12 w-[17rem] items-center gap-2.5 rounded-full pr-2 pl-4 text-left text-[1rem] font-semibold text-white/60 hover:text-white/85 max-[100rem]:w-auto max-md:w-12 max-md:justify-center max-md:p-0"
         aria-label="Search symbols"
       >
         <IconSearch className="size-5 shrink-0 text-white/80" />
-        <span className="flex-1 truncate max-md:hidden">Search symbols</span>
+        <span className="flex-1 truncate max-[100rem]:hidden">
+          Search symbols
+        </span>
         <span className="flex gap-1 max-md:hidden">
           <Kbd>{isMac ? "⌘" : "Ctrl"}</Kbd>
           <Kbd>K</Kbd>

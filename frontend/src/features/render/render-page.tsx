@@ -455,7 +455,7 @@ export default function RenderPage() {
               type="button"
               variants={reveal}
               onClick={() => void goHome()}
-              className="hud-dim pointer-events-auto absolute top-[3.75rem] left-[3.75rem] rounded-xl"
+              className="hud-dim pointer-events-auto absolute top-[3.75rem] left-[3.75rem] rounded-xl max-md:hidden"
               aria-label="Back to the start"
               title="Analyse another repository"
             >
@@ -474,7 +474,7 @@ export default function RenderPage() {
 
             <motion.div
               variants={reveal}
-              className="hud-dim pointer-events-auto absolute top-[3.75rem] right-[3.75rem] flex items-center gap-2.5"
+              className="hud-dim pointer-events-auto absolute top-[3.75rem] right-[3.75rem] flex items-center gap-2.5 max-md:top-4 max-md:right-4 max-md:gap-1.5"
             >
               <SearchPalette summary={summary} onPick={handlePick} />
               <ModeMenu mode={mode} onMode={handleMode} />

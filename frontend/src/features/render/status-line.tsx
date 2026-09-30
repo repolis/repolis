@@ -33,7 +33,7 @@ export function StatusLine({
   return (
     <>
       <GlowRing signal={signal} className="z-0" />
-      <div className="text-lift absolute top-[4.375rem] left-1/2 z-40 flex -translate-x-1/2 flex-col items-center gap-2">
+      <div className="text-lift absolute top-[4.375rem] left-1/2 z-40 flex -translate-x-1/2 flex-col items-center gap-2 max-md:top-[5.25rem] max-md:scale-90">
         <div className="flex items-center gap-3 text-[1.25rem] leading-6 font-semibold whitespace-nowrap">
           <span className="flex items-center gap-2.5">
             <StatusDot signal={signal} />

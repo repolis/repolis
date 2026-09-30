@@ -69,7 +69,7 @@ export default function HomePage() {
         {!leaving && (
           <motion.header
             key="header"
-            className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between px-[3.75rem] pt-[3.75rem]"
+            className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between px-[3.75rem] pt-[3.75rem] max-md:px-6 max-md:pt-6"
             initial="hidden"
             animate="show"
             exit="exit"
@@ -86,7 +86,7 @@ export default function HomePage() {
 
             <motion.div
               variants={reveal}
-              className="text-lift absolute left-1/2 mt-[0.625rem] flex -translate-x-1/2 items-center gap-3 text-[1.25rem] font-semibold whitespace-nowrap"
+              className="text-lift absolute left-1/2 mt-[0.625rem] flex -translate-x-1/2 items-center gap-3 text-[1.25rem] font-semibold whitespace-nowrap max-md:hidden"
             >
               <StatusDot signal={target ? "live" : "idle"} />
               <AnimatePresence mode="popLayout" initial={false}>
@@ -265,7 +265,7 @@ export default function HomePage() {
         {!leaving && (
           <motion.footer
             key="footer"
-            className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-between px-[3.75rem] pb-[3.75rem]"
+            className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-between px-[3.75rem] pb-[3.75rem] max-md:hidden"
             initial="hidden"
             animate="show"
             exit="exit"

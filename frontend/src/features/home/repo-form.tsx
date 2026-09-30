@@ -122,7 +122,7 @@ export function RepoForm({
             size="lg"
             className="h-14 px-6 text-[1.125rem]"
           >
-            Build city
+            Build<span className="max-sm:hidden"> city</span>
             <motion.span
               animate={{ x: parsed ? 3 : 0 }}
               transition={spring.snappy}

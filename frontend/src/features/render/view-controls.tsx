@@ -88,7 +88,7 @@ export function ModeMenu({
     <Popover
       open={open}
       onClose={() => setOpen(false)}
-      className="w-[18rem]"
+      className="w-[18rem] max-md:fixed max-md:top-20 max-md:right-4 max-md:left-4 max-md:w-auto"
       trigger={
         <GlassButton
           size="lg"
@@ -102,6 +102,7 @@ export function ModeMenu({
           <AnimatePresence mode="popLayout" initial={false}>
             <motion.span
               key={current.id}
+              className="max-md:hidden"
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -8 }}
@@ -113,7 +114,7 @@ export function ModeMenu({
           <motion.span
             animate={{ rotate: open ? 180 : 0 }}
             transition={spring.snappy}
-            className="grid size-4 place-items-center text-white/60 [&>svg]:size-full"
+            className="grid size-4 place-items-center text-white/60 max-md:hidden [&>svg]:size-full"
           >
             <IconChevronDown />
           </motion.span>
@@ -235,7 +236,7 @@ export function FilterMenu({
     <Popover
       open={open}
       onClose={() => setOpen(false)}
-      className="w-[26rem] p-5"
+      className="w-[26rem] p-5 max-md:fixed max-md:top-20 max-md:right-4 max-md:left-4 max-md:w-auto"
       trigger={
         <GlassButton
           size="lg"
@@ -246,7 +247,7 @@ export function FilterMenu({
           aria-expanded={open}
           className="text-[1rem]"
         >
-          Filter
+          <span className="max-md:hidden">Filter</span>
           <AnimatePresence initial={false}>
             {n > 0 && (
               <motion.span
