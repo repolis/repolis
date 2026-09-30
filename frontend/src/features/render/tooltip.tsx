@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { AnimatePresence, motion, useSpring } from "motion/react";
 
 import { spring } from "@/shared/lib/motion";
@@ -12,11 +12,18 @@ import type { HoverInfo } from "./types";
 export function Tooltip({ hover }: { hover: HoverInfo | null }) {
   const x = useSpring(0, spring.follow);
   const y = useSpring(0, spring.follow);
+  const tip = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const onMove = (e: PointerEvent) => {
-      x.set(e.clientX + 18);
-      y.set(e.clientY + 18);
+      // Stay on screen: flip to the other side of the pointer near an edge.
+      const w = tip.current?.offsetWidth ?? 0;
+      const h = tip.current?.offsetHeight ?? 0;
+      const gap = 18;
+      const right = e.clientX + gap + w > window.innerWidth - 16;
+      const below = e.clientY + gap + h > window.innerHeight - 16;
+      x.set(right ? e.clientX - gap - w : e.clientX + gap);
+      y.set(below ? e.clientY - gap - h : e.clientY + gap);
     };
     window.addEventListener("pointermove", onMove, { passive: true });
     return () => window.removeEventListener("pointermove", onMove);
@@ -31,11 +38,11 @@ export function Tooltip({ hover }: { hover: HoverInfo | null }) {
         {hover && (
           <motion.div
             key="tip"
-            initial={{ opacity: 0, scale: 0.9, y: 4 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.94 }}
-            transition={spring.snappy}
-            style={{ transformOrigin: "top left" }}
+            ref={tip}
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 2, transition: { duration: 0.12 } }}
+            transition={{ ...spring.snappy, opacity: { duration: 0.18 } }}
             className="flex max-w-[24rem] flex-col gap-0.5 rounded-2xl bg-[rgb(15_20_29/0.55)] px-4 py-2.5 backdrop-blur-xl"
           >
             <span className="truncate text-[1.0625rem] text-white">

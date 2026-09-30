@@ -28,48 +28,53 @@ export interface GlassParams {
   splay: number;
 }
 
-/** Values read from the Figma file (effects on the HUD layers). */
+/*
+ * One family of glass. Every pane shares the light (from the top left), the
+ * refraction and a quiet rim; they differ only in how thick they are and how
+ * much they frost, which follows their size and what sits on them. The
+ * values started from the Figma layers and were toned down so the rims read
+ * as an edge catching light, not as an outline.
+ */
+const LIGHT = { lightAngle: -45, lightIntensity: 0.55 } as const;
+
 export const GLASS = {
-  /** Stat pills and every other 48px control. */
+  /** Every 48px control and stat pill. No dispersion: at this size it is
+   * invisible, and it triples the filter's cost on every frame. */
   pill: {
+    ...LIGHT,
     depth: 10,
     refraction: 0.8,
-    dispersion: 0.5,
+    dispersion: 0,
     frost: 2,
-    lightAngle: -45,
-    lightIntensity: 0.8,
-    splay: 0,
+    splay: 0.2,
   },
-  /** The inspector card. */
+  /** The inspector card and the loader. */
   card: {
-    depth: 75,
+    ...LIGHT,
+    depth: 26,
     refraction: 0.8,
-    dispersion: 0.5,
-    frost: 33,
-    lightAngle: -45,
-    lightIntensity: 0.8,
-    splay: 1,
+    dispersion: 0.3,
+    frost: 30,
+    splay: 0.6,
   },
-  /** Menus and the command palette: card glass, shallower bevel. */
+  /** Menus, the palette and banners: card glass on a shallower bevel. */
   sheet: {
-    depth: 36,
+    ...LIGHT,
+    depth: 20,
     refraction: 0.8,
-    dispersion: 0.5,
-    frost: 33,
-    lightAngle: -45,
-    lightIntensity: 0.8,
-    splay: 1,
+    dispersion: 0.3,
+    frost: 30,
+    splay: 0.6,
   },
-  /** The landing capsule: clear, thick glass that lenses the scene, frosted
+  /** The landing field: clear, thick glass that lenses the scene, frosted
    * just enough that fine texture behind it does not break up the text. */
   capsule: {
+    ...LIGHT,
     depth: 22,
     refraction: 1,
-    dispersion: 0.6,
+    dispersion: 0.5,
     frost: 12,
-    lightAngle: -45,
-    lightIntensity: 0.9,
-    splay: 0.3,
+    splay: 0.4,
   },
 } satisfies Record<string, GlassParams>;
 
@@ -162,15 +167,26 @@ export function glassMaps(
   const hw = w / 2;
   const hh = h / 2;
 
+  // The bevel's normals come from a shape rounded at least as much as the
+  // bevel is deep. With the pane's own, tighter corner the normal flips
+  // from one side to the other along the diagonal, and the corners show a
+  // crease of bright and dark wedges.
+  const rn = Math.min(Math.max(r, bezel), hw, hh);
+
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const i = (y * w + x) * 4;
-      const { d, nx, ny } = roundedRect(x + 0.5 - hw, y + 0.5 - hh, hw, hh, r);
-      const inside = -d;
+      const px = x + 0.5 - hw;
+      const py = y + 0.5 - hh;
+      const { d } = roundedRect(px, py, hw, hh, r);
+      const { d: dn, nx, ny } = roundedRect(px, py, hw, hh, rn);
+      // Depth into the bevel, measured on the smooth shape but never
+      // outside the pane itself.
+      const inside = Math.min(-d, Math.max(0, -dn));
       let dx = 0;
       let dy = 0;
       let a = 0;
-      if (inside >= 0 && inside < bezel) {
+      if (-d >= 0 && inside < bezel) {
         const t = inside / bezel;
         const m = (bend(t) / BEND_MAX) * maxOffset;
         // Sample toward the centre: the rim shows what lies further in,
@@ -182,13 +198,14 @@ export function glassMaps(
         // on the opposite side, concentrated at the rim.
         const facing = nx * lx + ny * ly;
         const lit =
-          Math.max(0, facing) ** sharp + 0.45 * Math.max(0, -facing) ** sharp;
-        const rim = Math.exp(-inside / Math.max(1.2, bezel * 0.18));
-        a = Math.min(1, lit * rim * p.lightIntensity * 1.15);
+          Math.max(0, facing) ** sharp + 0.35 * Math.max(0, -facing) ** sharp;
+        const rim = Math.exp(-inside / Math.max(1, bezel * 0.12));
+        a = Math.min(1, lit * rim * p.lightIntensity * 0.75);
       }
-      // A hairline all the way round, so the pane has an edge in the dark.
-      if (inside >= 0 && inside < 1.25) {
-        a = Math.max(a, 0.16 * p.lightIntensity);
+      // A faint hairline all the way round, so the pane has an edge in the
+      // dark without being outlined.
+      if (-d >= 0 && -d < 1) {
+        a = Math.max(a, 0.12 * p.lightIntensity);
       }
       dimg.data[i] = 128 + (maxOffset > 0 ? (dx / maxOffset) * 127 : 0);
       dimg.data[i + 1] = 128 + (maxOffset > 0 ? (dy / maxOffset) * 127 : 0);

@@ -122,10 +122,14 @@ export function SearchPalette({
               radius={24}
               fill={SHEET_FILL}
               className="w-full max-w-[40rem]"
-              initial={{ opacity: 0, y: -14, scale: 0.96 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: -8, scale: 0.97 }}
-              transition={spring.glass}
+              initial={{ opacity: 0, y: -16 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{
+                opacity: 0,
+                y: -10,
+                transition: { duration: 0.2, ease: [0.22, 1, 0.36, 1] },
+              }}
+              transition={{ ...spring.glass, opacity: { duration: 0.25 } }}
             >
               <div className="relative flex h-[4.5rem] items-center gap-3 px-6">
                 <IconSearch className="size-[1.375rem] shrink-0 text-white/65" />

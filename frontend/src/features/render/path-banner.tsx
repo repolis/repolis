@@ -27,9 +27,9 @@ export function PathBanner({
           params={GLASS.sheet}
           radius={24}
           fill={SHEET_FILL}
-          initial={{ opacity: 0, y: -12, scale: 0.96 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          exit={{ opacity: 0, y: -8, scale: 0.97 }}
+          initial={{ opacity: 0, y: -14 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -8 }}
           transition={spring.glass}
           className="absolute top-[7.5rem] left-1/2 z-40 flex max-w-[min(48rem,calc(100vw-2rem))] -translate-x-1/2 items-start gap-3 py-4 pr-14 pl-5"
         >

@@ -5,6 +5,7 @@ import { GLASS } from "@/shared/glass/maps";
 import { cn } from "@/shared/lib/cn";
 import { formatAge, formatCount } from "@/shared/lib/format";
 import { spring } from "@/shared/lib/motion";
+import { AutoHeight } from "@/shared/ui/auto-height";
 import { Shimmer } from "@/shared/ui/brand";
 import { Chip, Glass, StatPill } from "@/shared/ui/glass";
 import {
@@ -65,7 +66,7 @@ export function InspectorPanel({
           params={GLASS.card}
           radius={24}
           fill="rgb(255 255 255 / 0.01)"
-          className="absolute top-1/2 right-10 z-40 flex max-h-[calc(100vh-15rem)] w-[27.25rem] -translate-y-1/2 flex-col max-lg:right-5 max-sm:inset-x-3 max-sm:top-auto max-sm:bottom-3 max-sm:w-auto max-sm:translate-y-0"
+          className="inspector-pos absolute right-10 z-40 flex w-[27.25rem] flex-col max-lg:right-5 max-sm:inset-x-3 max-sm:bottom-3 max-sm:w-auto"
           initial={{ opacity: 0, x: 32 }}
           animate={{ opacity: 1, x: 0 }}
           exit={{ opacity: 0, x: 24 }}
@@ -76,14 +77,18 @@ export function InspectorPanel({
             onClick={onClose}
             title="Close (Esc)"
             aria-label="Close inspector"
-            whileTap={{ scale: 0.9 }}
+            whileHover={{ rotate: 90 }}
+            whileTap={{ scale: 0.88 }}
             transition={spring.snappy}
-            className="absolute top-[0.9375rem] right-[0.9375rem] z-10 grid size-8 place-items-center rounded-full opacity-100 transition-opacity hover:opacity-70"
+            className="absolute top-[0.9375rem] right-[0.9375rem] z-10 grid size-8 place-items-center rounded-full opacity-100 transition-opacity hover:opacity-80"
           >
             <IconCross className="size-8" />
           </motion.button>
 
-          <div className="scrollbar-glass relative min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-8 pt-8 pb-9">
+          <AutoHeight
+            className="scrollbar-glass relative min-h-0 overflow-x-hidden overflow-y-auto"
+            innerClassName="px-8 pt-8 pb-9"
+          >
             <AnimatePresence mode="wait" initial={false}>
               <motion.div
                 key={key}
@@ -108,7 +113,7 @@ export function InspectorPanel({
                 )}
               </motion.div>
             </AnimatePresence>
-          </div>
+          </AutoHeight>
         </Glass>
       )}
     </AnimatePresence>
@@ -178,7 +183,7 @@ function Fold({
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        className="flex w-full items-center gap-2 py-3.5 text-left text-[1.0625rem] text-white/85 transition-colors hover:text-white"
+        className="group flex w-full items-center gap-2 py-3.5 text-left text-[1.0625rem] text-white/85 transition-colors duration-300 hover:text-white"
       >
         <span className="flex-1">{title}</span>
         {count !== undefined && (
@@ -187,7 +192,7 @@ function Fold({
         <motion.span
           animate={{ rotate: open ? 180 : 0 }}
           transition={spring.snappy}
-          className="grid size-4 place-items-center text-white/45 [&>svg]:size-full"
+          className="grid size-4 place-items-center text-white/45 transition-colors duration-300 group-hover:text-white/85 [&>svg]:size-full"
         >
           <IconChevronDown />
         </motion.span>
@@ -262,13 +267,13 @@ function Action({
       whileTap={{ scale: 0.97 }}
       transition={spring.snappy}
       className={cn(
-        "type-hud inline-flex h-12 items-center gap-2 rounded-full px-[1.125rem] transition-colors duration-200 disabled:opacity-60",
+        "glass-control type-hud inline-flex h-12 items-center gap-2 rounded-full px-[1.125rem] transition-colors duration-300 ease-[var(--ease-glass)] disabled:opacity-60",
         strong
           ? "bg-white text-[#0d0f14] hover:bg-white/90"
           : "bg-white/15 text-white/85 hover:bg-white/20 hover:text-white",
       )}
     >
-      <span className="grid size-[1.375rem] place-items-center [&>svg]:size-full">
+      <span className="glass-icon grid size-[1.375rem] place-items-center [&>svg]:size-full">
         {icon}
       </span>
       {children}

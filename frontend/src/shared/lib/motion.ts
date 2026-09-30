@@ -41,32 +41,31 @@ export const reveal: Variants = {
   },
 };
 
+/**
+ * For wrappers that hold glass: movement only. Opacity or a filter on an
+ * ancestor would switch the panes' refraction off until it settles.
+ */
+export const rise: Variants = {
+  hidden: { y: 12 },
+  show: { y: 0, transition: spring.glass },
+  exit: { y: -6, transition: { duration: 0.2, ease: ease.glass } },
+};
+
+/** The fade a glass pane runs on itself, driven by its parent's labels. */
+export const paneFade: Variants = {
+  hidden: { opacity: 0 },
+  show: { opacity: 1, transition: { duration: 0.45, ease: ease.glass } },
+  exit: { opacity: 0, transition: { duration: 0.2, ease: ease.glass } },
+};
+
+/** `paneFade` after a delay, for panes that enter on their own. */
+export const paneFadeAfter = (delay: number): Variants => ({
+  ...paneFade,
+  show: { opacity: 1, transition: { duration: 0.45, ease: ease.glass, delay } },
+});
+
 export const stagger = (step = 0.06, delay = 0): Variants => ({
   hidden: {},
   show: { transition: { staggerChildren: step, delayChildren: delay } },
   exit: { transition: { staggerChildren: step / 2, staggerDirection: -1 } },
 });
-
-/**
- * Blur-in for anything that contains glass. `filter` must end as `none`: any
- * other value, even blur(0px), stops descendants' backdrop-filter from
- * seeing the city.
- */
-export const glassIn = {
-  initial: { opacity: 0, scale: 0.96, filter: "blur(10px)" },
-  animate: {
-    opacity: 1,
-    scale: 1,
-    filter: "blur(0px)",
-    transitionEnd: { filter: "none" },
-  },
-  exit: { opacity: 0, scale: 0.97, filter: "blur(8px)" },
-  transition: spring.glass,
-} as const;
-
-/** Press feedback shared by every glass control. */
-export const press = {
-  whileHover: { scale: 1.03 },
-  whileTap: { scale: 0.96 },
-  transition: spring.snappy,
-} as const;

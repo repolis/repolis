@@ -8,7 +8,7 @@ import {
 import { useParams } from "@tanstack/react-router";
 import { AnimatePresence, motion } from "motion/react";
 
-import { reveal, spring, stagger } from "@/shared/lib/motion";
+import { reveal, rise, spring, stagger } from "@/shared/lib/motion";
 import { sky, skyScenes } from "@/shared/sky/sky";
 import { Logo, type Signal } from "@/shared/ui/brand";
 import { Glass, IconButton } from "@/shared/ui/glass";
@@ -441,6 +441,7 @@ export default function RenderPage() {
     <div className="h-full w-full">
       <canvas
         id="bevy-canvas"
+        data-hover={hover ? "" : undefined}
         className="absolute inset-0 h-full w-full outline-none"
         onContextMenu={(e) => e.preventDefault()}
         onPointerDown={() => {
@@ -503,7 +504,13 @@ export default function RenderPage() {
             </motion.div>
 
             <motion.div
-              variants={reveal}
+              variants={{
+                ...rise,
+                show: {
+                  ...rise.show,
+                  transition: { staggerChildren: 0.05, ...spring.glass },
+                },
+              }}
               className="hud-dim pointer-events-auto flex items-center gap-2.5 max-md:ml-auto max-md:gap-1.5"
             >
               <SearchPalette summary={summary} onPick={handlePick} />

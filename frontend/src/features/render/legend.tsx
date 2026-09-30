@@ -1,6 +1,8 @@
 import { useState, type ReactNode } from "react";
+import { motion } from "motion/react";
 
 import { formatCount } from "@/shared/lib/format";
+import { rise, spring } from "@/shared/lib/motion";
 import { GlassButton } from "@/shared/ui/glass";
 import { IconLayers } from "@/shared/ui/icons";
 import { Popover } from "@/shared/ui/popover";
@@ -64,7 +66,15 @@ export function Legend({
   const used = new Set(summary.districts.map((d) => d.typology));
 
   return (
-    <div className="hud-dim absolute right-10 bottom-10 z-[45] max-md:right-4 max-md:bottom-4">
+    <motion.div
+      initial="hidden"
+      animate="show"
+      variants={{
+        ...rise,
+        show: { ...rise.show, transition: { delay: 0.45, ...spring.glass } },
+      }}
+      className="hud-dim absolute right-10 bottom-10 z-[45] max-md:right-4 max-md:bottom-4"
+    >
       <Popover
         open={open}
         onClose={() => setOpen(false)}
@@ -99,17 +109,13 @@ export function Legend({
               Footprint = fields
             </Key>
             <Key mark={<span className="size-3 rounded-sm bg-white/25" />}>
-              Pale = not edited recently
+              Grey = not edited recently
             </Key>
             <Key mark={<span className="h-2 w-3.5 rounded-sm bg-orange-400" />}>
               Glowing roof cap = often edited
             </Key>
-            <Key
-              mark={
-                <span className="h-1.5 w-4 rounded-sm bg-black ring-1 ring-white/25" />
-              }
-            >
-              Dark plinth = file module, not a type
+            <Key mark={<span className="h-1.5 w-4 rounded-sm bg-[#57606f]" />}>
+              Plinth = file module, not a type
             </Key>
             <Key mark={<span className="h-0.5 w-4 rounded-full bg-red-400" />}>
               Red arc = dependency cycle
@@ -206,6 +212,6 @@ export function Legend({
           </div>
         </div>
       </Popover>
-    </div>
+    </motion.div>
   );
 }

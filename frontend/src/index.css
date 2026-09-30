@@ -147,12 +147,66 @@
  * While the city is being dragged, the HUD recedes. `!important` because
  * motion leaves an inline opacity on elements it has revealed.
  */
-.hud-dim {
+/*
+ * While the city is dragged the HUD recedes. Glass panes dim themselves:
+ * dimming a wrapper would cut the panes inside it off from the scene, and
+ * they would flash flat. Wrappers without glass (text) dim as a whole.
+ */
+.hud-dim:not(:has([data-glass])),
+.hud-dim [data-glass],
+.hud-dim[data-glass] {
   transition: opacity 0.45s var(--ease-glass);
 }
-html[data-dragging] .hud-dim {
+html[data-dragging] .hud-dim:not(:has([data-glass])),
+html[data-dragging] .hud-dim [data-glass],
+html[data-dragging] .hud-dim[data-glass] {
   opacity: 0.3 !important;
   transition-duration: 0.25s;
+}
+
+/*
+ * The inspector: its top edge stays put (where the Figma card sits on a
+ * 1080px frame) and it grows downward, so switching selection never moves
+ * the close button. On phones it is a bottom sheet.
+ */
+.inspector-pos {
+  top: max(7.5rem, calc(50vh - 14.875rem));
+  max-height: calc(100vh - max(7.5rem, calc(50vh - 14.875rem)) - 9rem);
+}
+@media (width < 40rem) {
+  .inspector-pos {
+    top: auto;
+    max-height: 70vh;
+  }
+}
+
+/* Controls: the rim catches a little more light under the pointer, and the
+ * icon answers the hover and the press. No glow, no movement of the pill. */
+.glass-control .glass-rim {
+  opacity: 0.75;
+  transition: opacity 0.35s var(--ease-glass);
+}
+.glass-control:hover:not(:disabled) .glass-rim {
+  opacity: 1;
+}
+.glass-control .glass-icon > svg,
+.glass-control.glass-icon svg {
+  transition: transform 0.45s var(--ease-glass);
+}
+.glass-control:hover:not(:disabled) .glass-icon > svg,
+.glass-control.glass-icon:hover:not(:disabled) svg {
+  transform: scale(1.08);
+}
+.glass-control.glass-nudge:hover:not(:disabled) .glass-icon > svg {
+  transform: translateX(3px);
+}
+.glass-control:active:not(:disabled) .glass-icon > svg,
+.glass-control.glass-icon:active:not(:disabled) svg {
+  transform: scale(0.94);
+  transition-duration: 0.12s;
+}
+#bevy-canvas[data-hover] {
+  cursor: pointer;
 }
 html[data-dragging] #bevy-canvas {
   cursor: grabbing;

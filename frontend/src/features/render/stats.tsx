@@ -1,6 +1,6 @@
 import { motion } from "motion/react";
 
-import { reveal, stagger } from "@/shared/lib/motion";
+import { rise, stagger } from "@/shared/lib/motion";
 import { CountUp } from "@/shared/ui/count-up";
 import { StatPill } from "@/shared/ui/glass";
 import { IconCode, IconFile, IconFunction } from "@/shared/ui/icons";
@@ -26,7 +26,7 @@ export function Stats({ summary }: { summary: CitySummary }) {
       variants={stagger(0.08, 0.2)}
     >
       {items.map((it, i) => (
-        <motion.div key={it.label} variants={reveal}>
+        <motion.div key={it.label} variants={rise}>
           <StatPill
             icon={it.icon}
             value={<CountUp value={it.value} delay={0.3 + i * 0.08} />}

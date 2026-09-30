@@ -88,12 +88,11 @@ export function AnalysisLoader({
         radius={24}
         fill={SHEET_FILL}
         className="w-full max-w-[32rem] px-8 pt-8 pb-9"
-        initial={{ opacity: 0, y: 20, scale: 0.95 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
+        initial={{ opacity: 0, y: 24 }}
+        animate={{ opacity: 1, y: 0 }}
         exit={{
           opacity: 0,
-          y: -12,
-          scale: 1.03,
+          y: -16,
           transition: { duration: 0.55, ease: ease.inOut },
         }}
         transition={{ ...spring.soft, delay: 0.2 }}

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 
-import { spring } from "@/shared/lib/motion";
+import { paneFadeAfter, spring } from "@/shared/lib/motion";
 import { Glass } from "@/shared/ui/glass";
 import { IconHistory, IconPause, IconPlay } from "@/shared/ui/icons";
 
@@ -72,7 +72,12 @@ export function Timeline({
   const pct = total > 0 ? (at / total) * 100 : 100;
 
   return (
-    <Glass className="hud-dim absolute bottom-10 left-1/2 z-40 flex h-12 w-[26rem] max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-3 pr-[1.125rem] pl-1.5 max-[90rem]:bottom-[7.5rem] max-md:right-20 max-md:bottom-4 max-md:left-4 max-md:w-auto max-md:translate-x-0">
+    <Glass
+      initial="hidden"
+      animate="show"
+      variants={paneFadeAfter(0.35)}
+      className="hud-dim absolute bottom-10 left-1/2 z-40 flex h-12 w-[26rem] max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-3 pr-[1.125rem] pl-1.5 max-[90rem]:bottom-[7.5rem] max-md:right-20 max-md:bottom-4 max-md:left-4 max-md:w-auto max-md:translate-x-0"
+    >
       <motion.button
         type="button"
         onClick={() => {

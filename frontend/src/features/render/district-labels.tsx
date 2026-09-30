@@ -100,7 +100,7 @@ export function DistrictLabels() {
             }}
             className="flex -translate-x-1/2 -translate-y-full flex-col items-center"
           >
-            <div className="flex h-8 items-center gap-2 rounded-full bg-[rgb(15_20_29/0.4)] pr-3.5 pl-3 text-[0.9375rem] whitespace-nowrap opacity-(--a) backdrop-blur-md transition-opacity duration-300">
+            <div className="flex h-8 items-center gap-2 rounded-full bg-[rgb(15_20_29/0.66)] pr-3.5 pl-3 text-[0.9375rem] whitespace-nowrap opacity-(--a) transition-opacity duration-300">
               <span
                 className="size-2 rounded-full"
                 style={{

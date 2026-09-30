@@ -31,8 +31,14 @@ export function StatusLine({
     <>
       <GlowRing signal={signal} className="z-0" />
       <div className="type-hud absolute top-[3.25rem] left-1/2 z-40 flex -translate-x-1/2 flex-col items-center gap-1.5 max-md:top-[5.5rem]">
+        {/* The parts glide when the lead changes width; the row itself is
+            not animated, which would stretch the type. */}
         <div className="flex items-center gap-3 whitespace-nowrap">
-          <span className="flex items-center gap-2.5">
+          <motion.span
+            layout="position"
+            transition={spring.glass}
+            className="flex items-center gap-2.5"
+          >
             <StatusDot signal={signal} className="-m-1" />
             <AnimatePresence mode="popLayout" initial={false}>
               <motion.span
@@ -46,17 +52,24 @@ export function StatusLine({
                 {lead}
               </motion.span>
             </AnimatePresence>
-          </span>
-          <a
+          </motion.span>
+          <motion.a
+            layout="position"
+            transition={spring.glass}
             href={`https://github.com/${owner}/${repo}`}
             target="_blank"
             rel="noreferrer"
-            className="pointer-events-auto flex items-center gap-0.5"
+            className="group pointer-events-auto flex items-center gap-0.5"
           >
-            <IconGithub className="size-6" />
-            <span className="text-white/65"> {owner}/</span>
-            <span className="text-white/85">{repo}</span>
-          </a>
+            <IconGithub className="size-6 transition-transform duration-300 ease-[var(--ease-glass)] group-hover:scale-110" />
+            <span className="text-white/65 transition-colors duration-300 group-hover:text-white/85">
+              {" "}
+              {owner}/
+            </span>
+            <span className="text-white/85 transition-colors duration-300 group-hover:text-white">
+              {repo}
+            </span>
+          </motion.a>
         </div>
         <AnimatePresence>
           {note && (

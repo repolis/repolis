@@ -3,12 +3,14 @@ import { AnimatePresence, motion } from "motion/react";
 
 import { GLASS } from "@/shared/glass/maps";
 import { cn } from "@/shared/lib/cn";
-import { spring } from "@/shared/lib/motion";
+import { ease, spring } from "@/shared/lib/motion";
 import { Glass, SHEET_FILL } from "@/shared/ui/glass";
 
 /**
- * A glass sheet that grows out of its trigger. Closes on outside press and
- * Escape: an open menu left over the canvas would swallow orbit drags.
+ * A glass sheet that unfolds straight out of its trigger: down from a
+ * control at the top of the screen, up from one at the bottom. No scaling
+ * from a corner. Closes on outside press and Escape: an open menu left
+ * over the canvas would swallow orbit drags.
  */
 export function Popover({
   open,
@@ -45,9 +47,12 @@ export function Popover({
     };
   }, [open, onClose]);
 
-  const origin =
-    (side === "bottom" ? "top " : "bottom ") +
-    (align === "center" ? "center" : align);
+  // The sheet is revealed from the edge nearest its trigger.
+  const down = side === "bottom";
+  const folded = down
+    ? "inset(0% 0% 100% 0% round 24px)"
+    : "inset(100% 0% 0% 0% round 24px)";
+  const unfolded = "inset(0% 0% 0% 0% round 24px)";
 
   return (
     <div ref={ref} className="relative">
@@ -58,17 +63,21 @@ export function Popover({
             params={GLASS.sheet}
             radius={24}
             fill={SHEET_FILL}
-            initial={{
+            initial={{ opacity: 0, y: down ? -8 : 8, clipPath: folded }}
+            animate={{ opacity: 1, y: 0, clipPath: unfolded }}
+            exit={{
               opacity: 0,
-              scale: 0.94,
-              y: side === "bottom" ? -6 : 6,
+              y: down ? -6 : 6,
+              clipPath: folded,
+              transition: { duration: 0.22, ease: ease.glass },
             }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.97, y: side === "bottom" ? -4 : 4 }}
-            transition={spring.glass}
-            style={{ transformOrigin: origin }}
+            transition={{
+              ...spring.glass,
+              clipPath: { duration: 0.42, ease: ease.glass },
+              opacity: { duration: 0.25 },
+            }}
             className={cn(
-              "absolute z-50 p-2",
+              "absolute z-50 flex max-h-[calc(100vh-8.5rem)] flex-col p-2",
               side === "bottom" ? "top-full mt-2.5" : "bottom-full mb-2.5",
               align === "right" && "right-0",
               align === "left" && "left-0",
@@ -76,7 +85,9 @@ export function Popover({
               className,
             )}
           >
-            <div className="relative">{children}</div>
+            <div className="scrollbar-glass relative min-h-0 overflow-y-auto">
+              {children}
+            </div>
           </Glass>
         )}
       </AnimatePresence>
@@ -115,7 +126,7 @@ export function MenuItem({
       )}
       <span className="absolute inset-0 rounded-2xl bg-white/0 transition-colors duration-200 group-hover:bg-white/6" />
       {icon && (
-        <span className="relative mt-0.5 grid size-5 shrink-0 place-items-center text-white/80 [&>svg]:size-full">
+        <span className="relative mt-0.5 grid size-5 shrink-0 place-items-center text-white/80 transition-transform duration-300 ease-[var(--ease-glass)] group-hover:scale-110 [&>svg]:size-full">
           {icon}
         </span>
       )}

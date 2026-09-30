@@ -29,31 +29,50 @@ function rootScale(): number {
 export function useGlass<T extends HTMLElement>(
   params: GlassParams,
   radius: GlassRadius,
-): { attach: (el: T | null) => void; style: CSSProperties; layers: ReactNode } {
+): {
+  attach: (el: T | null) => void;
+  el: T | null;
+  style: CSSProperties;
+  layers: ReactNode;
+} {
   // A callback ref kept in state, so a remounted element is measured again.
   const [el, attach] = useState<T | null>(null);
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
+  // The size the maps are baked for. While a pane is resizing (a panel
+  // growing to fit new content) the last maps are stretched to fit, and
+  // baked again only once the size settles: baking is a per-pixel pass.
+  const [mapSize, setMapSize] = useState<{ w: number; h: number } | null>(null);
   const canRefract = useCanRefract();
   const id = `lg${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
 
   useLayoutEffect(() => {
     if (!el) return;
     let raf = 0;
+    let settle = 0;
+    type Size = { w: number; h: number } | null;
+    const read = (bake: boolean) => {
+      // offsetWidth ignores transforms, so a pane that is still scaling in
+      // is measured at its real size.
+      const w = Math.round(el.offsetWidth);
+      const h = Math.round(el.offsetHeight);
+      const next = (s: Size) => (s && s.w === w && s.h === h ? s : { w, h });
+      setSize(next);
+      window.clearTimeout(settle);
+      if (bake) setMapSize(next);
+      else settle = window.setTimeout(() => setMapSize(next), 140);
+    };
+    // The first measure is synchronous, before paint: the pane appears as
+    // glass straight away instead of flashing a plain blur for a frame.
+    read(true);
     const measure = () => {
       cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(() => {
-        // offsetWidth ignores transforms, so a pane that is still scaling in
-        // is measured at its real size.
-        const w = Math.round(el.offsetWidth);
-        const h = Math.round(el.offsetHeight);
-        setSize((s) => (s && s.w === w && s.h === h ? s : { w, h }));
-      });
+      raf = requestAnimationFrame(() => read(false));
     };
-    measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => {
       cancelAnimationFrame(raf);
+      window.clearTimeout(settle);
       ro.disconnect();
     };
   }, [el]);
@@ -65,10 +84,10 @@ export function useGlass<T extends HTMLElement>(
   );
 
   const maps = useMemo(() => {
-    if (!size || size.w < 2 || size.h < 2) return null;
-    const r = radius === "full" ? size.h / 2 : radius * k;
-    return glassMaps(size.w, size.h, r, scaled);
-  }, [size, radius, scaled, k]);
+    if (!mapSize || mapSize.w < 2 || mapSize.h < 2) return null;
+    const r = radius === "full" ? mapSize.h / 2 : radius * k;
+    return glassMaps(mapSize.w, mapSize.h, r, scaled);
+  }, [mapSize, radius, scaled, k]);
 
   const refract = canRefract && maps !== null;
   const blur = scaled.frost / 2;
@@ -182,7 +201,7 @@ export function useGlass<T extends HTMLElement>(
       {maps && (
         <span
           aria-hidden
-          className="pointer-events-none absolute inset-0 rounded-[inherit]"
+          className="glass-rim pointer-events-none absolute inset-0 rounded-[inherit]"
           style={{
             backgroundImage: `url(${maps.specular})`,
             backgroundSize: "100% 100%",
@@ -193,5 +212,5 @@ export function useGlass<T extends HTMLElement>(
     </>
   );
 
-  return { attach, style, layers };
+  return { attach, el, style, layers };
 }
