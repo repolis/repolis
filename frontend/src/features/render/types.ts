@@ -118,3 +118,11 @@ export const TYPOLOGY_COLORS: Record<string, string> = {
   example: "rgb(97,173,184)",
   unknown: "rgb(158,158,163)",
 };
+
+/** Matches the Rust `language_rgb` table so the legend cannot drift from the scene. */
+export const LANGUAGE_COLORS: Record<string, string> = {
+  C: "rgb(97,140,199)",
+  Rust: "rgb(204,120,71)",
+  Go: "rgb(89,184,194)",
+  unknown: "rgb(158,158,163)",
+};
