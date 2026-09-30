@@ -8,6 +8,11 @@ pub const CAMERA_FOV: f32 = std::f32::consts::FRAC_PI_4;
 /// Fraction of the viewport height a focused object should fill.
 const FOCUS_FILL: f32 = 0.55;
 
+/// Length of the opening descent onto a freshly loaded city.
+const INTRO_SECONDS: f32 = 3.4;
+const HOME_ALPHA: f32 = std::f32::consts::FRAC_PI_4;
+const HOME_BETA: f32 = 0.62;
+
 #[derive(PartialEq, Clone, Copy)]
 pub enum CameraMode {
     Orbit,
@@ -27,6 +32,11 @@ pub struct CityCamera {
     pub home_focus: Vec3,
     pub home_radius: f32,
     pub fly_speed: f32,
+    /// Progress of the opening descent, None once it has landed or the user
+    /// took over.
+    pub intro: Option<f32>,
+    /// Where the descent starts: (alpha, beta, radius).
+    intro_from: (f32, f32, f32),
 }
 
 impl Default for CityCamera {
@@ -42,6 +52,8 @@ impl Default for CityCamera {
             home_focus: Vec3::ZERO,
             home_radius: 200.0,
             fly_speed: 140.0,
+            intro: None,
+            intro_from: (HOME_ALPHA, HOME_BETA, 200.0),
         }
     }
 }
@@ -55,12 +67,26 @@ impl CityCamera {
         self.target_radius = radius;
         self.home_focus = center;
         self.home_radius = radius;
-        self.alpha = std::f32::consts::FRAC_PI_4;
-        self.beta = 0.62;
+        self.alpha = HOME_ALPHA;
+        self.beta = HOME_BETA;
+        self.intro = None;
+    }
+
+    /// Starts high above the city, swung round a quarter turn, and settles
+    /// onto the home view with an ease-out, like a camera coming down
+    /// through cloud.
+    pub fn start_intro(&mut self) {
+        self.intro_from = (HOME_ALPHA - 1.05, 1.34, self.home_radius * 2.4);
+        self.alpha = self.intro_from.0;
+        self.beta = self.intro_from.1;
+        self.radius = self.intro_from.2;
+        self.target_radius = self.radius;
+        self.intro = Some(0.0);
     }
 
     /// Smoothly moves the orbit centre onto a point, e.g. a searched symbol.
     pub fn focus_on(&mut self, point: Vec3, radius: f32) {
+        self.intro = None;
         self.target_focus = point;
         self.target_radius = radius;
         self.mode = CameraMode::Orbit;
@@ -78,6 +104,7 @@ impl CityCamera {
     }
 
     pub fn go_home(&mut self) {
+        self.intro = None;
         self.target_focus = self.home_focus;
         self.target_radius = self.home_radius;
         self.mode = CameraMode::Orbit;
@@ -140,6 +167,35 @@ pub fn camera_controls(
         }
         if keys.just_pressed(KeyCode::KeyR) {
             cam.go_home();
+        }
+
+        let keys_moving = [
+            KeyCode::KeyW,
+            KeyCode::KeyA,
+            KeyCode::KeyS,
+            KeyCode::KeyD,
+            KeyCode::ArrowUp,
+            KeyCode::ArrowDown,
+            KeyCode::ArrowLeft,
+            KeyCode::ArrowRight,
+        ]
+        .iter()
+        .any(|k| keys.pressed(*k));
+        if let Some(t) = cam.intro {
+            if drag != Vec2::ZERO || scroll != 0.0 || keys_moving || cam.mode != CameraMode::Orbit {
+                // The user took the controls; land where the descent was.
+                cam.intro = None;
+                cam.target_radius = cam.radius;
+            } else {
+                let t = (t + dt / INTRO_SECONDS).min(1.0);
+                let e = 1.0 - (1.0 - t).powi(3);
+                let (a0, b0, r0) = cam.intro_from;
+                cam.alpha = a0 + (HOME_ALPHA - a0) * e;
+                cam.beta = b0 + (HOME_BETA - b0) * e;
+                cam.radius = r0 + (cam.home_radius - r0) * e;
+                cam.target_radius = cam.radius;
+                cam.intro = if t >= 1.0 { None } else { Some(t) };
+            }
         }
 
         match cam.mode {

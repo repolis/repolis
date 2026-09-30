@@ -24,9 +24,11 @@ pub fn typology_rgb(typology: &str) -> [f32; 3] {
     }
 }
 
+/// A pale plate tinted toward the district's hue: on the light ground the
+/// districts read as coloured paper under an architectural model.
 pub fn district_ground_rgb(typology: &str) -> [f32; 3] {
     let c = typology_rgb(typology);
-    [c[0] * 0.30 + 0.05, c[1] * 0.30 + 0.05, c[2] * 0.30 + 0.06]
+    [c[0] * 0.24 + 0.66, c[1] * 0.24 + 0.67, c[2] * 0.24 + 0.69]
 }
 
 /// Age buckets, in days. Five distinguishable shades compare better across a
@@ -74,10 +76,13 @@ pub fn churn_bucket(churn_rank: f64) -> u32 {
 /// on purpose - the camera is HDR and bloom only picks up what exceeds the
 /// threshold, which is what makes a busy building glow rather than look warm.
 pub fn make_cap_material(materials: &mut Assets<StandardMaterial>, bucket: u32) -> Handle<StandardMaterial> {
+    // On the light scene a dim brown cap reads as orange noise, so the quiet
+    // half of the city gets a pale warm cap and only real churn glows.
     let (base, emissive) = match bucket {
         3 => ([1.00, 0.55, 0.16], LinearRgba::new(5.2, 1.9, 0.35, 1.0)),
-        2 => ([0.94, 0.52, 0.18], LinearRgba::new(2.2, 0.85, 0.16, 1.0)),
-        _ => ([0.72, 0.46, 0.24], LinearRgba::new(0.55, 0.22, 0.05, 1.0)),
+        2 => ([0.98, 0.62, 0.26], LinearRgba::new(2.2, 0.85, 0.16, 1.0)),
+        1 => ([0.96, 0.82, 0.66], LinearRgba::new(0.12, 0.06, 0.01, 1.0)),
+        _ => ([0.94, 0.91, 0.86], LinearRgba::new(0.0, 0.0, 0.0, 1.0)),
     };
     materials.add(StandardMaterial {
         base_color: Color::srgb(base[0], base[1], base[2]),
@@ -115,8 +120,14 @@ pub fn make_building_materials(
         metallic: 0.02,
         ..default()
     });
+    // Dimmed buildings ghost toward the haze rather than going dark: the
+    // scene is light, and silhouettes would shout louder than the selection.
     let dim = materials.add(StandardMaterial {
-        base_color: Color::srgb(rgb[0] * 0.30, rgb[1] * 0.30, rgb[2] * 0.32),
+        base_color: Color::srgb(
+            rgb[0] * 0.22 + 0.64,
+            rgb[1] * 0.22 + 0.66,
+            rgb[2] * 0.22 + 0.69,
+        ),
         perceptual_roughness: 0.95,
         ..default()
     });
