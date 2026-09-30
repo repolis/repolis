@@ -1,63 +1,42 @@
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
+import LogoMark from "~icons/figma/logo";
 import { motion } from "motion/react";
 
 import { cn } from "@/shared/lib/cn";
 
-/** "@ repolis BETA", straight from the Figma header. */
-export function Logo({
-  className,
-  compact = false,
-}: {
-  className?: string;
-  compact?: boolean;
-}) {
+/** "@ repolis BETA": the Figma text layers exported as outlines, 193x43. */
+export function Logo({ className }: { className?: string }) {
   return (
-    <span
-      className={cn(
-        "text-lift inline-flex items-baseline gap-3 leading-none font-semibold whitespace-nowrap select-none",
-        className,
-      )}
-    >
-      <span
-        className={cn(
-          "tracking-[-0.02em]",
-          compact ? "text-[1.75rem]" : "text-[2.25rem]",
-        )}
-      >
-        <span className="text-white/45">@ </span>
-        <span className="text-white/65">repolis</span>
-      </span>
-      <span
-        className={cn(
-          "text-white/45",
-          compact ? "text-[1rem]" : "text-[1.25rem]",
-        )}
-      >
-        BETA
-      </span>
-    </span>
+    <LogoMark
+      aria-label="repolis beta"
+      role="img"
+      className={cn("h-[2.6875rem] w-[12.0625rem] shrink-0", className)}
+    />
   );
 }
 
 /**
- * Viewfinder brackets 15px in from each corner: the screen reads as a lens
- * onto the city rather than a page.
+ * Viewfinder brackets 15px in from each corner: 24x4 bars, radius 24, glass
+ * in Figma and the whole group at 25%.
  */
 export function Corners({ className }: { className?: string }) {
-  const arm = "absolute rounded-full bg-white/25";
+  const bar = "absolute rounded-full bg-white/40";
   const corner = (pos: string, flipX: boolean, flipY: boolean) => (
     <span
       className={cn("absolute size-6", pos)}
       style={{ transform: `scale(${flipX ? -1 : 1}, ${flipY ? -1 : 1})` }}
     >
-      <span className={cn(arm, "top-0 left-0 h-6 w-1")} />
-      <span className={cn(arm, "top-0 left-0 h-1 w-6")} />
+      <span className={cn(bar, "top-0 left-0 h-6 w-1")} />
+      <span className={cn(bar, "top-0 left-0 h-1 w-6")} />
     </span>
   );
   return (
     <div
       aria-hidden
-      className={cn("pointer-events-none fixed inset-[15px] z-30", className)}
+      className={cn(
+        "pointer-events-none fixed inset-[15px] z-30 opacity-25",
+        className,
+      )}
     >
       {corner("top-0 left-0", false, false)}
       {corner("top-0 right-0", true, false)}
@@ -68,17 +47,17 @@ export function Corners({ className }: { className?: string }) {
 }
 
 /**
- * The Figma frame's darkening: a soft radial pool plus four edge fades, so
- * white type stays legible over a white city without boxes behind it.
+ * The Figma overlay layer: each edge darkens to 65% black over its last 18%.
+ * It is what keeps white type legible; nothing in the HUD casts a shadow.
  */
 export function Vignette({
   className,
-  strength = 0.65,
+  strength = 1,
 }: {
   className?: string;
   strength?: number;
 }) {
-  const edge = "rgba(0,0,0,0.422)";
+  const edge = "rgba(0,0,0,0.65)";
   return (
     <div
       aria-hidden
@@ -86,11 +65,10 @@ export function Vignette({
       style={{
         opacity: strength,
         backgroundImage: [
-          `radial-gradient(ellipse 72% 72% at 66% 67%, rgba(0,0,0,0) 40%, rgba(0,0,0,0.25) 100%)`,
-          `linear-gradient(270deg, rgba(0,0,0,0) 70.6%, ${edge} 100%)`,
-          `linear-gradient(90deg, rgba(0,0,0,0) 70.6%, ${edge} 100%)`,
-          `linear-gradient(180deg, ${edge} 0%, rgba(0,0,0,0) 29.4%)`,
-          `linear-gradient(0deg, ${edge} 0%, rgba(0,0,0,0) 29.4%)`,
+          `linear-gradient(to bottom, ${edge} 0%, rgba(0,0,0,0) 17.9%)`,
+          `linear-gradient(to top, ${edge} 0%, rgba(0,0,0,0) 18.2%)`,
+          `linear-gradient(to left, ${edge} 0%, rgba(0,0,0,0) 17.8%)`,
+          `linear-gradient(to right, ${edge} 0%, rgba(0,0,0,0) 18.3%)`,
         ].join(", "),
       }}
     />
@@ -100,15 +78,15 @@ export function Vignette({
 export type Signal = "live" | "busy" | "error" | "idle";
 
 const signalColor: Record<Signal, string> = {
-  live: "var(--color-signal)",
-  busy: "var(--color-amber)",
-  error: "var(--color-danger)",
-  idle: "rgb(255 255 255 / 0.6)",
+  live: "#74FF51",
+  busy: "#FFC24D",
+  error: "#FF7A70",
+  idle: "#FFFFFF",
 };
 
 /**
- * The halo above the status line: a blurred glow inside three thin rings,
- * half off the top of the screen. Its colour is the connection state.
+ * The halo above the status line, as exported: a 320px disc blurred by 75
+ * inside three rings (25%, 10% and 5% white), half off the top edge.
  */
 export function GlowRing({
   signal = "live",
@@ -117,35 +95,73 @@ export function GlowRing({
   signal?: Signal;
   className?: string;
 }) {
-  const color = signalColor[signal];
+  const blurId = `halo${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
   return (
-    <div
+    <svg
       aria-hidden
+      viewBox="0 0 620 620"
       className={cn(
-        "pointer-events-none absolute left-1/2 size-[28rem] -translate-x-1/2",
+        "pointer-events-none absolute left-1/2 h-[38.75rem] w-[38.75rem] -translate-x-1/2",
         className,
       )}
-      style={{ top: "-25.6875rem" }}
+      style={{ top: "-31.0625rem" }}
     >
-      <motion.div
-        className="absolute inset-[4rem] rounded-full"
+      <defs>
+        <filter
+          id={blurId}
+          x="0"
+          y="0"
+          width="620"
+          height="620"
+          filterUnits="userSpaceOnUse"
+          colorInterpolationFilters="sRGB"
+        >
+          <feGaussianBlur stdDeviation="75" />
+        </filter>
+      </defs>
+      <motion.circle
+        cx="310"
+        cy="310"
+        r="160"
+        filter={`url(#${blurId})`}
         animate={{
-          backgroundColor: color,
-          opacity: signal === "idle" ? 0.4 : 1,
+          fill: signalColor[signal],
+          opacity: signal === "idle" ? 0.35 : 1,
         }}
         transition={{ duration: 0.8 }}
-        style={{ filter: "blur(4.6875rem)" }}
       />
-      <div className="animate-breathe absolute inset-0">
-        <span className="absolute inset-[1.52rem] rounded-full border-[0.169rem] border-white/25" />
-        <span className="absolute inset-[0.59rem] rounded-full border-[0.337rem] border-white/10" />
-        <span className="absolute -inset-[0.84rem] rounded-full border-[0.843rem] border-white/5" />
-      </div>
-    </div>
+      <circle
+        cx="310"
+        cy="310"
+        r="198.361"
+        fill="none"
+        stroke="white"
+        strokeOpacity="0.25"
+        strokeWidth="2.6988"
+      />
+      <circle
+        cx="310"
+        cy="310"
+        r="211.855"
+        fill="none"
+        stroke="white"
+        strokeOpacity="0.1"
+        strokeWidth="5.39759"
+      />
+      <circle
+        cx="310"
+        cy="310"
+        r="230.747"
+        fill="none"
+        stroke="white"
+        strokeOpacity="0.05"
+        strokeWidth="13.494"
+      />
+    </svg>
   );
 }
 
-/** 12px dot with a 4px halo, pinging while something is happening. */
+/** Figma: a 12px dot with a 4px ring outside it at 25% of the same colour. */
 export function StatusDot({
   signal = "live",
   className,
@@ -155,27 +171,37 @@ export function StatusDot({
 }) {
   const color = signalColor[signal];
   return (
-    <span className={cn("relative inline-grid size-3 shrink-0", className)}>
-      {signal !== "idle" && (
-        <span
-          className="animate-ping-soft absolute inset-0 rounded-full"
-          style={{ background: color }}
-        />
-      )}
-      <motion.span
-        className="relative size-3 rounded-full border-4"
+    <svg
+      aria-hidden
+      viewBox="0 0 20 20"
+      className={cn("size-5 shrink-0", className)}
+    >
+      <motion.circle
+        cx="10"
+        cy="10"
+        r="8"
+        fill="none"
+        strokeWidth="4"
+        initial={false}
         animate={{
-          backgroundColor: color,
-          borderColor: `color-mix(in srgb, ${color} 25%, transparent)`,
+          stroke: color,
+          strokeOpacity: signal === "idle" ? 0.15 : 0.25,
         }}
         transition={{ duration: 0.5 }}
-        style={{ backgroundClip: "padding-box" }}
       />
-    </span>
+      <motion.circle
+        cx="10"
+        cy="10"
+        r="6"
+        initial={false}
+        animate={{ fill: color, opacity: signal === "idle" ? 0.45 : 1 }}
+        transition={{ duration: 0.5 }}
+      />
+    </svg>
   );
 }
 
-/** A shimmer that sweeps across status text while work is in flight. */
+/** A soft sweep across status text while work is in flight. */
 export function Shimmer({
   children,
   className,
@@ -194,10 +220,10 @@ export function Shimmer({
       )}
       initial={{ backgroundPosition: "100% center" }}
       animate={{ backgroundPosition: "0% center" }}
-      transition={{ repeat: Infinity, duration: 1.8, ease: "linear" }}
+      transition={{ repeat: Infinity, duration: 2.2, ease: "linear" }}
       style={{
         backgroundImage:
-          "linear-gradient(90deg, transparent 35%, white 50%, transparent 65%), linear-gradient(rgb(255 255 255 / 0.62), rgb(255 255 255 / 0.62))",
+          "linear-gradient(90deg, transparent 35%, rgb(255 255 255 / 0.95) 50%, transparent 65%), linear-gradient(rgb(255 255 255 / 0.65), rgb(255 255 255 / 0.65))",
       }}
     >
       {children}

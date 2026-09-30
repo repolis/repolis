@@ -1,8 +1,10 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { AnimatePresence, motion } from "motion/react";
 
+import { GLASS } from "@/shared/glass/maps";
 import { cn } from "@/shared/lib/cn";
 import { spring } from "@/shared/lib/motion";
+import { Glass, SHEET_FILL } from "@/shared/ui/glass";
 
 /**
  * A glass sheet that grows out of its trigger. Closes on outside press and
@@ -52,27 +54,30 @@ export function Popover({
       {trigger}
       <AnimatePresence>
         {open && (
-          <motion.div
+          <Glass
+            params={GLASS.sheet}
+            radius={24}
+            fill={SHEET_FILL}
             initial={{
               opacity: 0,
-              scale: 0.92,
-              y: side === "bottom" ? -8 : 8,
+              scale: 0.94,
+              y: side === "bottom" ? -6 : 6,
             }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.96, y: side === "bottom" ? -4 : 4 }}
+            exit={{ opacity: 0, scale: 0.97, y: side === "bottom" ? -4 : 4 }}
             transition={spring.glass}
             style={{ transformOrigin: origin }}
             className={cn(
-              "glass glass-strong absolute z-50 rounded-[1.25rem] p-1.5",
-              side === "bottom" ? "top-full mt-3" : "bottom-full mb-3",
+              "absolute z-50 p-2",
+              side === "bottom" ? "top-full mt-2.5" : "bottom-full mb-2.5",
               align === "right" && "right-0",
               align === "left" && "left-0",
               align === "center" && "left-1/2 -translate-x-1/2",
               className,
             )}
           >
-            {children}
-          </motion.div>
+            <div className="relative">{children}</div>
+          </Glass>
         )}
       </AnimatePresence>
     </div>
@@ -105,10 +110,10 @@ export function MenuItem({
         <motion.span
           layoutId={`${layoutGroup}-active`}
           transition={spring.snappy}
-          className="absolute inset-0 rounded-2xl bg-white/14 shadow-[inset_0_1px_0_rgb(255_255_255/0.18)]"
+          className="absolute inset-0 rounded-2xl bg-white/12"
         />
       )}
-      <span className="absolute inset-0 rounded-2xl bg-white/0 transition-colors duration-200 group-hover:bg-white/7" />
+      <span className="absolute inset-0 rounded-2xl bg-white/0 transition-colors duration-200 group-hover:bg-white/6" />
       {icon && (
         <span className="relative mt-0.5 grid size-5 shrink-0 place-items-center text-white/80 [&>svg]:size-full">
           {icon}
@@ -117,14 +122,14 @@ export function MenuItem({
       <span className="relative flex min-w-0 flex-col gap-0.5">
         <span
           className={cn(
-            "text-[0.9375rem] font-semibold transition-colors",
+            "text-[1.0625rem] font-semibold transition-colors",
             selected ? "text-white" : "text-white/80 group-hover:text-white",
           )}
         >
           {title}
         </span>
         {hint && (
-          <span className="text-[0.8125rem] leading-snug text-white/50">
+          <span className="text-[0.875rem] leading-snug font-medium text-white/50">
             {hint}
           </span>
         )}

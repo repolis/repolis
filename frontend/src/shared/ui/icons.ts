@@ -1,12 +1,13 @@
-/** Every glyph the interface uses, in one place so the set stays coherent:
- * Solar duotone for UI, plus the three Figma originals (GitHub, function,
- * cross). */
-export { default as IconGithub } from "~icons/mdi/github";
-export { default as IconFunction } from "~icons/ri/function-ai-fill";
-export { default as IconCross } from "~icons/basil/cross-solid";
+/** Every glyph the interface uses, in one place so the set stays coherent.
+ * The Figma originals come straight from the design file (exact paths,
+ * fills and opacities); everything else is the same Solar duotone family. */
+export { default as IconGithub } from "~icons/figma/github";
+export { default as IconFunction } from "~icons/figma/function";
+export { default as IconCross } from "~icons/figma/cross";
+export { default as IconFile } from "~icons/figma/file";
+export { default as IconCode } from "~icons/figma/code";
+export { default as IconGithubMono } from "~icons/mdi/github";
 
-export { default as IconFile } from "~icons/solar/file-bold-duotone";
-export { default as IconCode } from "~icons/solar/code-2-bold-duotone";
 export { default as IconSearch } from "~icons/solar/magnifer-linear";
 export { default as IconLayers } from "~icons/solar/layers-minimalistic-bold-duotone";
 export { default as IconPalette } from "~icons/solar/pallete-2-bold-duotone";
