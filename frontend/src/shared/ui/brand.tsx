@@ -16,37 +16,6 @@ export function Logo({ className }: { className?: string }) {
 }
 
 /**
- * Viewfinder brackets 15px in from each corner: 24x4 bars, radius 24, glass
- * in Figma and the whole group at 25%.
- */
-export function Corners({ className }: { className?: string }) {
-  const bar = "absolute rounded-full bg-white/40";
-  const corner = (pos: string, flipX: boolean, flipY: boolean) => (
-    <span
-      className={cn("absolute size-6", pos)}
-      style={{ transform: `scale(${flipX ? -1 : 1}, ${flipY ? -1 : 1})` }}
-    >
-      <span className={cn(bar, "top-0 left-0 h-6 w-1")} />
-      <span className={cn(bar, "top-0 left-0 h-1 w-6")} />
-    </span>
-  );
-  return (
-    <div
-      aria-hidden
-      className={cn(
-        "pointer-events-none fixed inset-[15px] z-30 opacity-25",
-        className,
-      )}
-    >
-      {corner("top-0 left-0", false, false)}
-      {corner("top-0 right-0", true, false)}
-      {corner("bottom-0 left-0", false, true)}
-      {corner("right-0 bottom-0", true, true)}
-    </div>
-  );
-}
-
-/**
  * The Figma overlay layer: each edge darkens to 65% black over its last 18%.
  * It is what keeps white type legible; nothing in the HUD casts a shadow.
  */

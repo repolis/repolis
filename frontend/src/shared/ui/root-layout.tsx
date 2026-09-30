@@ -3,9 +3,9 @@ import { MotionConfig } from "motion/react";
 
 import { CloudSky } from "@/shared/sky/cloud-sky";
 import { SkyPhoto } from "@/shared/sky/sky-photo";
-import { Corners, Vignette } from "@/shared/ui/brand";
+import { Vignette } from "@/shared/ui/brand";
 
-/** The sky, the lens and the frame darkening persist across routes; pages
+/** The sky and the frame darkening persist across routes; pages
  * swap in between them, so moving from the landing page into a city never
  * cuts. */
 export function RootLayout() {
@@ -15,7 +15,6 @@ export function RootLayout() {
         <SkyPhoto />
         <CloudSky />
         <Vignette />
-        <Corners />
         <Outlet />
       </div>
     </MotionConfig>
