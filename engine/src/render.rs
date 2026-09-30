@@ -24,9 +24,11 @@ pub fn typology_rgb(typology: &str) -> [f32; 3] {
     }
 }
 
+/// A dark plate tinted toward the district's hue: a shade lighter than the
+/// night ground, so each district reads as its own lot.
 pub fn district_ground_rgb(typology: &str) -> [f32; 3] {
     let c = typology_rgb(typology);
-    [c[0] * 0.30 + 0.05, c[1] * 0.30 + 0.05, c[2] * 0.30 + 0.06]
+    [c[0] * 0.17 + 0.055, c[1] * 0.17 + 0.062, c[2] * 0.17 + 0.078]
 }
 
 /// Age buckets, in days. Five distinguishable shades compare better across a
@@ -74,10 +76,12 @@ pub fn churn_bucket(churn_rank: f64) -> u32 {
 /// on purpose - the camera is HDR and bloom only picks up what exceeds the
 /// threshold, which is what makes a busy building glow rather than look warm.
 pub fn make_cap_material(materials: &mut Assets<StandardMaterial>, bucket: u32) -> Handle<StandardMaterial> {
+    // At night the roofs are the lights of the city: a low ember for some
+    // churn, a lamp for a lot, and a flare for the hottest quarter.
     let (base, emissive) = match bucket {
         3 => ([1.00, 0.55, 0.16], LinearRgba::new(5.2, 1.9, 0.35, 1.0)),
-        2 => ([0.94, 0.52, 0.18], LinearRgba::new(2.2, 0.85, 0.16, 1.0)),
-        _ => ([0.72, 0.46, 0.24], LinearRgba::new(0.55, 0.22, 0.05, 1.0)),
+        2 => ([0.96, 0.56, 0.22], LinearRgba::new(1.9, 0.72, 0.14, 1.0)),
+        _ => ([0.42, 0.31, 0.22], LinearRgba::new(0.16, 0.065, 0.016, 1.0)),
     };
     materials.add(StandardMaterial {
         base_color: Color::srgb(base[0], base[1], base[2]),
@@ -91,8 +95,8 @@ pub fn make_cap_material(materials: &mut Assets<StandardMaterial>, bucket: u32) 
 /// types at a glance.
 pub fn make_plinth_material(materials: &mut Assets<StandardMaterial>) -> Handle<StandardMaterial> {
     materials.add(StandardMaterial {
-        base_color: Color::srgb(0.16, 0.17, 0.20),
-        perceptual_roughness: 0.95,
+        base_color: Color::srgb(0.34, 0.37, 0.44),
+        perceptual_roughness: 0.9,
         ..default()
     })
 }
@@ -111,12 +115,18 @@ pub fn make_building_materials(
     // facade tint was 0.55 of red on an already warm colour, and invisible.
     let normal = materials.add(StandardMaterial {
         base_color: Color::srgb(rgb[0], rgb[1], rgb[2]),
-        perceptual_roughness: 0.78,
+        perceptual_roughness: 0.66,
         metallic: 0.02,
         ..default()
     });
+    // Dimmed buildings sink toward the night ground and keep a trace of
+    // their hue, so the selection and its neighbours are what stays lit.
     let dim = materials.add(StandardMaterial {
-        base_color: Color::srgb(rgb[0] * 0.30, rgb[1] * 0.30, rgb[2] * 0.32),
+        base_color: Color::srgb(
+            rgb[0] * 0.20 + 0.04,
+            rgb[1] * 0.20 + 0.045,
+            rgb[2] * 0.20 + 0.06,
+        ),
         perceptual_roughness: 0.95,
         ..default()
     });

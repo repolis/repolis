@@ -1,12 +1,10 @@
 import { QueryClient } from "@tanstack/react-query";
-import { createRootRouteWithContext, Outlet } from "@tanstack/react-router";
+import { createRootRouteWithContext } from "@tanstack/react-router";
+
+import { RootLayout } from "@/shared/ui/root-layout";
 
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient;
 }>()({
-  component: () => (
-    <div className="w-full space-y-1">
-      <Outlet />
-    </div>
-  ),
+  component: RootLayout,
 });

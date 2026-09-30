@@ -1,4 +1,11 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
+import { motion } from "motion/react";
+
+import { formatCount } from "@/shared/lib/format";
+import { rise, spring } from "@/shared/lib/motion";
+import { GlassButton } from "@/shared/ui/glass";
+import { IconLayers } from "@/shared/ui/icons";
+import { Popover } from "@/shared/ui/popover";
 
 import { LANGUAGE_COLORS, TYPOLOGY_COLORS, type CitySummary } from "./types";
 
@@ -26,13 +33,23 @@ const RAMP_ENDS: Record<string, [string, string]> = {
 
 function Swatch({ color, label }: { color: string; label: string }) {
   return (
-    <span className="flex items-center gap-1 rounded bg-gray-800 px-1.5 py-0.5">
-      <span
-        className="inline-block h-2 w-2 rounded-sm"
-        style={{ background: color }}
-      />
+    <span className="flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5 text-[0.9375rem] text-white/80">
+      <span className="size-2 rounded-full" style={{ background: color }} />
       {label}
     </span>
+  );
+}
+
+function Heading({ children }: { children: ReactNode }) {
+  return <div className="text-[0.9375rem] text-white/45">{children}</div>;
+}
+
+function Key({ mark, children }: { mark: ReactNode; children: ReactNode }) {
+  return (
+    <div className="flex items-center gap-2.5 text-[0.9375rem] text-white/80">
+      <span className="grid w-5 shrink-0 place-items-center">{mark}</span>
+      {children}
+    </div>
   );
 }
 
@@ -49,45 +66,67 @@ export function Legend({
   const used = new Set(summary.districts.map((d) => d.typology));
 
   return (
-    <div className="absolute right-4 bottom-4 z-40 w-64 rounded border border-gray-700 bg-gray-900/95 text-xs text-gray-200">
-      <button
-        className="flex w-full items-center justify-between px-3 py-2 text-left font-semibold"
-        onClick={() => setOpen(!open)}
+    <motion.div
+      initial="hidden"
+      animate="show"
+      variants={{
+        ...rise,
+        show: { ...rise.show, transition: { delay: 0.45, ...spring.glass } },
+      }}
+      className="hud-dim absolute right-10 bottom-10 z-[45] max-md:right-4 max-md:bottom-4"
+    >
+      <Popover
+        open={open}
+        onClose={() => setOpen(false)}
+        side="top"
+        align="right"
+        className="w-[26rem] p-5 max-md:w-[calc(100vw-2rem)]"
+        trigger={
+          <GlassButton
+            icon={<IconLayers />}
+            onClick={() => setOpen(!open)}
+            active={open}
+            aria-expanded={open}
+          >
+            <span className="max-md:hidden">Legend</span>
+          </GlassButton>
+        }
       >
-        <span>Legend &amp; stats</span>
-        <span className="text-gray-500">{open ? "−" : "+"}</span>
-      </button>
-
-      {open && (
-        <div className="flex flex-col gap-3 border-t border-gray-800 p-3">
-          <div className="flex flex-col gap-1">
-            <div className="text-[10px] tracking-wide text-gray-500 uppercase">
-              Shape
-            </div>
-            <div className="text-gray-300">Height = functions</div>
-            <div className="text-gray-300">Footprint = fields</div>
-            <div className="text-gray-300">Pale = not edited recently</div>
-            <div className="flex items-center gap-1.5 text-gray-300">
-              <span className="inline-block h-2 w-3 rounded-sm bg-orange-400" />
+        <div className="scrollbar-glass flex max-h-[calc(100vh-14rem)] flex-col gap-5 overflow-y-auto">
+          <div className="flex flex-col gap-2">
+            <Heading>Shape</Heading>
+            <Key
+              mark={
+                <span className="flex items-end gap-0.5">
+                  <span className="h-2 w-1 rounded-sm bg-white/60" />
+                  <span className="h-3.5 w-1 rounded-sm bg-white/80" />
+                </span>
+              }
+            >
+              Height = functions
+            </Key>
+            <Key mark={<span className="h-2 w-4 rounded-sm bg-white/60" />}>
+              Footprint = fields
+            </Key>
+            <Key mark={<span className="size-3 rounded-sm bg-white/25" />}>
+              Grey = not edited recently
+            </Key>
+            <Key mark={<span className="h-2 w-3.5 rounded-sm bg-orange-400" />}>
               Glowing roof cap = often edited
-            </div>
-            <div className="flex items-center gap-1.5 text-gray-300">
-              <span className="inline-block h-1.5 w-3.5 rounded-sm bg-gray-600" />
-              Dark plinth = file module, not a type
-            </div>
-            <div className="flex items-center gap-1.5 text-gray-300">
-              <span className="inline-block h-0.5 w-3.5 rounded-sm bg-red-500" />
+            </Key>
+            <Key mark={<span className="h-1.5 w-4 rounded-sm bg-[#57606f]" />}>
+              Plinth = file module, not a type
+            </Key>
+            <Key mark={<span className="h-0.5 w-4 rounded-full bg-red-400" />}>
               Red arc = dependency cycle
-            </div>
+            </Key>
           </div>
 
-          <div className="flex flex-col gap-1">
+          <div className="flex flex-col gap-2">
             {mode === "typology" ? (
               <>
-                <div className="text-[10px] tracking-wide text-gray-500 uppercase">
-                  Colour = district purpose
-                </div>
-                <div className="flex flex-wrap gap-1">
+                <Heading>Colour = district purpose</Heading>
+                <div className="flex flex-wrap gap-1.5">
                   {Object.entries(TYPOLOGY_COLORS)
                     .filter(([t]) => used.has(t))
                     .map(([t, c]) => (
@@ -97,10 +136,8 @@ export function Legend({
               </>
             ) : mode === "language" ? (
               <>
-                <div className="text-[10px] tracking-wide text-gray-500 uppercase">
-                  Colour = source language
-                </div>
-                <div className="flex flex-wrap gap-1">
+                <Heading>Colour = source language</Heading>
+                <div className="flex flex-wrap gap-1.5">
                   {(summary.languages ?? []).map(([name, n]) => (
                     <Swatch
                       key={name}
@@ -112,13 +149,13 @@ export function Legend({
               </>
             ) : (
               <>
-                <div className="text-[10px] tracking-wide text-gray-500 uppercase">
-                  Colour
-                </div>
-                <div className="text-gray-300">{MODE_HELP[mode]}</div>
-                <div className="mt-0.5 h-2 w-full rounded-sm bg-gradient-to-r from-[rgb(219,217,199)] via-[rgb(217,112,56)] to-[rgb(184,41,43)]" />
+                <Heading>Colour</Heading>
+                <p className="text-[0.9375rem] leading-snug font-medium text-white/75">
+                  {MODE_HELP[mode]}
+                </p>
+                <div className="mt-1 h-2 w-full rounded-full bg-gradient-to-r from-[rgb(219,217,199)] via-[rgb(217,112,56)] to-[rgb(184,41,43)]" />
                 {RAMP_ENDS[mode] && (
-                  <div className="flex justify-between text-[10px] text-gray-500">
+                  <div className="flex justify-between text-[0.875rem] text-white/50">
                     <span>{RAMP_ENDS[mode][0]}</span>
                     <span>{RAMP_ENDS[mode][1]}</span>
                   </div>
@@ -127,39 +164,45 @@ export function Legend({
             )}
           </div>
 
-          <div className="flex flex-col gap-0.5 border-t border-gray-800 pt-2 text-[11px] text-gray-400">
+          <div className="flex flex-col gap-1 border-t border-white/10 pt-4 text-[0.9375rem] leading-relaxed font-medium text-white/60">
             <div>
-              {summary.total_buildings} entities ({summary.total_types} types,{" "}
-              {summary.total_modules} modules)
+              <b className="text-white/85">
+                {formatCount(summary.total_buildings)}
+              </b>{" "}
+              buildings ({formatCount(summary.total_types)} types,{" "}
+              {formatCount(summary.total_modules)} modules)
             </div>
             <div>
-              {summary.total_files} files &middot;{" "}
-              {summary.total_loc.toLocaleString()} lines
+              <b className="text-white/85">
+                {formatCount(summary.total_files)}
+              </b>{" "}
+              files &middot; {formatCount(summary.total_loc)} lines
             </div>
             {summary.languages?.length > 0 && (
               <div>
                 {summary.languages
                   .map(([name, n]) => `${name} ${n}`)
-                  .join(" \u00b7 ")}
+                  .join(" · ")}
               </div>
             )}
             <div>
-              {summary.total_methods} functions attributed &middot;{" "}
-              {summary.orphans} unattached
+              {formatCount(summary.total_methods)} functions attributed &middot;{" "}
+              {formatCount(summary.orphans)} unattached
             </div>
             <div>
-              by rule {summary.methods_by_rule} &middot; by model{" "}
-              {summary.methods_by_llm} &middot; {summary.llm_calls} LLM calls
+              by rule {formatCount(summary.methods_by_rule)} &middot; by model{" "}
+              {formatCount(summary.methods_by_llm)} &middot; {summary.llm_calls}{" "}
+              LLM calls
             </div>
             {summary.cycles?.length > 0 && (
-              <div className="text-red-400">
+              <div className="text-[var(--color-danger)]">
                 {summary.cycles.length} cross-module dependency{" "}
                 {summary.cycles.length === 1 ? "cycle" : "cycles"} (
                 {summary.cycles.map((c) => c.size).join(", ")} buildings)
               </div>
             )}
             {summary.skipped_dirs.length > 0 && (
-              <div className="text-gray-500">
+              <div className="text-white/40">
                 skipped: {summary.skipped_dirs.slice(0, 3).join(", ")}
                 {summary.skipped_dirs.length > 3
                   ? ` +${summary.skipped_dirs.length - 3}`
@@ -168,7 +211,7 @@ export function Legend({
             )}
           </div>
         </div>
-      )}
-    </div>
+      </Popover>
+    </motion.div>
   );
 }

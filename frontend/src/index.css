@@ -1,1 +1,232 @@
 @import "tailwindcss";
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/jetbrains-mono";
+
+/*
+ * repolis design tokens, taken from the Figma frame (1920x1080).
+ *
+ * Type is SF Pro Display Semibold at 20px with Figma's defaults: no tracking,
+ * "auto" line height. The installed SF Pro is named first so macOS renders
+ * exactly what Figma does; the system alias would add Apple's automatic
+ * tracking. Inter stands in on other platforms.
+ *
+ * The root size scales with the viewport so 1rem is 16px at 1920 wide.
+ */
+@theme {
+  --font-sans:
+    "SF Pro Display", "SF Pro", -apple-system, BlinkMacSystemFont,
+    "Inter Variable", "Inter", system-ui, sans-serif;
+  --font-mono:
+    "SF Mono", ui-monospace, "JetBrains Mono Variable", "JetBrains Mono", Menlo,
+    monospace;
+
+  --color-signal: #74ff51;
+  --color-amber: #ffc24d;
+  --color-danger: #ff7a70;
+
+  /* Night palette shared with the engine's fog and the dusk sky. */
+  --color-night: #0f141d;
+
+  --ease-glass: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@layer base {
+  html {
+    font-size: clamp(13px, 0.8334vw, 16px);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  @media (max-width: 768px) {
+    html {
+      font-size: 14px;
+    }
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+    background: var(--color-night);
+    overscroll-behavior: none;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    font-weight: 600;
+    letter-spacing: 0;
+    line-height: normal;
+    color: white;
+    overflow: hidden;
+  }
+
+  ::selection {
+    background: rgb(116 255 81 / 0.35);
+    color: white;
+  }
+
+  button {
+    cursor: pointer;
+  }
+
+  :focus-visible {
+    outline: 2px solid rgb(255 255 255 / 0.7);
+    outline-offset: 3px;
+  }
+}
+
+@layer components {
+  /* Figma: 20px Semibold, line height auto. */
+  .type-hud {
+    font-size: 1.25rem;
+    font-weight: 600;
+    line-height: normal;
+    letter-spacing: 0;
+  }
+
+  .scrollbar-glass {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(255 255 255 / 0.2) transparent;
+  }
+  .scrollbar-glass::-webkit-scrollbar {
+    width: 0.375rem;
+  }
+  .scrollbar-glass::-webkit-scrollbar-thumb {
+    background: rgb(255 255 255 / 0.2);
+    border-radius: 999px;
+  }
+
+  /* Range input as a thin track with a white thumb, nothing else. */
+  .range-glass {
+    -webkit-appearance: none;
+    appearance: none;
+    height: 1.5rem;
+    background: transparent;
+    cursor: pointer;
+  }
+  .range-glass::-webkit-slider-runnable-track {
+    height: 0.25rem;
+    border-radius: 999px;
+    background: linear-gradient(
+      90deg,
+      rgb(255 255 255 / 0.85) var(--fill, 0%),
+      rgb(255 255 255 / 0.18) var(--fill, 0%)
+    );
+  }
+  .range-glass::-moz-range-track {
+    height: 0.25rem;
+    border-radius: 999px;
+    background: rgb(255 255 255 / 0.18);
+  }
+  .range-glass::-moz-range-progress {
+    height: 0.25rem;
+    border-radius: 999px;
+    background: rgb(255 255 255 / 0.85);
+  }
+  .range-glass::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 1rem;
+    height: 1rem;
+    margin-top: -0.375rem;
+    border-radius: 999px;
+    background: white;
+    transition: transform 0.2s var(--ease-glass);
+  }
+  .range-glass::-moz-range-thumb {
+    width: 1rem;
+    height: 1rem;
+    border: 0;
+    border-radius: 999px;
+    background: white;
+  }
+  .range-glass:active::-webkit-slider-thumb {
+    transform: scale(1.2);
+  }
+}
+
+/*
+ * While the city is being dragged, the HUD recedes. `!important` because
+ * motion leaves an inline opacity on elements it has revealed.
+ */
+/*
+ * While the city is dragged the HUD recedes. Glass panes dim themselves:
+ * dimming a wrapper would cut the panes inside it off from the scene, and
+ * they would flash flat. Wrappers without glass (text) dim as a whole.
+ */
+.hud-dim:not(:has([data-glass])),
+.hud-dim [data-glass],
+.hud-dim[data-glass] {
+  transition: opacity 0.45s var(--ease-glass);
+}
+html[data-dragging] .hud-dim:not(:has([data-glass])),
+html[data-dragging] .hud-dim [data-glass],
+html[data-dragging] .hud-dim[data-glass] {
+  opacity: 0.3 !important;
+  transition-duration: 0.25s;
+}
+
+/*
+ * The inspector: its top edge stays put (where the Figma card sits on a
+ * 1080px frame) and it grows downward, so switching selection never moves
+ * the close button. On phones it is a bottom sheet.
+ */
+.inspector-pos {
+  top: max(7.5rem, calc(50vh - 14.875rem));
+  max-height: calc(100vh - max(7.5rem, calc(50vh - 14.875rem)) - 9rem);
+}
+@media (width < 40rem) {
+  .inspector-pos {
+    top: auto;
+    max-height: 70vh;
+  }
+}
+
+/* Leaving for the landing page: the whole HUD fades while the clouds close. */
+html[data-leaving] .hud-dim:not(:has([data-glass])),
+html[data-leaving] .hud-dim [data-glass],
+html[data-leaving] .hud-dim[data-glass] {
+  opacity: 0 !important;
+  pointer-events: none;
+  transition-duration: 0.6s;
+}
+
+/* Controls: the rim catches a little more light under the pointer, and the
+ * icon answers the hover and the press. No glow, no movement of the pill. */
+.glass-control .glass-rim {
+  opacity: 0.75;
+  transition: opacity 0.35s var(--ease-glass);
+}
+.glass-control:hover:not(:disabled) .glass-rim {
+  opacity: 1;
+}
+.glass-control .glass-icon > svg,
+.glass-control.glass-icon svg {
+  transition: transform 0.45s var(--ease-glass);
+}
+.glass-control:hover:not(:disabled) .glass-icon > svg,
+.glass-control.glass-icon:hover:not(:disabled) svg {
+  transform: scale(1.08);
+}
+.glass-control.glass-nudge:hover:not(:disabled) .glass-icon > svg {
+  transform: translateX(3px);
+}
+.glass-control:active:not(:disabled) .glass-icon > svg,
+.glass-control.glass-icon:active:not(:disabled) svg {
+  transform: scale(0.94);
+  transition-duration: 0.12s;
+}
+#bevy-canvas[data-hover] {
+  cursor: pointer;
+}
+html[data-dragging] #bevy-canvas {
+  cursor: grabbing;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

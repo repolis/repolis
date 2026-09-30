@@ -1,6 +1,18 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { useParams } from "@tanstack/react-router";
+import { AnimatePresence, motion } from "motion/react";
 
+import { reveal, rise, spring, stagger } from "@/shared/lib/motion";
+import { sky, skyScenes } from "@/shared/sky/sky";
+import { Logo, type Signal } from "@/shared/ui/brand";
+import { Glass, IconButton } from "@/shared/ui/glass";
+import { IconCompass } from "@/shared/ui/icons";
 import init, {
   camera_state,
   clear_selection,
@@ -15,15 +27,25 @@ import init, {
   show_path_to,
 } from "@/wasm/engine";
 
+import { DistrictLabels } from "./district-labels";
 import { InspectorPanel } from "./inspector-panel";
 import { Legend } from "./legend";
+import { AnalysisLoader, type StageProgress } from "./loader";
 import { PathBanner } from "./path-banner";
-import { SearchBar } from "./search-bar";
+import { Regenerate } from "./regenerate";
+import { SearchPalette } from "./search-bar";
+import { Stats } from "./stats";
+import { StatusLine } from "./status-line";
 import { Timeline } from "./timeline";
 import { Tooltip } from "./tooltip";
 import type { CitySummary, HoverInfo, PathInfo, SelectPayload } from "./types";
 import { decodeView, encodeView, isDefaultView } from "./url-state";
-import { EMPTY_FILTER, ViewControls, type FilterState } from "./view-controls";
+import {
+  EMPTY_FILTER,
+  FilterMenu,
+  ModeMenu,
+  type FilterState,
+} from "./view-controls";
 
 type Phase = "booting" | "working" | "ready" | "error";
 
@@ -48,7 +70,10 @@ export default function RenderPage() {
   const [refined, setRefined] = useState(false);
 
   const [hover, setHover] = useState<HoverInfo | null>(null);
-  const [cursor, setCursor] = useState({ x: 0, y: 0 });
+  // Presentation only: which pipeline stage the loader should light up, and
+  // whether the clouds have parted far enough to bring the HUD in.
+  const [stage, setStage] = useState<StageProgress | null>(null);
+  const [revealed, setRevealed] = useState(false);
   const [selection, setSelection] = useState<SelectPayload>({ type: "None" });
   const [summary, setSummary] = useState<CitySummary | null>(null);
   const [mode, setMode] = useState("typology");
@@ -112,19 +137,15 @@ export default function RenderPage() {
         }
       }
     };
-    const onMove = (e: MouseEvent) => setCursor({ x: e.clientX, y: e.clientY });
-
     window.addEventListener("repolis:hover", onHover);
     window.addEventListener("repolis:select", onSelect);
     window.addEventListener("repolis:city", onCity);
     window.addEventListener("repolis:path", onPathEvent);
-    window.addEventListener("mousemove", onMove);
     return () => {
       window.removeEventListener("repolis:hover", onHover);
       window.removeEventListener("repolis:select", onSelect);
       window.removeEventListener("repolis:city", onCity);
       window.removeEventListener("repolis:path", onPathEvent);
-      window.removeEventListener("mousemove", onMove);
     };
   }, []);
 
@@ -178,6 +199,13 @@ export default function RenderPage() {
           const msg = JSON.parse(ev.data);
           switch (msg.type) {
             case "stage": {
+              if (msg.stage?.name) {
+                setStage({
+                  name: msg.stage.name,
+                  done: msg.stage.done ?? 0,
+                  total: msg.stage.total ?? 0,
+                });
+              }
               const label =
                 STAGE_LABELS[msg.stage?.name] ?? msg.stage?.name ?? "Working";
               setStatus(
@@ -332,30 +360,181 @@ export default function RenderPage() {
     return () => window.clearInterval(id);
   }, [phase, mode, filter, timelineDay, selection]);
 
+  // A panic inside the engine surfaces as a wasm trap. Show it rather than
+  // waiting forever for a city that will not arrive; the instance is dead
+  // after a trap, so retrying means reloading the page.
+  const engineDead = useRef(false);
+  useEffect(() => {
+    const onError = (e: ErrorEvent) => {
+      if (!/unreachable|RuntimeError/.test(e.message ?? "")) return;
+      engineDead.current = true;
+      setError("The 3D engine stopped while building this city.");
+      setPhase("error");
+      setBusy(false);
+    };
+    window.addEventListener("error", onError);
+    return () => window.removeEventListener("error", onError);
+  }, []);
+
+  // Deep link straight into a city: start inside the clouds, not the sky.
+  // Arriving from the landing page, the dive is still under way: let it
+  // finish rather than snapping the clouds shut.
+  useLayoutEffect(() => {
+    if (sky.fog.get() < 0.9 && !skyScenes.isDiving()) skyScenes.cover();
+    void skyScenes.holding();
+  }, []);
+
+  // The first city to arrive parts the clouds; the HUD follows them in.
+  useEffect(() => {
+    if (phase !== "ready" || revealed) return;
+    void skyScenes.reveal();
+    const id = window.setTimeout(() => setRevealed(true), 900);
+    return () => window.clearTimeout(id);
+  }, [phase, revealed]);
+
+  // While the city is being dragged the HUD recedes, so nothing competes
+  // with the camera; it returns the moment the pointer lifts.
+  const dragTimer = useRef<number | null>(null);
+  const endDrag = useCallback(() => {
+    if (dragTimer.current !== null) window.clearTimeout(dragTimer.current);
+    dragTimer.current = null;
+    delete document.documentElement.dataset.dragging;
+  }, []);
+  useEffect(() => {
+    window.addEventListener("pointerup", endDrag);
+    window.addEventListener("pointercancel", endDrag);
+    return () => {
+      window.removeEventListener("pointerup", endDrag);
+      window.removeEventListener("pointercancel", endDrag);
+      endDrag();
+    };
+  }, [endDrag]);
+
+  const leavingRef = useRef(false);
+  const goHome = useCallback(async () => {
+    if (leavingRef.current) return;
+    leavingRef.current = true;
+    // The HUD fades as the clouds close over the city from the edges in.
+    // Then a full load, because the engine binds to its canvas once and
+    // cannot be re-attached; the landing page opens inside these same
+    // clouds (see `skyScenes.handOff`) and parts them onto the landscape.
+    document.documentElement.dataset.leaving = "1";
+    await Promise.race([
+      skyScenes.closeOver(),
+      new Promise((r) => setTimeout(r, 1400)),
+    ]);
+    skyScenes.handOff();
+    window.location.assign("/");
+  }, []);
+
+  // Amber only while something is actually streaming in. A draft city with
+  // no model configured stays unrefined for good, and is still complete.
+  const signal: Signal = phase === "error" ? "error" : busy ? "busy" : "live";
+  // As on main: the status stays visible until the model has refined the
+  // city; a finished draft says what it is instead of "Refining…" forever.
+  const note =
+    phase !== "ready"
+      ? null
+      : busy
+        ? status
+        : !refined
+          ? "Draft city, drawn without the model"
+          : null;
+
   return (
-    <div className="relative h-screen w-screen overflow-hidden bg-black">
+    <div className="h-full w-full">
       <canvas
         id="bevy-canvas"
-        className="h-full w-full"
+        data-hover={hover ? "" : undefined}
+        className="absolute inset-0 h-full w-full outline-none"
         onContextMenu={(e) => e.preventDefault()}
+        onPointerDown={() => {
+          dragTimer.current = window.setTimeout(() => {
+            document.documentElement.dataset.dragging = "1";
+          }, 140);
+        }}
       />
 
-      {phase === "ready" && (
+      <AnimatePresence>
+        {phase !== "ready" && (
+          <AnalysisLoader
+            key="loader"
+            owner={owner}
+            repo={repo}
+            phase={phase}
+            stage={stage}
+            status={status}
+            error={error}
+            onRetry={() => {
+              if (engineDead.current) {
+                window.location.reload();
+                return;
+              }
+              setStage(null);
+              void startAnalysis();
+            }}
+            onHome={() => void goHome()}
+          />
+        )}
+      </AnimatePresence>
+
+      {phase === "ready" && revealed && (
         <>
-          <SearchBar
-            summary={summary}
-            busy={busy}
-            onPick={handlePick}
-            onReset={handleReset}
-            onRegenerate={handleRegenerate}
-          />
-          <ViewControls
-            summary={summary}
-            mode={mode}
-            filter={filter}
-            onMode={handleMode}
-            onFilter={handleFilter}
-          />
+          <DistrictLabels />
+          <motion.header
+            className="pointer-events-none absolute inset-x-0 top-0 z-[45] flex items-center justify-between gap-6 px-10 pt-10 max-md:px-4 max-md:pt-4"
+            initial="hidden"
+            animate="show"
+            variants={stagger(0.08)}
+          >
+            <motion.button
+              type="button"
+              variants={reveal}
+              onClick={() => void goHome()}
+              className="hud-dim pointer-events-auto rounded-xl max-md:hidden"
+              aria-label="Back to the start"
+              title="Analyse another repository"
+            >
+              <Logo />
+            </motion.button>
+
+            <motion.div variants={reveal} className="hud-dim">
+              <StatusLine
+                owner={owner}
+                repo={repo}
+                signal={signal}
+                note={note}
+              />
+            </motion.div>
+
+            <motion.div
+              variants={{
+                ...rise,
+                show: {
+                  ...rise.show,
+                  transition: { staggerChildren: 0.05, ...spring.glass },
+                },
+              }}
+              className="hud-dim pointer-events-auto flex items-center gap-2.5 max-md:ml-auto max-md:gap-1.5"
+            >
+              <SearchPalette summary={summary} onPick={handlePick} />
+              <ModeMenu mode={mode} onMode={handleMode} />
+              {summary && (
+                <FilterMenu
+                  summary={summary}
+                  filter={filter}
+                  onFilter={handleFilter}
+                />
+              )}
+              <Regenerate busy={busy} onRun={handleRegenerate} />
+              <IconButton label="Reset view (R)" onClick={handleReset}>
+                <IconCompass />
+              </IconButton>
+            </motion.div>
+          </motion.header>
+
+          {summary && <Stats summary={summary} />}
+          <Timeline summary={summary} onChange={handleTimeline} />
           <Legend summary={summary} mode={mode} />
           <InspectorPanel
             selection={selection}
@@ -371,38 +550,52 @@ export default function RenderPage() {
             path={path}
             onClear={handleClearPath}
           />
-          <Tooltip
-            hover={selection.type === "None" ? hover : null}
-            pos={cursor}
-          />
-          <Timeline summary={summary} onChange={handleTimeline} />
-          {(busy || !refined) && (
-            <div className="absolute bottom-16 left-1/2 z-40 -translate-x-1/2 rounded border border-gray-700 bg-gray-900/95 px-3 py-1.5 text-xs text-gray-300">
-              {status}
-            </div>
-          )}
+          <Tooltip hover={selection.type === "None" ? hover : null} />
+          <Hints />
         </>
       )}
-
-      {phase !== "ready" && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80">
-          <div className="w-80 rounded border border-gray-700 bg-gray-900 p-5 text-sm text-gray-200">
-            <div className="font-semibold text-white">
-              {owner}/{repo}
-            </div>
-            {phase === "error" ? (
-              <div className="mt-2 text-red-400">{error}</div>
-            ) : (
-              <>
-                <div className="mt-2 text-gray-400">{status}</div>
-                <div className="mt-3 h-1 w-full overflow-hidden rounded bg-gray-800">
-                  <div className="h-full w-1/3 animate-pulse rounded bg-gray-500" />
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      )}
     </div>
+  );
+}
+
+/** How to move, shown once after landing and then out of the way. */
+function Hints() {
+  const [show, setShow] = useState(true);
+  useEffect(() => {
+    const id = window.setTimeout(() => setShow(false), 7000);
+    const hide = () => setShow(false);
+    window.addEventListener("wheel", hide, { once: true, passive: true });
+    return () => {
+      window.clearTimeout(id);
+      window.removeEventListener("wheel", hide);
+    };
+  }, []);
+  const items = [
+    ["Drag", "orbit"],
+    ["Scroll", "zoom"],
+    ["WASD", "pan"],
+    ["Click", "inspect"],
+    ["F", "fly"],
+  ];
+  return (
+    <AnimatePresence>
+      {show && (
+        <Glass
+          key="hints"
+          className="hud-dim pointer-events-none absolute bottom-[6.5rem] left-1/2 z-40 flex h-12 -translate-x-1/2 items-center gap-5 px-6 text-[1.0625rem] whitespace-nowrap max-[90rem]:bottom-[11rem] max-xl:hidden"
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: 6 }}
+          transition={{ ...spring.soft, delay: 0.8 }}
+        >
+          {items.map(([k, v]) => (
+            <span key={k} className="relative flex items-center gap-1.5">
+              <span className="text-white/85">{k}</span>
+              <span className="text-white/45">{v}</span>
+            </span>
+          ))}
+        </Glass>
+      )}
+    </AnimatePresence>
   );
 }

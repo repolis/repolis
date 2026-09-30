@@ -1,4 +1,16 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
+import { AnimatePresence, motion } from "motion/react";
+
+import { cn } from "@/shared/lib/cn";
+import { spring } from "@/shared/lib/motion";
+import { GlassButton } from "@/shared/ui/glass";
+import {
+  IconChevronDown,
+  IconCross,
+  IconFilter,
+  IconPalette,
+} from "@/shared/ui/icons";
+import { MenuItem, Popover } from "@/shared/ui/popover";
 
 import type { CitySummary } from "./types";
 
@@ -11,6 +23,16 @@ export const COLOR_MODES = [
   { id: "instability", label: "Instability" },
   { id: "language", label: "Language" },
 ] as const;
+
+const MODE_HINTS: Record<string, string> = {
+  typology: "What each district is for",
+  complexity: "Worst cyclomatic complexity",
+  age: "How recently it was edited",
+  churn: "How often it changes",
+  fanin: "How much depends on it",
+  instability: "Depended upon versus depending",
+  language: "Source language",
+};
 
 export interface FilterState {
   text: string;
@@ -52,8 +74,75 @@ function activeCount(f: FilterState): number {
   return n;
 }
 
+/** Which metric drives building colour. */
+export function ModeMenu({
+  mode,
+  onMode,
+}: {
+  mode: string;
+  onMode: (m: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const current = COLOR_MODES.find((m) => m.id === mode) ?? COLOR_MODES[0];
+  return (
+    <Popover
+      open={open}
+      onClose={() => setOpen(false)}
+      className="w-[18rem] max-md:fixed max-md:top-20 max-md:right-4 max-md:left-4 max-md:w-auto"
+      trigger={
+        <GlassButton
+          icon={<IconPalette />}
+          onClick={() => setOpen(!open)}
+          active={open}
+          aria-haspopup="menu"
+          aria-expanded={open}
+        >
+          <AnimatePresence mode="popLayout" initial={false}>
+            <motion.span
+              key={current.id}
+              className="max-md:hidden"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={spring.snappy}
+            >
+              {current.label}
+            </motion.span>
+          </AnimatePresence>
+          <motion.span
+            animate={{ rotate: open ? 180 : 0 }}
+            transition={spring.snappy}
+            className="grid size-4 place-items-center text-white/60 max-md:hidden [&>svg]:size-full"
+          >
+            <IconChevronDown />
+          </motion.span>
+        </GlassButton>
+      }
+    >
+      <div role="menu" className="flex flex-col">
+        <div className="px-3.5 pt-2 pb-2 text-[0.9375rem] text-white/45">
+          Colour by
+        </div>
+        {COLOR_MODES.map((m) => (
+          <MenuItem
+            key={m.id}
+            layoutGroup="mode"
+            selected={m.id === mode}
+            title={m.label}
+            hint={MODE_HINTS[m.id]}
+            onSelect={() => {
+              onMode(m.id);
+              setOpen(false);
+            }}
+          />
+        ))}
+      </div>
+    </Popover>
+  );
+}
+
 /** A toggle chip. Clicking sets the value, clicking again clears it. */
-function Chip({
+function Toggle({
   on,
   label,
   onClick,
@@ -63,35 +152,78 @@ function Chip({
   onClick: () => void;
 }) {
   return (
-    <button
+    <motion.button
+      type="button"
       onClick={onClick}
-      className={`rounded border px-1.5 py-0.5 ${
+      whileTap={{ scale: 0.94 }}
+      transition={spring.snappy}
+      className={cn(
+        "relative h-9 rounded-full px-3.5 text-[0.9375rem] font-semibold transition-colors duration-200",
         on
-          ? "border-gray-400 bg-gray-700 text-white"
-          : "border-gray-700 text-gray-300 hover:border-gray-500"
-      }`}
+          ? "bg-white text-[#0d0f14]"
+          : "bg-white/10 text-white/75 hover:bg-white/15 hover:text-white",
+      )}
     >
       {label}
-    </button>
+    </motion.button>
   );
 }
 
-export function ViewControls({
+function Row({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex items-start gap-3">
+      <span className="w-[6rem] shrink-0 pt-2 text-[0.9375rem] text-white/45">
+        {label}
+      </span>
+      <div className="flex flex-1 flex-wrap items-center gap-1.5">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function Slider({
+  label,
+  value,
+  max,
+  onChange,
+  format,
+}: {
+  label: string;
+  value: number;
+  max: number;
+  onChange: (v: number) => void;
+  format: (v: number) => string;
+}) {
+  return (
+    <Row label={label}>
+      <input
+        type="range"
+        min={0}
+        max={max}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="range-glass flex-1"
+        style={{ ["--fill" as string]: `${(value / max) * 100}%` }}
+      />
+      <span className="w-20 text-right text-[0.9375rem] text-white/70 tabular-nums">
+        {format(value)}
+      </span>
+    </Row>
+  );
+}
+
+/** Restricts the view. Buildings that do not match fade rather than vanish. */
+export function FilterMenu({
   summary,
-  mode,
   filter,
-  onMode,
   onFilter,
 }: {
-  summary: CitySummary | null;
-  mode: string;
+  summary: CitySummary;
   filter: FilterState;
-  onMode: (m: string) => void;
   onFilter: (f: FilterState) => void;
 }) {
   const [open, setOpen] = useState(false);
-  if (!summary) return null;
-
   const n = activeCount(filter);
   const set = (patch: Partial<FilterState>) =>
     onFilter({ ...filter, ...patch });
@@ -99,147 +231,128 @@ export function ViewControls({
     set({ [k]: !filter[k] } as Partial<FilterState>);
 
   return (
-    <div className="absolute top-14 left-4 z-40 w-[26rem] text-xs">
-      <div className="flex items-center gap-2 rounded border border-gray-700 bg-gray-900/95 px-2 py-1.5">
-        <span className="text-gray-500">Colour</span>
-        <select
-          value={mode}
-          onChange={(e) => onMode(e.target.value)}
-          className="flex-1 rounded border border-gray-700 bg-gray-900 px-1 py-0.5 text-gray-200 outline-none"
-        >
-          {COLOR_MODES.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.label}
-            </option>
-          ))}
-        </select>
-        <button
+    <Popover
+      open={open}
+      onClose={() => setOpen(false)}
+      className="w-[28rem] p-4 max-md:fixed max-md:top-20 max-md:right-4 max-md:left-4 max-md:w-auto"
+      trigger={
+        <GlassButton
+          icon={<IconFilter />}
           onClick={() => setOpen(!open)}
-          className="rounded border border-gray-700 px-1.5 py-0.5 text-gray-300 hover:border-gray-500"
+          active={open}
+          aria-haspopup="dialog"
+          aria-expanded={open}
         >
-          Filter{n > 0 ? ` (${n})` : ""}
-        </button>
-        {n > 0 && (
-          <button
-            onClick={() => onFilter(EMPTY_FILTER)}
-            className="text-gray-500 hover:text-gray-200"
-            title="Clear all filters"
-          >
-            &times;
-          </button>
-        )}
-      </div>
-
-      {open && (
-        <div className="mt-1 flex flex-col gap-2 rounded border border-gray-700 bg-gray-900/95 p-2.5">
-          <div className="flex flex-wrap items-center gap-1">
-            <span className="w-16 text-gray-500">Shape</span>
-            <Chip
-              on={filter.kind === "type"}
-              label="types"
-              onClick={() =>
-                set({ kind: filter.kind === "type" ? "" : "type" })
-              }
-            />
-            <Chip
-              on={filter.kind === "module"}
-              label="modules"
-              onClick={() =>
-                set({ kind: filter.kind === "module" ? "" : "module" })
-              }
-            />
-          </div>
-
-          {summary.languages?.length > 1 && (
-            <div className="flex flex-wrap items-center gap-1">
-              <span className="w-16 text-gray-500">Language</span>
-              {summary.languages.map(([name]) => (
-                <Chip
-                  key={name}
-                  on={filter.language === name}
-                  label={name}
-                  onClick={() =>
-                    set({ language: filter.language === name ? "" : name })
-                  }
-                />
-              ))}
-            </div>
+          <span className="max-md:hidden">Filter</span>
+          <AnimatePresence initial={false}>
+            {n > 0 && (
+              <motion.span
+                initial={{ scale: 0, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0, opacity: 0 }}
+                transition={spring.snappy}
+                className="grid h-6 min-w-6 place-items-center rounded-full bg-white px-1.5 text-[0.875rem] text-[#0d0f14] tabular-nums"
+              >
+                {n}
+              </motion.span>
+            )}
+          </AnimatePresence>
+        </GlassButton>
+      }
+    >
+      <div className="flex flex-col gap-4">
+        <div className="flex items-center justify-between">
+          <span className="text-[1rem] font-semibold text-white">
+            Filter the city
+          </span>
+          {n > 0 && (
+            <button
+              type="button"
+              onClick={() => onFilter(EMPTY_FILTER)}
+              className="flex items-center gap-1 text-[0.9375rem] text-white/55 hover:text-white"
+            >
+              <IconCross className="size-4" />
+              Clear all
+            </button>
           )}
-
-          <div className="flex flex-wrap items-center gap-1">
-            <span className="w-16 text-gray-500">Graph</span>
-            <Chip
-              on={filter.only_hubs}
-              label="hubs"
-              onClick={() => toggle("only_hubs")}
-            />
-            <Chip
-              on={filter.only_no_callers}
-              label="no callers"
-              onClick={() => toggle("only_no_callers")}
-            />
-            <Chip
-              on={filter.only_cycles}
-              label="in a cycle"
-              onClick={() => toggle("only_cycles")}
-            />
-          </div>
-
-          <div className="flex items-center gap-2">
-            <span className="w-16 shrink-0 text-gray-500">Complexity</span>
-            <input
-              type="range"
-              min={0}
-              max={40}
-              value={filter.min_complexity}
-              onChange={(e) => set({ min_complexity: Number(e.target.value) })}
-              className="flex-1"
-            />
-            <span className="w-10 text-right text-gray-400">
-              {filter.min_complexity > 0 ? `≥${filter.min_complexity}` : "any"}
-            </span>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <span className="w-16 shrink-0 text-gray-500">Churn</span>
-            <input
-              type="range"
-              min={0}
-              max={99}
-              value={filter.min_churn_pct}
-              onChange={(e) => set({ min_churn_pct: Number(e.target.value) })}
-              className="flex-1"
-            />
-            <span className="w-10 text-right text-gray-400">
-              {filter.min_churn_pct > 0
-                ? `top ${100 - filter.min_churn_pct}%`
-                : "any"}
-            </span>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <span className="w-16 shrink-0 text-gray-500">Functions</span>
-            <input
-              type="range"
-              min={0}
-              max={40}
-              value={filter.min_methods}
-              onChange={(e) => set({ min_methods: Number(e.target.value) })}
-              className="flex-1"
-            />
-            <span className="w-10 text-right text-gray-400">
-              {filter.min_methods > 0 ? `≥${filter.min_methods}` : "any"}
-            </span>
-          </div>
-
-          <div className="border-t border-gray-800 pt-1.5 text-[10px] leading-snug text-gray-500">
-            Buildings that do not match fade out rather than disappear, so a
-            match is still read in context. &quot;No callers&quot; is a
-            question, not a verdict: a library&apos;s whole public surface has
-            none.
-          </div>
         </div>
-      )}
-    </div>
+
+        <Row label="Shape">
+          <Toggle
+            on={filter.kind === "type"}
+            label="types"
+            onClick={() => set({ kind: filter.kind === "type" ? "" : "type" })}
+          />
+          <Toggle
+            on={filter.kind === "module"}
+            label="modules"
+            onClick={() =>
+              set({ kind: filter.kind === "module" ? "" : "module" })
+            }
+          />
+        </Row>
+
+        {summary.languages?.length > 1 && (
+          <Row label="Language">
+            {summary.languages.map(([name]) => (
+              <Toggle
+                key={name}
+                on={filter.language === name}
+                label={name}
+                onClick={() =>
+                  set({ language: filter.language === name ? "" : name })
+                }
+              />
+            ))}
+          </Row>
+        )}
+
+        <Row label="Graph">
+          <Toggle
+            on={filter.only_hubs}
+            label="hubs"
+            onClick={() => toggle("only_hubs")}
+          />
+          <Toggle
+            on={filter.only_no_callers}
+            label="no callers"
+            onClick={() => toggle("only_no_callers")}
+          />
+          <Toggle
+            on={filter.only_cycles}
+            label="in a cycle"
+            onClick={() => toggle("only_cycles")}
+          />
+        </Row>
+
+        <Slider
+          label="Complexity"
+          value={filter.min_complexity}
+          max={40}
+          onChange={(v) => set({ min_complexity: v })}
+          format={(v) => (v > 0 ? `≥ ${v}` : "any")}
+        />
+        <Slider
+          label="Churn"
+          value={filter.min_churn_pct}
+          max={99}
+          onChange={(v) => set({ min_churn_pct: v })}
+          format={(v) => (v > 0 ? `top ${100 - v}%` : "any")}
+        />
+        <Slider
+          label="Functions"
+          value={filter.min_methods}
+          max={40}
+          onChange={(v) => set({ min_methods: v })}
+          format={(v) => (v > 0 ? `≥ ${v}` : "any")}
+        />
+
+        <p className="border-t border-white/10 pt-3 text-[0.875rem] leading-snug font-medium text-white/45">
+          Buildings that do not match fade out rather than disappear, so a match
+          is still read in context. &quot;No callers&quot; is a question, not a
+          verdict: a library&apos;s whole public surface has none.
+        </p>
+      </div>
+    </Popover>
   );
 }

@@ -1,4 +1,9 @@
 import { useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
+
+import { paneFadeAfter, spring } from "@/shared/lib/motion";
+import { Glass } from "@/shared/ui/glass";
+import { IconHistory, IconPause, IconPlay } from "@/shared/ui/icons";
 
 import type { CitySummary } from "./types";
 
@@ -64,9 +69,17 @@ export function Timeline({
     ? new Date(new Date(summary.first_commit).getTime() + at * 86400000)
     : null;
 
+  const pct = total > 0 ? (at / total) * 100 : 100;
+
   return (
-    <div className="absolute bottom-4 left-1/2 z-40 flex w-[34rem] -translate-x-1/2 items-center gap-3 rounded border border-gray-700 bg-gray-900/95 px-3 py-2 text-xs">
-      <button
+    <Glass
+      initial="hidden"
+      animate="show"
+      variants={paneFadeAfter(0.35)}
+      className="hud-dim absolute bottom-10 left-1/2 z-40 flex h-12 w-[26rem] max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-3 pr-[1.125rem] pl-1.5 max-[90rem]:bottom-[7.5rem] max-md:right-20 max-md:bottom-4 max-md:left-4 max-md:w-auto max-md:translate-x-0"
+    >
+      <motion.button
+        type="button"
         onClick={() => {
           if (playing) {
             setPlaying(false);
@@ -76,16 +89,39 @@ export function Timeline({
             setPlaying(true);
           }
         }}
-        className="w-12 shrink-0 rounded border border-gray-700 px-1.5 py-0.5 text-gray-300 hover:border-gray-500"
+        whileHover={{ scale: 1.06 }}
+        whileTap={{ scale: 0.9 }}
+        transition={spring.snappy}
+        aria-label={playing ? "Stop replay" : "Replay history"}
+        title={playing ? "Stop" : "Replay the city's history"}
+        className="relative grid size-9 shrink-0 place-items-center rounded-full bg-white text-[#0d0f14]"
       >
-        {playing ? "Stop" : "Play"}
-      </button>
+        <AnimatePresence mode="popLayout" initial={false}>
+          <motion.span
+            key={playing ? "pause" : "play"}
+            initial={{ scale: 0.4, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.4, opacity: 0 }}
+            transition={spring.snappy}
+            className="grid place-items-center"
+          >
+            {playing ? (
+              <IconPause className="size-4" />
+            ) : (
+              <IconPlay className="size-4 translate-x-px" />
+            )}
+          </motion.span>
+        </AnimatePresence>
+      </motion.button>
+
+      <IconHistory className="relative size-[1.375rem] shrink-0 text-white/65" />
 
       <input
         type="range"
         min={0}
         max={total}
         value={at}
+        aria-label="Day in the repository's history"
         onChange={(e) => {
           setPlaying(false);
           const v = Number(e.target.value);
@@ -93,16 +129,17 @@ export function Timeline({
           setDay(next);
           onChange(next);
         }}
-        className="flex-1"
+        className="range-glass relative min-w-0 flex-1"
+        style={{ ["--fill" as string]: `${pct}%` }}
       />
 
-      <span className="w-28 shrink-0 text-right text-gray-400">
+      <span className="type-hud relative w-[7.5rem] shrink-0 text-right text-white/85 tabular-nums">
         {day === null
-          ? "today"
+          ? "Today"
           : date
             ? date.toISOString().slice(0, 10)
             : `day ${at}`}
       </span>
-    </div>
+    </Glass>
   );
 }

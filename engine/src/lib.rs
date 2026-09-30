@@ -1,5 +1,5 @@
 use bevy::core_pipeline::bloom::BloomSettings;
-use bevy::pbr::CascadeShadowConfigBuilder;
+use bevy::pbr::{CascadeShadowConfigBuilder, FogFalloff, FogSettings};
 use bevy::prelude::*;
 use bevy::render::settings::{Backends, RenderCreation, WgpuSettings};
 use bevy::render::RenderPlugin;
@@ -8,6 +8,7 @@ use wasm_bindgen::prelude::*;
 
 mod camera;
 mod data;
+mod highlight;
 mod hover;
 mod layout;
 mod render;
@@ -37,7 +38,9 @@ use hover::*;
 use render::*;
 use view::{ColorMode, Filter, Scales};
 
-pub const SKY_COLOR: Color = Color::srgb(0.62, 0.71, 0.80);
+/// Night haze, the colour the interface's dusk sky has at the horizon, so the
+/// city is revealed without a seam. Fog fades the far ground into it too.
+pub const SKY_COLOR: Color = Color::srgb(0.085, 0.10, 0.145);
 const GROUND_Y: f32 = 0.0;
 const DISTRICT_TOP: f32 = 0.35;
 const STREET_Y: f32 = 0.40;
@@ -177,6 +180,7 @@ thread_local! {
     static PENDING_DATA: std::cell::RefCell<Option<CityMap>> = const { std::cell::RefCell::new(None) };
     static PENDING_FOCUS: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
     static PENDING_COMMAND: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+    static LABELS_OUT: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
 }
 
 /// Registers every resource and system the city needs. Split out from
@@ -189,12 +193,12 @@ pub fn add_city_systems(app: &mut App) {
         .init_resource::<ViewState>()
         .insert_resource(ClearColor(SKY_COLOR))
         .insert_resource(AmbientLight {
-            color: Color::srgb(0.80, 0.86, 0.96),
-            // Low: shadows carry the depth cue, and more washes the massing
-            // flat.
-            brightness: 260.0,
+            color: Color::srgb(0.58, 0.68, 0.98),
+            // Low: a night scene, where the moonlit faces and the shadows
+            // carry the massing and the glowing roofs carry the churn.
+            brightness: 170.0,
         })
-        .add_systems(Startup, setup_scene)
+        .add_systems(Startup, (setup_scene, highlight::spawn_hover_shell))
         .add_systems(
             Update,
             (
@@ -202,8 +206,10 @@ pub fn add_city_systems(app: &mut App) {
                 consume_commands,
                 camera_controls,
                 picking_system,
+                highlight::update_hover_shell,
                 refresh_view,
                 update_labels,
+                update_fog,
                 publish_camera,
             )
                 .chain(),
@@ -300,6 +306,13 @@ pub fn camera_state() -> String {
     CAMERA_OUT.with(|c| c.borrow().clone())
 }
 
+/// District labels projected to the viewport, as JSON. The interface draws
+/// them itself so they share its type and glass; polled once per frame.
+#[wasm_bindgen]
+pub fn district_labels() -> String {
+    LABELS_OUT.with(|c| c.borrow().clone())
+}
+
 /// Restores a camera previously returned by `camera_state`.
 #[wasm_bindgen]
 pub fn set_camera_state(state: String) {
@@ -342,21 +355,33 @@ fn setup_scene(mut commands: Commands) {
             transform: Transform::from_xyz(60.0, 70.0, 100.0).looking_at(Vec3::ZERO, Vec3::Y),
             ..default()
         },
-        // Weak on purpose: only high-churn roof caps pass the threshold.
+        // Weak on purpose: the glowing roofs, arcs and the selection bloom,
+        // the lit facades barely do.
         BloomSettings {
-            intensity: 0.12,
+            intensity: 0.2,
             ..BloomSettings::NATURAL
+        },
+        // Aerial perspective: distant ground melts into the haze instead of
+        // ending at the rim of a disc. Distances follow the camera, see
+        // `update_fog`.
+        FogSettings {
+            color: SKY_COLOR,
+            falloff: FogFalloff::Linear {
+                start: 600.0,
+                end: 1600.0,
+            },
+            ..default()
         },
         CityCamera::default(),
     ));
 
     // Height is the primary metric, and without cast shadows the massing
-    // reads flat at every angle.
+    // reads flat at every angle. A cool moon for the key...
     commands.spawn(DirectionalLightBundle {
         directional_light: DirectionalLight {
-            illuminance: 11000.0,
+            illuminance: 5200.0,
             shadows_enabled: true,
-            color: Color::srgb(1.0, 0.97, 0.92),
+            color: Color::srgb(0.80, 0.87, 1.0),
             ..default()
         },
         transform: Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, -0.95, 0.6, 0.0)),
@@ -369,24 +394,38 @@ fn setup_scene(mut commands: Commands) {
         .build(),
         ..default()
     });
-
-    commands.spawn((
-        TextBundle::from_section(
-            "loading...",
-            TextStyle {
-                font_size: 15.0,
-                color: Color::srgba(1.0, 1.0, 1.0, 0.85),
-                ..default()
-            },
-        )
-        .with_style(Style {
-            position_type: PositionType::Absolute,
-            bottom: Val::Px(10.0),
-            left: Val::Px(12.0),
+    // ...and a warm, shadowless fill from the opposite side, the glow a city
+    // throws back up, so the faces in shadow still separate from each other.
+    commands.spawn(DirectionalLightBundle {
+        directional_light: DirectionalLight {
+            illuminance: 1700.0,
+            shadows_enabled: false,
+            color: Color::srgb(1.0, 0.70, 0.46),
             ..default()
-        }),
-        HelpText,
-    ));
+        },
+        transform: Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, -0.55, 3.6, 0.0)),
+        ..default()
+    });
+
+    let mut help = TextBundle::from_section(
+        "loading...",
+        TextStyle {
+            font_size: 15.0,
+            color: Color::srgba(1.0, 1.0, 1.0, 0.85),
+            ..default()
+        },
+    )
+    .with_style(Style {
+        position_type: PositionType::Absolute,
+        bottom: Val::Px(10.0),
+        left: Val::Px(12.0),
+        ..default()
+    });
+    // The interface shows its own hints; this stays for native runs.
+    if cfg!(target_arch = "wasm32") {
+        help.visibility = Visibility::Hidden;
+    }
+    commands.spawn((help, HelpText));
 }
 
 #[derive(Component)]
@@ -487,6 +526,8 @@ fn process_city_data(
     if !had_city {
         for (mut transform, mut cam) in camera_q.iter_mut() {
             cam.frame(index.center, index.radius * 2.35 + 60.0);
+            // Descend onto the city as the interface's clouds part.
+            cam.start_intro();
             cam.apply(&mut transform);
         }
     }
@@ -602,12 +643,14 @@ fn spawn_city(
         }
     }
 
-    let ground_radius = result.radius as f32 * 1.9 + 160.0;
+    // Far wider than the city: its rim must always lie beyond the fog, or the
+    // ground reads as a plate floating in the haze.
+    let ground_radius = result.radius as f32 * 12.0 + 4000.0;
     commands.spawn((
         PbrBundle {
             mesh: meshes.add(circular_ground(ground_radius, 96)),
             material: materials.add(StandardMaterial {
-                base_color: Color::srgb(0.13, 0.14, 0.15),
+                base_color: Color::srgb(0.05, 0.06, 0.08),
                 perceptual_roughness: 1.0,
                 ..default()
             }),
@@ -656,9 +699,12 @@ fn spawn_city(
             commands.spawn((
                 PbrBundle {
                     mesh: meshes.add(quads.build()),
+                    // Lit lanes: a faint glow of their own keeps the street
+                    // grid legible between dark blocks.
                     material: materials.add(StandardMaterial {
-                        base_color: Color::srgb(0.20, 0.21, 0.23),
-                        perceptual_roughness: 0.98,
+                        base_color: Color::srgb(0.15, 0.165, 0.20),
+                        emissive: LinearRgba::new(0.012, 0.016, 0.026, 1.0),
+                        perceptual_roughness: 0.9,
                         ..default()
                     }),
                     ..default()
@@ -692,6 +738,9 @@ fn spawn_city(
             DistrictLabel {
                 world: Vec3::new(d.label_x as f32, BUILDING_BASE + 6.0, d.label_z as f32),
                 district_idx: i,
+                name: d.name.clone(),
+                count: d.building_count,
+                typology: d.typology.clone(),
             },
             CityElement,
         ));
@@ -879,8 +928,8 @@ fn spawn_city(
         PbrBundle {
             mesh: meshes.add(build_link_mesh(&overview, 0.0)),
             material: materials.add(StandardMaterial {
-                base_color: Color::srgba(0.45, 0.78, 0.95, 0.30),
-                emissive: LinearRgba::new(0.10, 0.35, 0.55, 1.0),
+                base_color: Color::srgba(0.45, 0.66, 1.0, 0.2),
+                emissive: LinearRgba::new(0.10, 0.30, 0.70, 1.0),
                 alpha_mode: AlphaMode::Blend,
                 unlit: true,
                 double_sided: true,
@@ -917,8 +966,8 @@ fn spawn_city(
         PbrBundle {
             mesh: meshes.add(build_link_mesh(&[], 0.0)),
             material: materials.add(StandardMaterial {
-                base_color: Color::srgb(1.0, 0.82, 0.25),
-                emissive: LinearRgba::new(3.0, 2.0, 0.3, 1.0),
+                base_color: Color::srgb(1.0, 0.64, 0.14),
+                emissive: LinearRgba::new(3.0, 1.35, 0.15, 1.0),
                 alpha_mode: AlphaMode::Blend,
                 unlit: true,
                 double_sided: true,
@@ -1269,7 +1318,9 @@ fn refresh_view(
 
     let faded = index.faded.clone().unwrap_or_else(|| {
         let h = materials.add(StandardMaterial {
-            base_color: Color::srgba(0.42, 0.43, 0.46, 0.16),
+            // Filtered-out buildings stay as faint glass, so the shape of
+            // the city survives a filter.
+            base_color: Color::srgba(0.55, 0.64, 0.80, 0.10),
             alpha_mode: AlphaMode::Blend,
             perceptual_roughness: 1.0,
             ..default()
@@ -1467,6 +1518,20 @@ fn shortest_path(links: &[LinkRef], from: &str, to: &str) -> Vec<String> {
 
 /// Projects each district label to screen space. Text lives in Bevy's UI layer
 /// rather than being marshalled to JS every frame.
+#[derive(serde::Serialize)]
+struct LabelOut<'a> {
+    i: usize,
+    x: f32,
+    y: f32,
+    a: f32,
+    n: &'a str,
+    c: usize,
+    t: &'a str,
+}
+
+/// Projects each district label to the viewport and publishes the result for
+/// the interface, which draws the labels itself. The Bevy text stays hidden:
+/// its bundled font has no glyphs beyond ASCII and cannot match the HUD.
 fn update_labels(
     camera_q: Query<(&Camera, &GlobalTransform), With<CityCamera>>,
     mut labels: Query<(&DistrictLabel, &mut Style, &mut Visibility, &mut Text)>,
@@ -1476,6 +1541,7 @@ fn update_labels(
         return;
     };
     let cam_pos = cam_tf.translation();
+    let mut out: Vec<LabelOut> = Vec::new();
 
     for (label, mut style, mut vis, mut text) in labels.iter_mut() {
         let Some(screen) = camera.world_to_viewport(cam_tf, label.world) else {
@@ -1487,15 +1553,45 @@ fn update_labels(
         // Fade out where labels would overlap into noise, and when zoomed
         // right into one building.
         let hide = dist > index.radius.max(1.0) * 6.0 || dist < 12.0;
-        *vis = if hide { Visibility::Hidden } else { Visibility::Inherited };
-
         let alpha = (1.0 - (dist / (index.radius.max(1.0) * 6.0))).clamp(0.25, 1.0);
-        text.sections[0].style.color = Color::srgba(1.0, 0.99, 0.94, alpha);
 
+        if cfg!(target_arch = "wasm32") {
+            *vis = Visibility::Hidden;
+            if !hide {
+                out.push(LabelOut {
+                    i: label.district_idx,
+                    x: screen.x,
+                    y: screen.y,
+                    a: alpha,
+                    n: &label.name,
+                    c: label.count,
+                    t: &label.typology,
+                });
+            }
+            continue;
+        }
+
+        *vis = if hide { Visibility::Hidden } else { Visibility::Inherited };
+        text.sections[0].style.color = Color::srgba(1.0, 0.99, 0.94, alpha);
         let width = text.sections[0].value.chars().count() as f32 * 7.0;
         style.left = Val::Px(screen.x - width * 0.5);
         style.top = Val::Px(screen.y);
-        let _ = label.district_idx;
+    }
+
+    let json = serde_json::to_string(&out).unwrap_or_default();
+    LABELS_OUT.with(|c| *c.borrow_mut() = json);
+}
+
+/// Keeps the haze just beyond whatever the camera is looking at: the focused
+/// part of the city stays crisp, the far ground dissolves into the sky.
+fn update_fog(mut q: Query<(&CityCamera, &mut FogSettings)>, index: Res<CityIndex>) {
+    let city = index.radius.max(40.0);
+    for (cam, mut fog) in q.iter_mut() {
+        let r = cam.radius.max(10.0);
+        fog.falloff = FogFalloff::Linear {
+            start: r + city * 0.5,
+            end: r + city * 1.7 + 80.0,
+        };
     }
 }
 
@@ -1542,6 +1638,8 @@ fn consume_commands(
                 if let Ok(mut cam) = cam_q.get_single_mut() {
                     let n: Vec<f32> = arg.split(',').filter_map(|v| v.parse().ok()).collect();
                     if n.len() == 5 {
+                        // A restored view wins over the opening fly-in.
+                        cam.intro = None;
                         cam.focus = Vec3::new(n[0], 0.0, n[1]);
                         cam.target_focus = cam.focus;
                         cam.radius = n[2].clamp(2.5, 20000.0);

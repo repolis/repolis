@@ -144,6 +144,9 @@ pub struct PickableDistrict {
 pub struct DistrictLabel {
     pub world: Vec3,
     pub district_idx: usize,
+    pub name: String,
+    pub count: usize,
+    pub typology: String,
 }
 
 #[derive(Resource, Default)]
