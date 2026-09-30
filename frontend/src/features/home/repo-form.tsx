@@ -1,15 +1,18 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { AnimatePresence, motion, useAnimate } from "motion/react";
 
+import { GLASS } from "@/shared/glass/maps";
+import { useGlass } from "@/shared/glass/use-glass";
 import { cn } from "@/shared/lib/cn";
 import { parseRepo } from "@/shared/lib/format";
 import { spring } from "@/shared/lib/motion";
-import { GlassButton, Kbd } from "@/shared/ui/glass";
-import { IconArrowRight, IconDanger, IconGithub } from "@/shared/ui/icons";
+import { GlassButton } from "@/shared/ui/glass";
+import { IconArrowRight, IconGithub } from "@/shared/ui/icons";
 
 /**
- * The one input on the landing page. Accepts "owner/repo", a github.com path
- * or a full URL (pasted links are folded down to owner/repo as they land).
+ * The one input on the landing page: a thick glass capsule with the create
+ * button inside it. Accepts "owner/repo", a github.com path or a full URL;
+ * pasted links are folded down to owner/repo as they land.
  */
 export function RepoForm({
   value,
@@ -24,6 +27,11 @@ export function RepoForm({
   const [focused, setFocused] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [scope, animate] = useAnimate<HTMLDivElement>();
+  const {
+    attach,
+    style: glassStyle,
+    layers: glassLayers,
+  } = useGlass<HTMLLabelElement>(GLASS.capsule, "full");
 
   const parsed = parseRepo(value);
 
@@ -42,7 +50,6 @@ export function RepoForm({
 
   function handleChange(raw: string) {
     setError(null);
-    // Fold a pasted URL down to owner/repo, but leave partial typing alone.
     const looksLikeUrl =
       /github\.com[/:]/.test(raw) || /^https?:\/\//.test(raw);
     const p = looksLikeUrl ? parseRepo(raw) : null;
@@ -71,23 +78,17 @@ export function RepoForm({
   return (
     <form onSubmit={handleSubmit} noValidate className="relative w-full">
       <div ref={scope}>
-        <motion.label
-          animate={{
-            scale: focused ? 1.015 : 1,
-            boxShadow: focused
-              ? "0 0 0 0.375rem rgb(255 255 255 / 0.08), 0 1.5rem 4rem -1.5rem rgb(0 0 0 / 0.5), 0 0 3rem rgb(255 255 255 / 0.12)"
-              : "0 0 0 0rem rgb(255 255 255 / 0), 0 1rem 3rem -1.5rem rgb(0 0 0 / 0.45), 0 0 0rem rgb(255 255 255 / 0)",
-          }}
-          transition={spring.glass}
-          className="glass glass-strong flex h-[4.5rem] w-full cursor-text items-center gap-3 rounded-full pr-2 pl-6 text-left"
+        <label
+          ref={attach}
+          className={cn(
+            "type-hud relative isolate flex h-[4.5rem] w-full cursor-text items-center gap-3 rounded-full pr-3 pl-6 transition-colors duration-300",
+            focused ? "bg-white/[0.09]" : "bg-white/[0.06]",
+          )}
+          style={glassStyle}
         >
-          <IconGithub
-            className={cn(
-              "size-7 shrink-0 transition-colors duration-300",
-              parsed ? "text-white" : "text-white/55",
-            )}
-          />
-          <span className="hidden shrink-0 text-[1.375rem] font-semibold text-white/40 sm:inline">
+          {glassLayers}
+          <IconGithub className="relative size-7 shrink-0" />
+          <span className="relative shrink-0 text-white/45 max-sm:hidden">
             github.com/
           </span>
           <input
@@ -102,49 +103,31 @@ export function RepoForm({
             aria-label="GitHub repository"
             aria-invalid={!!error}
             placeholder="owner/repository"
-            className="min-w-0 flex-1 bg-transparent text-[1.375rem] font-semibold text-white caret-white outline-none placeholder:text-white/35"
+            className="relative min-w-0 flex-1 bg-transparent text-white caret-white outline-none placeholder:text-white/35"
           />
-          <AnimatePresence initial={false}>
-            {!value && !focused && (
-              <motion.span
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="hidden sm:block"
-              >
-                <Kbd>/</Kbd>
-              </motion.span>
-            )}
-          </AnimatePresence>
-          <GlassButton
-            type="submit"
-            tone={parsed ? "primary" : "clear"}
-            size="lg"
-            className="h-14 px-6 text-[1.125rem]"
-          >
-            Build<span className="max-sm:hidden"> city</span>
+          <GlassButton type="submit" tone="primary" className="relative">
+            Create
             <motion.span
-              animate={{ x: parsed ? 3 : 0 }}
+              animate={{ x: parsed ? 2 : 0 }}
               transition={spring.snappy}
               className="grid size-5 place-items-center [&>svg]:size-full"
             >
               <IconArrowRight />
             </motion.span>
           </GlassButton>
-        </motion.label>
+        </label>
       </div>
 
       <AnimatePresence>
         {error && (
           <motion.p
             role="alert"
-            initial={{ opacity: 0, y: -6, filter: "blur(6px)" }}
-            animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-            exit={{ opacity: 0, y: -4, filter: "blur(6px)" }}
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
             transition={spring.glass}
-            className="text-lift absolute inset-x-0 top-full mt-3 flex items-center justify-center gap-2 text-[0.9375rem] font-semibold text-[var(--color-danger)]"
+            className="absolute inset-x-0 top-full mt-14 text-center text-[1.0625rem] text-[var(--color-danger)]"
           >
-            <IconDanger className="size-4" />
             {error}
           </motion.p>
         )}

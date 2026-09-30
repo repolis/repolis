@@ -29,6 +29,7 @@ varying vec2 v_uv;
 uniform vec2 u_res;
 uniform float u_time;
 uniform float u_sky;
+uniform float u_clouds;
 uniform float u_fog;
 uniform float u_part;
 uniform float u_zoom;
@@ -40,6 +41,13 @@ uniform vec3 u_skyBottom;
 const mat2 R = mat2(0.80, 0.60, -0.60, 0.80);
 
 float hash(vec2 p) { return fract(sin(dot(p, vec2(41.31, 289.17))) * 26737.367); }
+
+// Well-mixed hash for sparse points (the sin hash shows grid artefacts).
+float hash21(vec2 p) {
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
 
 float vnoise(vec2 p) {
   vec2 i = floor(p);
@@ -95,7 +103,7 @@ vec4 shadeCloud(vec4 acc, vec3 sky, vec2 p, vec2 c, vec2 r, float seed, float t,
   float dUp = cloudDensity(p + vec2(0.0, r.y * 0.55), c, r, seed, t);
   float occl = clamp((dUp - d) * 1.1 + d * 0.55, 0.0, 1.0);
   vec3 lit = u_cloud * 1.04;
-  vec3 shadow = mix(u_cloud * 0.66, sky, 0.38);
+  vec3 shadow = mix(u_cloud * 0.42, sky, 0.5);
   vec3 col = mix(lit, shadow, occl * 0.8);
   float a = smoothstep(0.02, 0.38, d);
   float rim = smoothstep(0.02, 0.14, d) * (1.0 - smoothstep(0.14, 0.40, d));
@@ -129,25 +137,33 @@ void main() {
   float t = u_time;
   vec3 sky = mix(u_skyBottom, u_skyTop, smoothstep(0.0, 1.0, uv.y));
   sky = mix(sky, u_skyBottom * 1.04, smoothstep(0.38, 0.0, uv.y) * 0.5);
-  vec2 sunPos = vec2(aspect * 0.78, 0.94);
-  float sunDist = length(vec2(uv.x * aspect, uv.y) - sunPos);
-  sky += vec3(1.0, 0.95, 0.84) * exp(-sunDist * sunDist * 5.0) * 0.3;
+  // A cool moon glow high on the right, and a scatter of faint stars.
+  vec2 moonPos = vec2(aspect * 0.78, 0.9);
+  float moonDist = length(vec2(uv.x * aspect, uv.y) - moonPos);
+  sky += vec3(0.62, 0.7, 0.9) * exp(-moonDist * moonDist * 9.0) * 0.22;
+  vec2 cell = floor(v_uv * u_res / 2.5);
+  float star = step(0.9975, hash21(cell)) * smoothstep(0.3, 0.95, uv.y);
+  star *= 0.5 + 0.5 * sin(t * 1.3 + hash21(cell + 7.7) * 40.0);
+  sky += vec3(star) * 0.45 * u_sky;
 
   vec4 clouds = vec4(0.0);
 
-  float cirrusBand = smoothstep(0.55, 0.8, uv.y) * (1.0 - smoothstep(0.92, 1.0, uv.y));
-  if (cirrusBand > 0.01) {
-    float streak = fbm(vec2(p.x * 1.6 - t * 0.006, p.y * 12.0));
-    float wisp = smoothstep(0.52, 0.78, streak) * cirrusBand * 0.35;
-    clouds = over(vec4(u_cloud * 0.98 * wisp, wisp), clouds);
-  }
+  if (u_clouds > 0.001) {
+    float cirrusBand = smoothstep(0.55, 0.8, uv.y) * (1.0 - smoothstep(0.92, 1.0, uv.y));
+    if (cirrusBand > 0.01) {
+      float streak = fbm(vec2(p.x * 1.6 - t * 0.006, p.y * 12.0));
+      float wisp = smoothstep(0.52, 0.78, streak) * cirrusBand * 0.35;
+      clouds = over(vec4(u_cloud * 0.98 * wisp, wisp), clouds);
+    }
 
-  clouds = cloudPass(clouds, sky, p, aspect, t, 0.006, 0.10, 0.84, vec2(0.20, 0.10), 43.7, 1.0);
-  clouds = cloudPass(clouds, sky, p, aspect, t, 0.008, 0.62, 0.73, vec2(0.24, 0.12), 71.3, 0.85);
-  clouds = cloudPass(clouds, sky, p, aspect, t, 0.011, 0.33, 0.60, vec2(0.34, 0.16), 17.3, 0.55);
-  clouds = cloudPass(clouds, sky, p, aspect, t, 0.013, 0.80, 0.47, vec2(0.30, 0.15), 29.9, 0.45);
-  clouds = cloudPass(clouds, sky, p, aspect, t, 0.016, 0.05, 0.35, vec2(0.46, 0.20), 91.1, 0.15);
-  clouds = cloudPass(clouds, sky, p, aspect, t, 0.020, 0.48, 0.20, vec2(0.56, 0.24), 57.2, 0.0);
+    clouds = cloudPass(clouds, sky, p, aspect, t, 0.006, 0.10, 0.84, vec2(0.20, 0.10), 43.7, 1.0);
+    clouds = cloudPass(clouds, sky, p, aspect, t, 0.008, 0.62, 0.73, vec2(0.24, 0.12), 71.3, 0.85);
+    clouds = cloudPass(clouds, sky, p, aspect, t, 0.011, 0.33, 0.60, vec2(0.34, 0.16), 17.3, 0.55);
+    clouds = cloudPass(clouds, sky, p, aspect, t, 0.013, 0.80, 0.47, vec2(0.30, 0.15), 29.9, 0.45);
+    clouds = cloudPass(clouds, sky, p, aspect, t, 0.016, 0.05, 0.35, vec2(0.46, 0.20), 91.1, 0.15);
+    clouds = cloudPass(clouds, sky, p, aspect, t, 0.020, 0.48, 0.20, vec2(0.56, 0.24), 57.2, 0.0);
+    clouds *= u_clouds;
+  }
 
   // Horizon haze, cheap, present whenever there is any fog at all.
   if (u_fog > 0.001) {
@@ -159,8 +175,8 @@ void main() {
   // the cloud bank has depth. Only computed once the camera is inside it.
   if (u_fog > 0.2) {
     float lo = mix(0.7, 0.4, u_fog);
-    vec3 shadowCol = mix(u_cloud * 0.7, u_skyTop, 0.38);
-    vec3 litCol = u_cloud * 1.08;
+    vec3 shadowCol = mix(u_cloud * 0.4, u_skyTop, 0.45);
+    vec3 litCol = u_cloud * 1.02;
     float grow = smoothstep(0.2, 0.55, u_fog);
 
     // Far deck: smaller cells, drifting slowly, lit from above.
@@ -182,12 +198,13 @@ void main() {
     clouds = over(vec4(colN * aN, aN), clouds);
   }
 
-  // Dissolve from the centre outward with a noisy, organic edge.
-  vec2 d = (uv - 0.5) * vec2(aspect, 1.0);
-  float r = length(d) / (0.5 * sqrt(aspect * aspect + 1.0));
-  r += (fbm(uv * 4.0 + t * 0.05) - 0.5) * 0.35;
-  float edge = u_part * 1.55;
-  float keep = smoothstep(edge - 0.32, edge, r);
+  // Part like curtains: a gap opens at the centre line and widens to the
+  // sides, its edge ragged with the cloud texture, while the rest thins out.
+  float ragged = (fbm(vec2(uv.y * 3.2, t * 0.05)) - 0.5) * 0.35;
+  float gap = abs(uv.x - 0.5) * 2.0 + ragged;
+  float edge = u_part * 1.5;
+  float keep = smoothstep(edge - 0.4, edge, gap);
+  keep *= 1.0 - smoothstep(0.55, 1.0, u_part);
   clouds *= keep;
 
   vec4 skyLayer = vec4(sky * u_sky, u_sky);
@@ -217,11 +234,11 @@ function compile(gl: WebGLRenderingContext, type: number, src: string) {
   return s;
 }
 
-/** Soft sky palette tuned to hand over to the engine's own clear colour. */
+/** Dusk palette: it hands over to the night city's fog colour. */
 const PALETTE = {
-  cloud: hex("#fbfbfa"),
-  skyTop: hex("#6a95c2"),
-  skyBottom: hex("#d9e3ec"),
+  cloud: hex("#aab4c5"),
+  skyTop: hex("#060a14"),
+  skyBottom: hex("#28324a"),
 };
 
 /** Clouds are soft; rendering them well below device resolution is
@@ -269,6 +286,7 @@ export function CloudSky() {
       res: u("u_res"),
       time: u("u_time"),
       sky: u("u_sky"),
+      clouds: u("u_clouds"),
       fog: u("u_fog"),
       part: u("u_part"),
       zoom: u("u_zoom"),
@@ -331,6 +349,7 @@ export function CloudSky() {
 
       gl.uniform1f(loc.time, clock + 40);
       gl.uniform1f(loc.sky, sky.sky.get());
+      gl.uniform1f(loc.clouds, sky.clouds.get());
       gl.uniform1f(loc.fog, sky.fog.get());
       gl.uniform1f(loc.part, sky.part.get());
       gl.uniform1f(loc.zoom, sky.zoom.get());
