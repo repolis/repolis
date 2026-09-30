@@ -113,6 +113,15 @@ export default function HomePage() {
       </AnimatePresence>
 
       <main className="absolute inset-0 flex items-center justify-center px-6">
+        {/* The overlay approach from the Figma frame, local to the hero:
+            the scene darkens softly behind the field and the suggestions. */}
+        <motion.div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_42%_32%_at_50%_53%,rgb(0_0_0/0.5),rgb(0_0_0/0))]"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: leaving ? 0 : 1 }}
+          transition={{ duration: leaving ? 0.4 : 1.2 }}
+        />
         <AnimatePresence>
           {!leaving && (
             <motion.section
@@ -139,7 +148,7 @@ export default function HomePage() {
                 variants={reveal}
                 className="mt-6 flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-[1.0625rem]"
               >
-                <span className="text-white/45">Try</span>
+                <span className="text-white/60">Try</span>
                 {suggestions.map((slug) => (
                   <button
                     key={slug}
@@ -148,7 +157,7 @@ export default function HomePage() {
                       setDraft(slug);
                       go(slug);
                     }}
-                    className="text-white/65 transition-colors duration-200 hover:text-white"
+                    className="text-white/85 transition-colors duration-200 hover:text-white"
                   >
                     {slug}
                   </button>

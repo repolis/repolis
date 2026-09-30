@@ -82,13 +82,15 @@ export function RepoForm({
           ref={attach}
           className={cn(
             "type-hud relative isolate flex h-[4.5rem] w-full cursor-text items-center gap-3 rounded-full pr-3 pl-6 transition-colors duration-300",
-            focused ? "bg-white/[0.09]" : "bg-white/[0.06]",
+            // Dark glass: the field sits on the brightest part of the
+            // landscape, and white type needs a quiet ground to read on.
+            focused ? "bg-[rgb(8_12_20/0.5)]" : "bg-[rgb(8_12_20/0.4)]",
           )}
           style={glassStyle}
         >
           {glassLayers}
           <IconGithub className="relative size-7 shrink-0" />
-          <span className="relative shrink-0 text-white/45 max-sm:hidden">
+          <span className="relative shrink-0 text-white/55 max-sm:hidden">
             github.com/
           </span>
           <input
@@ -103,7 +105,7 @@ export function RepoForm({
             aria-label="GitHub repository"
             aria-invalid={!!error}
             placeholder="owner/repository"
-            className="relative min-w-0 flex-1 bg-transparent text-white caret-white outline-none placeholder:text-white/35"
+            className="relative min-w-0 flex-1 bg-transparent text-white caret-white outline-none placeholder:text-white/50"
           />
           <GlassButton type="submit" tone="primary" className="relative">
             Create

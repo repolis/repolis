@@ -60,12 +60,13 @@ export const GLASS = {
     lightIntensity: 0.8,
     splay: 1,
   },
-  /** The landing capsule: a thick pill that visibly lenses the sky. */
+  /** The landing capsule: a thick pill that lenses the scene at its rim
+   * and is frosted enough in the middle for the text to sit on calm glass. */
   capsule: {
     depth: 22,
     refraction: 1,
     dispersion: 0.6,
-    frost: 4,
+    frost: 28,
     lightAngle: -45,
     lightIntensity: 0.9,
     splay: 0.3,
