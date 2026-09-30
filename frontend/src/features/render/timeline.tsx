@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 
 import { spring } from "@/shared/lib/motion";
+import { Glass } from "@/shared/ui/glass";
 import { IconHistory, IconPause, IconPlay } from "@/shared/ui/icons";
 
 import type { CitySummary } from "./types";
@@ -71,7 +72,7 @@ export function Timeline({
   const pct = total > 0 ? (at / total) * 100 : 100;
 
   return (
-    <div className="hud-dim glass absolute bottom-[3.75rem] left-1/2 z-40 flex h-12 w-[26rem] max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-3 rounded-full pr-5 pl-1.5 max-[90rem]:bottom-[8rem] max-md:right-20 max-md:bottom-4 max-md:left-4 max-md:w-auto max-md:translate-x-0">
+    <Glass className="hud-dim absolute bottom-10 left-1/2 z-40 flex h-12 w-[26rem] max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-3 pr-[1.125rem] pl-1.5 max-[90rem]:bottom-[7.5rem] max-md:right-20 max-md:bottom-4 max-md:left-4 max-md:w-auto max-md:translate-x-0">
       <motion.button
         type="button"
         onClick={() => {
@@ -88,7 +89,7 @@ export function Timeline({
         transition={spring.snappy}
         aria-label={playing ? "Stop replay" : "Replay history"}
         title={playing ? "Stop" : "Replay the city's history"}
-        className="grid size-9 shrink-0 place-items-center rounded-full bg-white text-[#0d0f14] shadow-[0_0.25rem_0.75rem_rgb(0_0_0/0.3)]"
+        className="relative grid size-9 shrink-0 place-items-center rounded-full bg-white text-[#0d0f14]"
       >
         <AnimatePresence mode="popLayout" initial={false}>
           <motion.span
@@ -108,7 +109,7 @@ export function Timeline({
         </AnimatePresence>
       </motion.button>
 
-      <IconHistory className="size-5 shrink-0 text-white/60" />
+      <IconHistory className="relative size-[1.375rem] shrink-0 text-white/65" />
 
       <input
         type="range"
@@ -123,17 +124,17 @@ export function Timeline({
           setDay(next);
           onChange(next);
         }}
-        className="range-glass min-w-0 flex-1"
+        className="range-glass relative min-w-0 flex-1"
         style={{ ["--fill" as string]: `${pct}%` }}
       />
 
-      <span className="w-[6.5rem] shrink-0 text-right text-[0.9375rem] font-semibold text-white/80 tabular-nums">
+      <span className="type-hud relative w-[7.5rem] shrink-0 text-right text-white/85 tabular-nums">
         {day === null
           ? "Today"
           : date
             ? date.toISOString().slice(0, 10)
             : `day ${at}`}
       </span>
-    </div>
+    </Glass>
   );
 }

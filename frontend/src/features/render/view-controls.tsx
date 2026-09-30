@@ -91,13 +91,11 @@ export function ModeMenu({
       className="w-[18rem] max-md:fixed max-md:top-20 max-md:right-4 max-md:left-4 max-md:w-auto"
       trigger={
         <GlassButton
-          size="lg"
           icon={<IconPalette />}
           onClick={() => setOpen(!open)}
           active={open}
           aria-haspopup="menu"
           aria-expanded={open}
-          className="text-[1rem]"
         >
           <AnimatePresence mode="popLayout" initial={false}>
             <motion.span
@@ -122,7 +120,7 @@ export function ModeMenu({
       }
     >
       <div role="menu" className="flex flex-col">
-        <div className="px-3.5 pt-2 pb-1.5 text-[0.75rem] font-semibold tracking-wide text-white/45 uppercase">
+        <div className="px-3.5 pt-2 pb-2 text-[0.9375rem] text-white/45">
           Colour by
         </div>
         {COLOR_MODES.map((m) => (
@@ -160,10 +158,10 @@ function Toggle({
       whileTap={{ scale: 0.94 }}
       transition={spring.snappy}
       className={cn(
-        "relative rounded-full px-3 py-1.5 text-[0.8125rem] font-semibold transition-colors duration-200",
+        "relative h-9 rounded-full px-3.5 text-[0.9375rem] font-semibold transition-colors duration-200",
         on
           ? "bg-white text-[#0d0f14]"
-          : "bg-white/10 text-white/75 shadow-[inset_0_1px_0_rgb(255_255_255/0.12)] hover:bg-white/18 hover:text-white",
+          : "bg-white/10 text-white/75 hover:bg-white/15 hover:text-white",
       )}
     >
       {label}
@@ -174,7 +172,7 @@ function Toggle({
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex items-start gap-3">
-      <span className="w-[5.5rem] shrink-0 pt-1.5 text-[0.8125rem] font-semibold text-white/50">
+      <span className="w-[6rem] shrink-0 pt-2 text-[0.9375rem] text-white/45">
         {label}
       </span>
       <div className="flex flex-1 flex-wrap items-center gap-1.5">
@@ -208,7 +206,7 @@ function Slider({
         className="range-glass flex-1"
         style={{ ["--fill" as string]: `${(value / max) * 100}%` }}
       />
-      <span className="w-16 text-right text-[0.8125rem] font-semibold text-white/70 tabular-nums">
+      <span className="w-20 text-right text-[0.9375rem] text-white/70 tabular-nums">
         {format(value)}
       </span>
     </Row>
@@ -236,16 +234,14 @@ export function FilterMenu({
     <Popover
       open={open}
       onClose={() => setOpen(false)}
-      className="w-[26rem] p-5 max-md:fixed max-md:top-20 max-md:right-4 max-md:left-4 max-md:w-auto"
+      className="w-[28rem] p-4 max-md:fixed max-md:top-20 max-md:right-4 max-md:left-4 max-md:w-auto"
       trigger={
         <GlassButton
-          size="lg"
           icon={<IconFilter />}
           onClick={() => setOpen(!open)}
           active={open}
           aria-haspopup="dialog"
           aria-expanded={open}
-          className="text-[1rem]"
         >
           <span className="max-md:hidden">Filter</span>
           <AnimatePresence initial={false}>
@@ -255,7 +251,7 @@ export function FilterMenu({
                 animate={{ scale: 1, opacity: 1 }}
                 exit={{ scale: 0, opacity: 0 }}
                 transition={spring.snappy}
-                className="grid h-5 min-w-5 place-items-center rounded-full bg-[var(--color-signal)] px-1 text-[0.75rem] text-[#0d0f14] tabular-nums"
+                className="grid h-6 min-w-6 place-items-center rounded-full bg-white px-1.5 text-[0.875rem] text-[#0d0f14] tabular-nums"
               >
                 {n}
               </motion.span>
@@ -273,7 +269,7 @@ export function FilterMenu({
             <button
               type="button"
               onClick={() => onFilter(EMPTY_FILTER)}
-              className="flex items-center gap-1 text-[0.8125rem] font-semibold text-white/55 hover:text-white"
+              className="flex items-center gap-1 text-[0.9375rem] text-white/55 hover:text-white"
             >
               <IconCross className="size-4" />
               Clear all
@@ -351,7 +347,7 @@ export function FilterMenu({
           format={(v) => (v > 0 ? `≥ ${v}` : "any")}
         />
 
-        <p className="border-t border-white/10 pt-3 text-[0.75rem] leading-snug text-white/45">
+        <p className="border-t border-white/10 pt-3 text-[0.875rem] leading-snug font-medium text-white/45">
           Buildings that do not match fade out rather than disappear, so a match
           is still read in context. &quot;No callers&quot; is a question, not a
           verdict: a library&apos;s whole public surface has none.

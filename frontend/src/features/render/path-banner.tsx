@@ -1,6 +1,8 @@
 import { AnimatePresence, motion } from "motion/react";
 
+import { GLASS } from "@/shared/glass/maps";
 import { spring } from "@/shared/lib/motion";
+import { Glass, SHEET_FILL } from "@/shared/ui/glass";
 import { IconArrowRight, IconCross, IconRouting } from "@/shared/ui/icons";
 
 import type { PathInfo } from "./types";
@@ -20,16 +22,19 @@ export function PathBanner({
   return (
     <AnimatePresence>
       {visible && (
-        <motion.div
+        <Glass
           key="path"
+          params={GLASS.sheet}
+          radius={24}
+          fill={SHEET_FILL}
           initial={{ opacity: 0, y: -12, scale: 0.96 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: -8, scale: 0.97 }}
           transition={spring.glass}
-          className="glass glass-strong absolute top-[8.25rem] left-1/2 z-40 flex max-w-[min(48rem,calc(100vw-2rem))] -translate-x-1/2 items-start gap-3 rounded-[1.25rem] py-3 pr-12 pl-4"
+          className="absolute top-[7.5rem] left-1/2 z-40 flex max-w-[min(48rem,calc(100vw-2rem))] -translate-x-1/2 items-start gap-3 py-4 pr-14 pl-5"
         >
-          <IconRouting className="mt-0.5 size-5 shrink-0 text-[var(--color-signal)]" />
-          <div className="flex min-w-0 flex-col gap-2 text-[0.9375rem] font-semibold">
+          <IconRouting className="relative mt-0.5 size-[1.375rem] shrink-0 text-[var(--color-signal)]" />
+          <div className="relative flex min-w-0 flex-col gap-2.5 text-[1.0625rem]">
             {path ? (
               path.hops.length > 0 ? (
                 <>
@@ -51,9 +56,9 @@ export function PathBanner({
                         className="flex items-center gap-1.5"
                       >
                         {i > 0 && (
-                          <IconArrowRight className="size-3.5 text-white/40" />
+                          <IconArrowRight className="size-3.5 text-white/45" />
                         )}
-                        <span className="rounded-full bg-white/12 px-2.5 py-1 font-mono text-[0.75rem] text-white/85">
+                        <span className="rounded-full bg-white/10 px-3 py-1 text-[0.9375rem] text-white/85">
                           {h}
                         </span>
                       </motion.span>
@@ -69,8 +74,7 @@ export function PathBanner({
               )
             ) : (
               <div className="text-white/65">
-                Path starts at{" "}
-                <span className="font-mono text-white">{anchorName}</span>
+                Path starts at <span className="text-white">{anchorName}</span>
                 <span className="text-white/45">
                   {" "}
                   · now pick another building and trace the path to it
@@ -83,11 +87,11 @@ export function PathBanner({
             onClick={onClear}
             aria-label="Clear path"
             title="Clear path"
-            className="absolute top-2.5 right-2.5 grid size-7 place-items-center rounded-full text-white/55 hover:bg-white/10 hover:text-white"
+            className="absolute top-3 right-3 grid size-8 place-items-center rounded-full opacity-100 transition-opacity duration-200 hover:opacity-75"
           >
-            <IconCross className="size-7" />
+            <IconCross className="size-8" />
           </button>
-        </motion.div>
+        </Glass>
       )}
     </AnimatePresence>
   );

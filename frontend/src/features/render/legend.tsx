@@ -31,27 +31,20 @@ const RAMP_ENDS: Record<string, [string, string]> = {
 
 function Swatch({ color, label }: { color: string; label: string }) {
   return (
-    <span className="flex items-center gap-1.5 rounded-full bg-white/10 px-2.5 py-1 text-[0.8125rem] font-semibold text-white/80 shadow-[inset_0_1px_0_rgb(255_255_255/0.12)]">
-      <span
-        className="size-2 rounded-full shadow-[0_0_0_2px_rgb(255_255_255/0.12)]"
-        style={{ background: color }}
-      />
+    <span className="flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5 text-[0.9375rem] text-white/80">
+      <span className="size-2 rounded-full" style={{ background: color }} />
       {label}
     </span>
   );
 }
 
 function Heading({ children }: { children: ReactNode }) {
-  return (
-    <div className="text-[0.75rem] font-semibold tracking-wide text-white/45 uppercase">
-      {children}
-    </div>
-  );
+  return <div className="text-[0.9375rem] text-white/45">{children}</div>;
 }
 
 function Key({ mark, children }: { mark: ReactNode; children: ReactNode }) {
   return (
-    <div className="flex items-center gap-2.5 text-[0.875rem] font-medium text-white/80">
+    <div className="flex items-center gap-2.5 text-[0.9375rem] text-white/80">
       <span className="grid w-5 shrink-0 place-items-center">{mark}</span>
       {children}
     </div>
@@ -71,21 +64,19 @@ export function Legend({
   const used = new Set(summary.districts.map((d) => d.typology));
 
   return (
-    <div className="hud-dim absolute right-[3.75rem] bottom-[3.75rem] z-[45] max-md:right-4 max-md:bottom-4">
+    <div className="hud-dim absolute right-10 bottom-10 z-[45] max-md:right-4 max-md:bottom-4">
       <Popover
         open={open}
         onClose={() => setOpen(false)}
         side="top"
         align="right"
-        className="w-[23rem] p-5 max-md:w-[calc(100vw-2rem)]"
+        className="w-[26rem] p-5 max-md:w-[calc(100vw-2rem)]"
         trigger={
           <GlassButton
-            size="lg"
             icon={<IconLayers />}
             onClick={() => setOpen(!open)}
             active={open}
             aria-expanded={open}
-            className="text-[1rem]"
           >
             <span className="max-md:hidden">Legend</span>
           </GlassButton>
@@ -110,14 +101,14 @@ export function Legend({
             <Key mark={<span className="size-3 rounded-sm bg-white/25" />}>
               Pale = not edited recently
             </Key>
-            <Key
-              mark={
-                <span className="h-2 w-3.5 rounded-sm bg-orange-400 shadow-[0_0_0.5rem_rgb(251_146_60/0.9)]" />
-              }
-            >
+            <Key mark={<span className="h-2 w-3.5 rounded-sm bg-orange-400" />}>
               Glowing roof cap = often edited
             </Key>
-            <Key mark={<span className="h-1.5 w-4 rounded-sm bg-[#2a2c33]" />}>
+            <Key
+              mark={
+                <span className="h-1.5 w-4 rounded-sm bg-black ring-1 ring-white/25" />
+              }
+            >
               Dark plinth = file module, not a type
             </Key>
             <Key mark={<span className="h-0.5 w-4 rounded-full bg-red-400" />}>
@@ -153,12 +144,12 @@ export function Legend({
             ) : (
               <>
                 <Heading>Colour</Heading>
-                <p className="text-[0.875rem] leading-snug text-white/75">
+                <p className="text-[0.9375rem] leading-snug font-medium text-white/75">
                   {MODE_HELP[mode]}
                 </p>
-                <div className="mt-1 h-2 w-full rounded-full bg-gradient-to-r from-[rgb(219,217,199)] via-[rgb(217,112,56)] to-[rgb(184,41,43)] shadow-[inset_0_1px_0_rgb(255_255_255/0.3)]" />
+                <div className="mt-1 h-2 w-full rounded-full bg-gradient-to-r from-[rgb(219,217,199)] via-[rgb(217,112,56)] to-[rgb(184,41,43)]" />
                 {RAMP_ENDS[mode] && (
-                  <div className="flex justify-between text-[0.75rem] font-semibold text-white/50">
+                  <div className="flex justify-between text-[0.875rem] text-white/50">
                     <span>{RAMP_ENDS[mode][0]}</span>
                     <span>{RAMP_ENDS[mode][1]}</span>
                   </div>
@@ -167,7 +158,7 @@ export function Legend({
             )}
           </div>
 
-          <div className="flex flex-col gap-1 border-t border-white/10 pt-4 text-[0.8125rem] leading-relaxed text-white/60">
+          <div className="flex flex-col gap-1 border-t border-white/10 pt-4 text-[0.9375rem] leading-relaxed font-medium text-white/60">
             <div>
               <b className="text-white/85">
                 {formatCount(summary.total_buildings)}

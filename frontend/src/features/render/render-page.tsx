@@ -11,7 +11,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { reveal, spring, stagger } from "@/shared/lib/motion";
 import { sky, skyScenes } from "@/shared/sky/sky";
 import { Logo, type Signal } from "@/shared/ui/brand";
-import { IconButton } from "@/shared/ui/glass";
+import { Glass, IconButton } from "@/shared/ui/glass";
 import { IconCompass } from "@/shared/ui/icons";
 import init, {
   camera_state,
@@ -377,8 +377,10 @@ export default function RenderPage() {
   }, []);
 
   // Deep link straight into a city: start inside the clouds, not the sky.
+  // Arriving from the landing page, the dive is still under way: let it
+  // finish rather than snapping the clouds shut.
   useLayoutEffect(() => {
-    if (sky.fog.get() < 0.9) skyScenes.cover();
+    if (sky.fog.get() < 0.9 && !skyScenes.isDiving()) skyScenes.cover();
     void skyScenes.holding();
   }, []);
 
@@ -424,7 +426,16 @@ export default function RenderPage() {
   // Amber only while something is actually streaming in. A draft city with
   // no model configured stays unrefined for good, and is still complete.
   const signal: Signal = phase === "error" ? "error" : busy ? "busy" : "live";
-  const note = phase === "ready" && busy ? status : null;
+  // As on main: the status stays visible until the model has refined the
+  // city; a finished draft says what it is instead of "Refining…" forever.
+  const note =
+    phase !== "ready"
+      ? null
+      : busy
+        ? status
+        : !refined
+          ? "Draft city, drawn without the model"
+          : null;
 
   return (
     <div className="h-full w-full">
@@ -466,7 +477,7 @@ export default function RenderPage() {
         <>
           <DistrictLabels />
           <motion.header
-            className="pointer-events-none absolute inset-x-0 top-0 z-[45]"
+            className="pointer-events-none absolute inset-x-0 top-0 z-[45] flex items-center justify-between gap-6 px-10 pt-10 max-md:px-4 max-md:pt-4"
             initial="hidden"
             animate="show"
             variants={stagger(0.08)}
@@ -475,7 +486,7 @@ export default function RenderPage() {
               type="button"
               variants={reveal}
               onClick={() => void goHome()}
-              className="hud-dim pointer-events-auto absolute top-[3.75rem] left-[3.75rem] rounded-xl max-md:hidden"
+              className="hud-dim pointer-events-auto rounded-xl max-md:hidden"
               aria-label="Back to the start"
               title="Analyse another repository"
             >
@@ -488,13 +499,12 @@ export default function RenderPage() {
                 repo={repo}
                 signal={signal}
                 note={note}
-                draft={!refined && !busy}
               />
             </motion.div>
 
             <motion.div
               variants={reveal}
-              className="hud-dim pointer-events-auto absolute top-[3.75rem] right-[3.75rem] flex items-center gap-2.5 max-md:top-4 max-md:right-4 max-md:gap-1.5"
+              className="hud-dim pointer-events-auto flex items-center gap-2.5 max-md:ml-auto max-md:gap-1.5"
             >
               <SearchPalette summary={summary} onPick={handlePick} />
               <ModeMenu mode={mode} onMode={handleMode} />
@@ -506,11 +516,7 @@ export default function RenderPage() {
                 />
               )}
               <Regenerate busy={busy} onRun={handleRegenerate} />
-              <IconButton
-                size="lg"
-                label="Reset view (R)"
-                onClick={handleReset}
-              >
+              <IconButton label="Reset view (R)" onClick={handleReset}>
                 <IconCompass />
               </IconButton>
             </motion.div>
@@ -563,20 +569,21 @@ function Hints() {
   return (
     <AnimatePresence>
       {show && (
-        <motion.div
-          className="text-lift pointer-events-none absolute bottom-[8.25rem] left-1/2 z-40 flex -translate-x-1/2 gap-5 text-[0.9375rem] font-semibold whitespace-nowrap max-[90rem]:bottom-[12.5rem] max-xl:hidden"
-          initial={{ opacity: 0, y: 10, filter: "blur(8px)" }}
-          animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-          exit={{ opacity: 0, y: 6, filter: "blur(8px)" }}
+        <Glass
+          key="hints"
+          className="pointer-events-none absolute bottom-[6.5rem] left-1/2 z-40 flex h-12 -translate-x-1/2 items-center gap-5 px-6 text-[1.0625rem] whitespace-nowrap max-[90rem]:bottom-[11rem] max-xl:hidden"
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: 6 }}
           transition={{ ...spring.soft, delay: 0.8 }}
         >
           {items.map(([k, v]) => (
-            <span key={k} className="flex items-center gap-1.5">
-              <span className="text-white">{k}</span>
-              <span className="text-white/60">{v}</span>
+            <span key={k} className="relative flex items-center gap-1.5">
+              <span className="text-white/85">{k}</span>
+              <span className="text-white/45">{v}</span>
             </span>
           ))}
-        </motion.div>
+        </Glass>
       )}
     </AnimatePresence>
   );

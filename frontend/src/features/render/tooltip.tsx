@@ -36,12 +36,12 @@ export function Tooltip({ hover }: { hover: HoverInfo | null }) {
             exit={{ opacity: 0, scale: 0.94 }}
             transition={spring.snappy}
             style={{ transformOrigin: "top left" }}
-            className="glass glass-strong flex max-w-[22rem] flex-col gap-0.5 rounded-2xl px-3.5 py-2.5"
+            className="flex max-w-[24rem] flex-col gap-0.5 rounded-2xl bg-[rgb(15_20_29/0.55)] px-4 py-2.5 backdrop-blur-xl"
           >
-            <span className="truncate text-[0.9375rem] font-semibold text-white">
+            <span className="truncate text-[1.0625rem] text-white">
               {hover.name}
             </span>
-            <span className="truncate text-[0.8125rem] font-medium text-white/60">
+            <span className="truncate text-[0.9375rem] text-white/65">
               {hover.detail}
             </span>
           </motion.div>

@@ -20,7 +20,7 @@ export function Stats({ summary }: { summary: CitySummary }) {
   ];
   return (
     <motion.div
-      className="hud-dim absolute bottom-[3.75rem] left-[3.75rem] z-40 flex gap-2.5 max-md:hidden"
+      className="hud-dim absolute bottom-10 left-10 z-40 flex gap-2.5 max-md:hidden"
       initial="hidden"
       animate="show"
       variants={stagger(0.08, 0.2)}

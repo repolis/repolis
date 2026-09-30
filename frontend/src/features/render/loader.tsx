@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 
+import { GLASS } from "@/shared/glass/maps";
 import { cn } from "@/shared/lib/cn";
-import { spring } from "@/shared/lib/motion";
+import { ease, spring } from "@/shared/lib/motion";
 import { Shimmer } from "@/shared/ui/brand";
-import { GlassButton, GlassPanel } from "@/shared/ui/glass";
+import { Glass, GlassButton, SHEET_FILL } from "@/shared/ui/glass";
 import {
   IconArrowLeft,
   IconDanger,
@@ -81,70 +82,57 @@ export function AnalysisLoader({
   const headline = stage ? STEPS[current].label : status;
 
   return (
-    <motion.div
-      className="absolute inset-0 z-40 flex items-center justify-center px-6"
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0, transition: { duration: 0.5 } }}
-    >
-      <GlassPanel
-        strong
-        className="w-full max-w-[32rem]"
-        innerClassName="p-8"
-        initial={{ opacity: 0, y: 24, scale: 0.94, filter: "blur(16px)" }}
-        animate={{
-          opacity: 1,
-          y: 0,
-          scale: 1,
-          filter: "blur(0px)",
-          transitionEnd: { filter: "none" },
-        }}
+    <div className="absolute inset-0 z-40 flex items-center justify-center px-6">
+      <Glass
+        params={GLASS.card}
+        radius={24}
+        fill={SHEET_FILL}
+        className="w-full max-w-[32rem] px-8 pt-8 pb-9"
+        initial={{ opacity: 0, y: 20, scale: 0.95 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
         exit={{
           opacity: 0,
-          scale: 1.06,
-          filter: "blur(20px)",
-          transition: { duration: 0.6, ease: [0.65, 0, 0.35, 1] },
+          y: -12,
+          scale: 1.03,
+          transition: { duration: 0.55, ease: ease.inOut },
         }}
-        transition={{ ...spring.soft, delay: 0.15 }}
+        transition={{ ...spring.soft, delay: 0.2 }}
       >
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex min-w-0 items-center gap-2.5 text-[1.5rem] leading-none font-semibold">
-            <IconGithub className="size-7 shrink-0 text-white/85" />
+        <div className="type-hud relative flex items-center justify-between gap-4">
+          <span className="flex min-w-0 items-center gap-0.5">
+            <IconGithub className="size-6 shrink-0" />
             <span className="truncate">
-              <span className="text-white/55">{owner}/</span>
-              <span className="text-white">{repo}</span>
+              <span className="text-white/65"> {owner}/</span>
+              <span className="text-white/85">{repo}</span>
             </span>
-          </div>
-          <span className="shrink-0 rounded-full bg-white/10 px-2.5 py-1 text-[0.8125rem] font-semibold text-white/65 tabular-nums">
-            {elapsed}
           </span>
+          <span className="shrink-0 text-white/45 tabular-nums">{elapsed}</span>
         </div>
 
         <AnimatePresence mode="wait" initial={false}>
           {failed ? (
             <motion.div
               key="error"
-              initial={{ opacity: 0, y: 8, filter: "blur(8px)" }}
-              animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-              exit={{ opacity: 0, y: -8, filter: "blur(8px)" }}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
               transition={spring.glass}
-              className="mt-7 flex flex-col gap-6"
+              className="relative mt-8 flex flex-col gap-6"
             >
-              <div className="flex items-start gap-3 rounded-2xl bg-[var(--color-danger-soft)] p-4 text-[1rem] leading-snug font-medium text-white">
-                <IconDanger className="mt-0.5 size-5 shrink-0 text-[var(--color-danger)]" />
+              <div className="flex items-start gap-3 text-[1.0625rem] leading-snug text-white/85">
+                <IconDanger className="mt-0.5 size-[1.375rem] shrink-0 text-[var(--color-danger)]" />
                 <span>{error ?? "Analysis failed"}</span>
               </div>
-              <div className="flex gap-2.5">
+              <div className="flex flex-wrap gap-2.5">
                 <GlassButton
                   tone="primary"
-                  size="lg"
                   icon={<IconRestart />}
                   onClick={onRetry}
                 >
                   Try again
                 </GlassButton>
                 <GlassButton
-                  size="lg"
+                  tone="inset"
                   icon={<IconArrowLeft />}
                   onClick={onHome}
                 >
@@ -158,48 +146,39 @@ export function AnalysisLoader({
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="mt-7"
+              className="relative mt-8"
             >
-              <div className="flex items-baseline justify-between gap-3 text-[1.125rem] font-semibold">
+              <div className="type-hud flex items-baseline justify-between gap-3">
                 <Shimmer className="truncate">{headline}</Shimmer>
                 {stage && stage.total > 0 && (
-                  <span className="shrink-0 text-[0.9375rem] text-white/55 tabular-nums">
+                  <span className="shrink-0 text-white/45 tabular-nums">
                     {stage.done}/{stage.total}
                   </span>
                 )}
               </div>
 
-              <div className="relative mt-4 h-1 overflow-hidden rounded-full bg-white/12">
+              <div className="relative mt-4 h-1 overflow-hidden rounded-full bg-white/10">
                 <motion.div
-                  className="absolute inset-y-0 left-0 rounded-full bg-white"
+                  className="absolute inset-y-0 left-0 rounded-full bg-white/85"
                   initial={{ width: "2%" }}
                   animate={{ width: `${progress * 100}%` }}
                   transition={spring.soft}
                 />
-                <motion.div
-                  className="absolute inset-y-0 w-24 bg-gradient-to-r from-transparent via-white/70 to-transparent"
-                  animate={{ x: ["-6rem", "32rem"] }}
-                  transition={{
-                    duration: 1.6,
-                    repeat: Infinity,
-                    ease: "easeInOut",
-                  }}
-                />
               </div>
 
-              <ol className="mt-6 flex flex-col gap-2.5">
+              <ol className="mt-7 flex flex-col gap-3">
                 {STEPS.map((s, i) => {
                   const state =
                     i < current ? "done" : i === current ? "active" : "pending";
                   return (
                     <motion.li
                       key={s.id}
-                      initial={{ opacity: 0, x: -8 }}
+                      initial={{ opacity: 0, x: -6 }}
                       animate={{ opacity: 1, x: 0 }}
-                      transition={{ ...spring.glass, delay: 0.3 + i * 0.05 }}
+                      transition={{ ...spring.glass, delay: 0.35 + i * 0.05 }}
                       className={cn(
-                        "flex items-center gap-3 text-[0.9375rem] font-semibold transition-colors duration-500",
-                        state === "done" && "text-white/60",
+                        "flex items-center gap-3 text-[1.0625rem] transition-colors duration-500",
+                        state === "done" && "text-white/65",
                         state === "active" && "text-white",
                         state === "pending" && "text-white/35",
                       )}
@@ -211,15 +190,15 @@ export function AnalysisLoader({
                 })}
               </ol>
 
-              <p className="mt-6 border-t border-white/10 pt-4 text-[0.8125rem] leading-snug font-medium text-white/45">
+              <p className="mt-7 text-[0.9375rem] leading-snug text-white/45">
                 The first city is drawn without a model. District names arrive
                 afterwards, streamed into the city you are already exploring.
               </p>
             </motion.div>
           )}
         </AnimatePresence>
-      </GlassPanel>
-    </motion.div>
+      </Glass>
+    </div>
   );
 }
 

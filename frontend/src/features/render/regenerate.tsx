@@ -46,7 +46,6 @@ export function Regenerate({
       className="w-[20rem]"
       trigger={
         <IconButton
-          size="lg"
           label={busy ? "Working…" : "Regenerate this city"}
           disabled={busy}
           active={open}
@@ -61,13 +60,13 @@ export function Regenerate({
                 : { duration: 0.3 }
             }
           >
-            <IconRefresh className="size-5" />
+            <IconRefresh />
           </motion.span>
         </IconButton>
       }
     >
       <div role="menu" className="flex flex-col">
-        <div className="px-3.5 pt-2 pb-1.5 text-[0.75rem] font-semibold tracking-wide text-white/45 uppercase">
+        <div className="px-3.5 pt-2 pb-2 text-[0.9375rem] text-white/45">
           Regenerate
         </div>
         {REFRESH_LEVELS.map((r) => (
