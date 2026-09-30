@@ -82,9 +82,7 @@ export function RepoForm({
           ref={attach}
           className={cn(
             "type-hud relative isolate flex h-[4.5rem] w-full cursor-text items-center gap-3 rounded-full pr-3 pl-6 transition-colors duration-300",
-            // Dark glass: the field sits on the brightest part of the
-            // landscape, and white type needs a quiet ground to read on.
-            focused ? "bg-[rgb(8_12_20/0.5)]" : "bg-[rgb(8_12_20/0.4)]",
+            focused ? "bg-white/[0.1]" : "bg-white/[0.07]",
           )}
           style={glassStyle}
         >
