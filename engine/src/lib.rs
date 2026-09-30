@@ -37,9 +37,9 @@ use hover::*;
 use render::*;
 use view::{ColorMode, Filter, Scales};
 
-/// A pale haze, the same colour the interface's cloud layer settles on, so
-/// the city is revealed without a seam. Fog fades the ground into it too.
-pub const SKY_COLOR: Color = Color::srgb(0.80, 0.85, 0.895);
+/// Night haze, the colour the interface's dusk sky has at the horizon, so the
+/// city is revealed without a seam. Fog fades the far ground into it too.
+pub const SKY_COLOR: Color = Color::srgb(0.085, 0.10, 0.145);
 const GROUND_Y: f32 = 0.0;
 const DISTRICT_TOP: f32 = 0.35;
 const STREET_Y: f32 = 0.40;
@@ -192,10 +192,10 @@ pub fn add_city_systems(app: &mut App) {
         .init_resource::<ViewState>()
         .insert_resource(ClearColor(SKY_COLOR))
         .insert_resource(AmbientLight {
-            color: Color::srgb(0.90, 0.94, 1.0),
-            // Brighter than a studio setup: the ground is pale now, and the
-            // shadows still carry the depth cue.
-            brightness: 380.0,
+            color: Color::srgb(0.58, 0.68, 0.98),
+            // Low: a night scene, where the moonlit faces and the shadows
+            // carry the massing and the glowing roofs carry the churn.
+            brightness: 170.0,
         })
         .add_systems(Startup, setup_scene)
         .add_systems(
@@ -353,9 +353,10 @@ fn setup_scene(mut commands: Commands) {
             transform: Transform::from_xyz(60.0, 70.0, 100.0).looking_at(Vec3::ZERO, Vec3::Y),
             ..default()
         },
-        // Weak on purpose: only high-churn roof caps pass the threshold.
+        // Weak on purpose: the glowing roofs, arcs and the selection bloom,
+        // the lit facades barely do.
         BloomSettings {
-            intensity: 0.12,
+            intensity: 0.2,
             ..BloomSettings::NATURAL
         },
         // Aerial perspective: distant ground melts into the haze instead of
@@ -373,12 +374,12 @@ fn setup_scene(mut commands: Commands) {
     ));
 
     // Height is the primary metric, and without cast shadows the massing
-    // reads flat at every angle.
+    // reads flat at every angle. A cool moon for the key...
     commands.spawn(DirectionalLightBundle {
         directional_light: DirectionalLight {
-            illuminance: 12000.0,
+            illuminance: 5200.0,
             shadows_enabled: true,
-            color: Color::srgb(1.0, 0.96, 0.90),
+            color: Color::srgb(0.80, 0.87, 1.0),
             ..default()
         },
         transform: Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, -0.95, 0.6, 0.0)),
@@ -389,6 +390,18 @@ fn setup_scene(mut commands: Commands) {
             ..default()
         }
         .build(),
+        ..default()
+    });
+    // ...and a warm, shadowless fill from the opposite side, the glow a city
+    // throws back up, so the faces in shadow still separate from each other.
+    commands.spawn(DirectionalLightBundle {
+        directional_light: DirectionalLight {
+            illuminance: 1700.0,
+            shadows_enabled: false,
+            color: Color::srgb(1.0, 0.70, 0.46),
+            ..default()
+        },
+        transform: Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, -0.55, 3.6, 0.0)),
         ..default()
     });
 
@@ -635,7 +648,7 @@ fn spawn_city(
         PbrBundle {
             mesh: meshes.add(circular_ground(ground_radius, 96)),
             material: materials.add(StandardMaterial {
-                base_color: Color::srgb(0.86, 0.875, 0.89),
+                base_color: Color::srgb(0.05, 0.06, 0.08),
                 perceptual_roughness: 1.0,
                 ..default()
             }),
@@ -684,9 +697,12 @@ fn spawn_city(
             commands.spawn((
                 PbrBundle {
                     mesh: meshes.add(quads.build()),
+                    // Lit lanes: a faint glow of their own keeps the street
+                    // grid legible between dark blocks.
                     material: materials.add(StandardMaterial {
-                        base_color: Color::srgb(0.72, 0.735, 0.76),
-                        perceptual_roughness: 0.98,
+                        base_color: Color::srgb(0.15, 0.165, 0.20),
+                        emissive: LinearRgba::new(0.012, 0.016, 0.026, 1.0),
+                        perceptual_roughness: 0.9,
                         ..default()
                     }),
                     ..default()
@@ -910,8 +926,8 @@ fn spawn_city(
         PbrBundle {
             mesh: meshes.add(build_link_mesh(&overview, 0.0)),
             material: materials.add(StandardMaterial {
-                base_color: Color::srgba(0.18, 0.44, 0.84, 0.36),
-                emissive: LinearRgba::new(0.02, 0.08, 0.22, 1.0),
+                base_color: Color::srgba(0.45, 0.66, 1.0, 0.2),
+                emissive: LinearRgba::new(0.10, 0.30, 0.70, 1.0),
                 alpha_mode: AlphaMode::Blend,
                 unlit: true,
                 double_sided: true,
@@ -1300,7 +1316,9 @@ fn refresh_view(
 
     let faded = index.faded.clone().unwrap_or_else(|| {
         let h = materials.add(StandardMaterial {
-            base_color: Color::srgba(0.42, 0.43, 0.46, 0.16),
+            // Filtered-out buildings stay as faint glass, so the shape of
+            // the city survives a filter.
+            base_color: Color::srgba(0.55, 0.64, 0.80, 0.10),
             alpha_mode: AlphaMode::Blend,
             perceptual_roughness: 1.0,
             ..default()
