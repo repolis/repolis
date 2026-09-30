@@ -1,4 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
+import { motion } from "motion/react";
+
+import { IconButton } from "@/shared/ui/glass";
+import { IconCpu, IconRefresh, IconRestart } from "@/shared/ui/icons";
+import { MenuItem, Popover } from "@/shared/ui/popover";
 
 /** Mirrors the Refresh* constants in backend/internal/models/api.go. */
 export const REFRESH_LEVELS = [
@@ -19,6 +24,12 @@ export const REFRESH_LEVELS = [
   },
 ] as const;
 
+const ICONS = {
+  city: <IconRefresh />,
+  model: <IconCpu />,
+  clone: <IconRestart />,
+} as const;
+
 export function Regenerate({
   busy,
   onRun,
@@ -27,54 +38,52 @@ export function Regenerate({
   onRun: (level: string) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  // Otherwise the menu sits over the canvas swallowing orbit drags.
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node))
-        setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
-    window.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
 
   return (
-    <div ref={ref} className="relative">
-      <button
-        disabled={busy}
-        onClick={() => setOpen(!open)}
-        title="Regenerate this city"
-        className="rounded border border-gray-700 bg-gray-900/95 px-2 py-1.5 text-gray-300 hover:border-gray-500 disabled:opacity-50"
-      >
-        {busy ? "Working…" : "Regenerate"}
-      </button>
-
-      {open && (
-        <div className="absolute right-0 z-50 mt-1 w-72 rounded border border-gray-700 bg-gray-900/95">
-          {REFRESH_LEVELS.map((r) => (
-            <button
-              key={r.level}
-              className="block w-full border-b border-gray-800 px-3 py-2 text-left last:border-b-0 hover:bg-gray-800"
-              onClick={() => {
-                setOpen(false);
-                onRun(r.level);
-              }}
-            >
-              <div className="font-semibold text-gray-200">{r.label}</div>
-              <div className="mt-0.5 text-[10px] leading-snug text-gray-500">
-                {r.hint}
-              </div>
-            </button>
-          ))}
+    <Popover
+      open={open}
+      onClose={() => setOpen(false)}
+      className="w-[20rem]"
+      trigger={
+        <IconButton
+          size="lg"
+          label={busy ? "Working…" : "Regenerate this city"}
+          disabled={busy}
+          active={open}
+          onClick={() => setOpen(!open)}
+        >
+          <motion.span
+            className="grid place-items-center"
+            animate={{ rotate: busy ? 360 : 0 }}
+            transition={
+              busy
+                ? { duration: 1.1, repeat: Infinity, ease: "linear" }
+                : { duration: 0.3 }
+            }
+          >
+            <IconRefresh className="size-5" />
+          </motion.span>
+        </IconButton>
+      }
+    >
+      <div role="menu" className="flex flex-col">
+        <div className="px-3.5 pt-2 pb-1.5 text-[0.75rem] font-semibold tracking-wide text-white/45 uppercase">
+          Regenerate
         </div>
-      )}
-    </div>
+        {REFRESH_LEVELS.map((r) => (
+          <MenuItem
+            key={r.level}
+            layoutGroup="regen"
+            icon={ICONS[r.level]}
+            title={r.label}
+            hint={r.hint}
+            onSelect={() => {
+              setOpen(false);
+              onRun(r.level);
+            }}
+          />
+        ))}
+      </div>
+    </Popover>
   );
 }

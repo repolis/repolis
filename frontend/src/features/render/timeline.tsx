@@ -1,4 +1,8 @@
 import { useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
+
+import { spring } from "@/shared/lib/motion";
+import { IconHistory, IconPause, IconPlay } from "@/shared/ui/icons";
 
 import type { CitySummary } from "./types";
 
@@ -64,9 +68,12 @@ export function Timeline({
     ? new Date(new Date(summary.first_commit).getTime() + at * 86400000)
     : null;
 
+  const pct = total > 0 ? (at / total) * 100 : 100;
+
   return (
-    <div className="absolute bottom-4 left-1/2 z-40 flex w-[34rem] -translate-x-1/2 items-center gap-3 rounded border border-gray-700 bg-gray-900/95 px-3 py-2 text-xs">
-      <button
+    <div className="hud-dim glass absolute bottom-[3.75rem] left-1/2 z-40 flex h-12 w-[26rem] max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-3 rounded-full pr-5 pl-1.5 max-[90rem]:bottom-[8rem]">
+      <motion.button
+        type="button"
         onClick={() => {
           if (playing) {
             setPlaying(false);
@@ -76,16 +83,39 @@ export function Timeline({
             setPlaying(true);
           }
         }}
-        className="w-12 shrink-0 rounded border border-gray-700 px-1.5 py-0.5 text-gray-300 hover:border-gray-500"
+        whileHover={{ scale: 1.06 }}
+        whileTap={{ scale: 0.9 }}
+        transition={spring.snappy}
+        aria-label={playing ? "Stop replay" : "Replay history"}
+        title={playing ? "Stop" : "Replay the city's history"}
+        className="grid size-9 shrink-0 place-items-center rounded-full bg-white text-[#0d0f14] shadow-[0_0.25rem_0.75rem_rgb(0_0_0/0.3)]"
       >
-        {playing ? "Stop" : "Play"}
-      </button>
+        <AnimatePresence mode="popLayout" initial={false}>
+          <motion.span
+            key={playing ? "pause" : "play"}
+            initial={{ scale: 0.4, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.4, opacity: 0 }}
+            transition={spring.snappy}
+            className="grid place-items-center"
+          >
+            {playing ? (
+              <IconPause className="size-4" />
+            ) : (
+              <IconPlay className="size-4 translate-x-px" />
+            )}
+          </motion.span>
+        </AnimatePresence>
+      </motion.button>
+
+      <IconHistory className="size-5 shrink-0 text-white/60" />
 
       <input
         type="range"
         min={0}
         max={total}
         value={at}
+        aria-label="Day in the repository's history"
         onChange={(e) => {
           setPlaying(false);
           const v = Number(e.target.value);
@@ -93,12 +123,13 @@ export function Timeline({
           setDay(next);
           onChange(next);
         }}
-        className="flex-1"
+        className="range-glass min-w-0 flex-1"
+        style={{ ["--fill" as string]: `${pct}%` }}
       />
 
-      <span className="w-28 shrink-0 text-right text-gray-400">
+      <span className="w-[6.5rem] shrink-0 text-right text-[0.9375rem] font-semibold text-white/80 tabular-nums">
         {day === null
-          ? "today"
+          ? "Today"
           : date
             ? date.toISOString().slice(0, 10)
             : `day ${at}`}
