@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent, type RefObject } from "react";
 import { AnimatePresence, motion, useAnimate } from "motion/react";
 
 import { GLASS } from "@/shared/glass/maps";
@@ -19,17 +19,19 @@ import type { Lookup } from "./use-repo-lookup";
  * path or a full URL; pasted links are folded down to owner/repo.
  */
 export function RepoForm({
+  inputRef,
   value,
   onChange,
   onSubmit,
   lookup,
 }: {
+  /** Owned by the page, so a suggestion can put the caret in the field. */
+  inputRef: RefObject<HTMLInputElement | null>;
   value: string;
   onChange: (v: string) => void;
   onSubmit: (slug: string) => void;
   lookup: Lookup;
 }) {
-  const inputRef = useRef<HTMLInputElement>(null);
   const [focused, setFocused] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [scope, animate] = useAnimate<HTMLDivElement>();
@@ -54,7 +56,7 @@ export function RepoForm({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [inputRef]);
 
   function handleChange(raw: string) {
     setError(null);

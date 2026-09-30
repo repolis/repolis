@@ -31,7 +31,7 @@ export function PathBanner({
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -8 }}
           transition={spring.glass}
-          className="absolute top-[7.5rem] left-1/2 z-40 flex max-w-[min(48rem,calc(100vw-2rem))] -translate-x-1/2 items-start gap-3 py-4 pr-14 pl-5"
+          className="hud-dim absolute top-[7.5rem] left-1/2 z-40 flex max-w-[min(48rem,calc(100vw-2rem))] -translate-x-1/2 items-start gap-3 py-4 pr-14 pl-5"
         >
           <IconRouting className="relative mt-0.5 size-[1.375rem] shrink-0 text-[var(--color-signal)]" />
           <div className="relative flex min-w-0 flex-col gap-2.5 text-[1.0625rem]">

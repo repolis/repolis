@@ -1,6 +1,6 @@
-import { useEffect, useRef } from "react";
+import { useLayoutEffect, useRef } from "react";
 
-import { isSkyVisible, sky } from "./sky";
+import { isSkyVisible, sky, skyClock } from "./sky";
 
 /*
  * Procedural sky, adapted from the 21st.dev "Cloud Shader" (Aceternity).
@@ -276,7 +276,9 @@ const RENDER_SCALE = 0.5;
 export function CloudSky() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  useEffect(() => {
+  // A layout effect, and the first frame drawn before paint: the page never
+  // shows an empty sky, which matters when it opens inside the clouds.
+  useLayoutEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const gl = canvas.getContext("webgl", {
@@ -355,7 +357,8 @@ export function CloudSky() {
       "(prefers-reduced-motion: reduce)",
     ).matches;
     let raf = 0;
-    let clock = 0;
+    // Continues from the clouds the previous page closed, if any.
+    let clock = skyClock.value;
     let last = performance.now();
     let shown = true;
 
@@ -373,6 +376,7 @@ export function CloudSky() {
       if (!visible) return;
 
       if (!reduce) clock += dt * sky.speed.get();
+      skyClock.value = clock;
       mouse.x += (mouse.tx - mouse.x) * Math.min(1, dt * 2.5);
       mouse.y += (mouse.ty - mouse.y) * Math.min(1, dt * 2.5);
 
@@ -386,7 +390,7 @@ export function CloudSky() {
       gl.uniform2f(loc.mouse, mouse.x, mouse.y);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     };
-    raf = requestAnimationFrame(frame);
+    frame(performance.now());
 
     return () => {
       cancelAnimationFrame(raf);

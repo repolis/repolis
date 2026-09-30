@@ -3,7 +3,7 @@ import { motion, useSpring, useTransform } from "motion/react";
 
 import night from "@/assets/landing/night.webp";
 
-import { sky } from "./sky";
+import { markPhotoReady, sky } from "./sky";
 
 /**
  * The moonlit landscape behind the landing page. It sits under the cloud
@@ -40,7 +40,10 @@ export function SkyPhoto() {
         src={night}
         alt=""
         decoding="async"
-        onLoad={() => setLoaded(true)}
+        onLoad={() => {
+          setLoaded(true);
+          markPhotoReady();
+        }}
         className="h-full w-full object-cover object-[50%_40%] transition-opacity duration-700"
         style={{ scale, x, y, opacity: loaded ? 1 : 0 }}
       />

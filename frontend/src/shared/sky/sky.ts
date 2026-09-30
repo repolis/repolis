@@ -24,16 +24,68 @@ export interface SkyState {
   speed: MotionValue<number>;
 }
 
+/*
+ * Going back to the landing page is a full page load (the engine binds to
+ * its canvas once). To keep that seamless, the city page leaves a hand-off
+ * note: the clouds' clock and camera push at the moment it closed them. The
+ * new page starts inside exactly those clouds and opens them from there.
+ */
+const HANDOFF_KEY = "repolis:sky-handoff";
+
+interface Handoff {
+  clock: number;
+  zoom: number;
+  speed: number;
+}
+
+function readHandoff(): Handoff | null {
+  try {
+    const raw = window.sessionStorage.getItem(HANDOFF_KEY);
+    return raw ? (JSON.parse(raw) as Handoff) : null;
+  } catch {
+    return null;
+  }
+}
+
+const handoff = typeof window === "undefined" ? null : readHandoff();
+
+/** True when this page load continues a flight back from a city. */
+export const returning = handoff !== null;
+
+/** The page starts covered when it opens on a city or comes back from one;
+ * otherwise straight on the clear landscape, with nothing to fade through. */
+const covered =
+  returning ||
+  (typeof window !== "undefined" &&
+    window.location.pathname.startsWith("/city"));
+
 export const sky: SkyState = {
-  photo: motionValue(0),
-  sky: motionValue(1),
-  clouds: motionValue(1),
+  photo: motionValue(covered ? 0 : 1),
+  sky: motionValue(covered ? 1 : 0),
+  clouds: motionValue(covered ? 1 : 0),
   far: motionValue(0),
-  fog: motionValue(0.14),
+  fog: motionValue(covered ? 1 : 0),
   part: motionValue(0),
-  zoom: motionValue(0),
-  speed: motionValue(1),
+  zoom: motionValue(handoff?.zoom ?? (covered ? 0.7 : 0)),
+  speed: motionValue(handoff?.speed ?? (covered ? 1.2 : 1)),
 };
+
+/** The clouds' clock, written by the renderer every frame. */
+export const skyClock = { value: handoff?.clock ?? 0 };
+
+let photoLoaded: () => void = () => {};
+const photoReady = new Promise<void>((resolve) => {
+  photoLoaded = resolve;
+});
+/** Called by the photograph layer once its image has decoded. */
+export function markPhotoReady() {
+  photoLoaded();
+}
+
+/** Where the camera rests when the clouds are closed over a city. */
+const CLOSED = { zoom: 0.95, speed: 1.2 } as const;
+
+const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 type Target = Partial<Record<keyof SkyState, number>>;
 
@@ -65,7 +117,7 @@ let scene = 0;
 let diving: Promise<void> | null = null;
 
 export const skyScenes = {
-  /** The moonlit landscape, clear, with nothing drawn over it. */
+  /** The moonlit landscape, clear, with distant clouds drifting in. */
   landing: () => {
     scene++;
     return to(
@@ -81,6 +133,61 @@ export const skyScenes = {
       },
       1.4,
     );
+  },
+  /**
+   * Back from a city: the page opened inside the clouds the city closed,
+   * and they now part from the centre onto the landscape while the camera
+   * rises out of them.
+   */
+  arrive: async () => {
+    const id = ++scene;
+    // Open onto the photograph, not onto its empty frame.
+    await Promise.race([photoReady, wait(1500)]);
+    if (id !== scene) return;
+    sky.photo.jump(1);
+    await Promise.all([
+      to({ part: 1, zoom: 0, speed: 1 }, 2.6, 0, [0.45, 0, 0.2, 1]),
+      to({ sky: 0 }, 1.8, 0.3, [0.33, 0, 0.2, 1]),
+    ]);
+    if (id !== scene) return;
+    // Everything below is invisible at part 1; reset it to the landing.
+    sky.fog.jump(0);
+    sky.clouds.jump(0);
+    sky.part.jump(0);
+    await to({ far: 1 }, 1.6);
+  },
+  /** Close the clouds over the city, from the edges in, before leaving. */
+  closeOver: async () => {
+    ++scene;
+    await to(
+      { sky: 1, clouds: 1, fog: 1, part: 0, ...CLOSED },
+      1.1,
+      0,
+      [0.55, 0, 0.35, 1],
+    );
+  },
+  /** Leave the note the next page load picks the clouds up from. */
+  handOff: () => {
+    try {
+      // The closed state, not the live values: a slow frame must not hand
+      // over a camera that is still mid-move.
+      window.sessionStorage.setItem(
+        HANDOFF_KEY,
+        JSON.stringify({ clock: skyClock.value, ...CLOSED } satisfies Handoff),
+      );
+    } catch {
+      // Private mode: the return simply starts from fresh clouds.
+    }
+  },
+  /** The landing page has picked the hand-off up; the clouds are drawn by
+   * now, so the stand-in ground from index.html can go too. */
+  consumeHandOff: () => {
+    document.documentElement.classList.remove("sky-return");
+    try {
+      window.sessionStorage.removeItem(HANDOFF_KEY);
+    } catch {
+      // Nothing to clear.
+    }
   },
   /** Push into the landscape as the cloud bank rolls in over it. */
   dive: () => {

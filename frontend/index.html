@@ -4,7 +4,33 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>frontend</title>
+    <title>repolis</title>
+    <!--
+      Painted before any script runs, so a page load never flashes white.
+      Coming back from a city the page opens inside clouds: until the sky
+      renderer draws them, a cloud-grey ground stands in for them.
+    -->
+    <style>
+      html,
+      body {
+        background: #0f141d;
+      }
+      html.sky-return,
+      html.sky-return body {
+        background: radial-gradient(
+          ellipse 80% 70% at 50% 45%,
+          #666d7c 0%,
+          #474e5d 45%,
+          #2a303b 100%
+        );
+      }
+    </style>
+    <script>
+      try {
+        if (sessionStorage.getItem("repolis:sky-handoff"))
+          document.documentElement.classList.add("sky-return");
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

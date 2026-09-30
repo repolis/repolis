@@ -410,16 +410,20 @@ export default function RenderPage() {
     };
   }, [endDrag]);
 
+  const leavingRef = useRef(false);
   const goHome = useCallback(async () => {
-    // Close the clouds over the city before leaving. A full load, because the
-    // engine binds to its canvas once and cannot be re-attached.
+    if (leavingRef.current) return;
+    leavingRef.current = true;
+    // The HUD fades as the clouds close over the city from the edges in.
+    // Then a full load, because the engine binds to its canvas once and
+    // cannot be re-attached; the landing page opens inside these same
+    // clouds (see `skyScenes.handOff`) and parts them onto the landscape.
+    document.documentElement.dataset.leaving = "1";
     await Promise.race([
-      Promise.all([
-        skyScenes.holding(),
-        new Promise((r) => setTimeout(r, 700)),
-      ]),
-      new Promise((r) => setTimeout(r, 1200)),
+      skyScenes.closeOver(),
+      new Promise((r) => setTimeout(r, 1400)),
     ]);
+    skyScenes.handOff();
     window.location.assign("/");
   }, []);
 
@@ -578,7 +582,7 @@ function Hints() {
       {show && (
         <Glass
           key="hints"
-          className="pointer-events-none absolute bottom-[6.5rem] left-1/2 z-40 flex h-12 -translate-x-1/2 items-center gap-5 px-6 text-[1.0625rem] whitespace-nowrap max-[90rem]:bottom-[11rem] max-xl:hidden"
+          className="hud-dim pointer-events-none absolute bottom-[6.5rem] left-1/2 z-40 flex h-12 -translate-x-1/2 items-center gap-5 px-6 text-[1.0625rem] whitespace-nowrap max-[90rem]:bottom-[11rem] max-xl:hidden"
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: 6 }}

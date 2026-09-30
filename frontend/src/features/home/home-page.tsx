@@ -1,11 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { AnimatePresence, motion } from "motion/react";
 
+import { cn } from "@/shared/lib/cn";
 import { parseRepo } from "@/shared/lib/format";
 import { reveal, rise, spring, stagger } from "@/shared/lib/motion";
 import { pushRecent, readRecent } from "@/shared/lib/recent";
-import { skyScenes } from "@/shared/sky/sky";
+import { returning, sky, skyScenes } from "@/shared/sky/sky";
 import { GlowRing, Logo, Shimmer, StatusDot } from "@/shared/ui/brand";
 import { GlassLink } from "@/shared/ui/glass";
 import { IconGithub } from "@/shared/ui/icons";
@@ -21,10 +22,34 @@ export default function HomePage() {
   const [leaving, setLeaving] = useState(false);
   const [draft, setDraft] = useState("");
   const [recent] = useState(readRecent);
+  const inputRef = useRef<HTMLInputElement>(null);
+  // Arriving from a city: after the flight back (a page load, `returning`)
+  // or with the browser's back button, when the sky is still the city's.
+  const [fromCity] = useState(() => returning || sky.photo.get() < 0.5);
 
   useEffect(() => {
-    void skyScenes.landing();
-  }, []);
+    if (!fromCity) {
+      void skyScenes.landing();
+      return;
+    }
+    // Open the clouds the city closed, then clear the note so a later
+    // reload starts on the clear landscape.
+    if (returning) skyScenes.consumeHandOff();
+    else skyScenes.cover();
+    void skyScenes.arrive();
+  }, [fromCity]);
+
+  // A suggestion fills the field, as if typed: it is looked up, and the
+  // create button comes out once the repository is confirmed.
+  function suggest(slug: string) {
+    setDraft(slug);
+    const input = inputRef.current;
+    if (!input) return;
+    input.focus({ preventScroll: true });
+    requestAnimationFrame(() =>
+      input.setSelectionRange(slug.length, slug.length),
+    );
+  }
 
   const target = parseRepo(draft);
   const lookup = useRepoLookup(
@@ -61,7 +86,7 @@ export default function HomePage() {
             initial="hidden"
             animate="show"
             exit="exit"
-            variants={stagger(0.06, 0.1)}
+            variants={stagger(0.06, fromCity ? 1.1 : 0.1)}
           >
             <motion.a
               href="/"
@@ -113,7 +138,9 @@ export default function HomePage() {
               animate="show"
               exit="exit"
               variants={{
-                ...stagger(0.08, 0.25),
+                // Coming back from a city, the page waits for the clouds to
+                // open before it comes in.
+                ...stagger(0.08, fromCity ? 1.2 : 0.25),
                 // Grows toward the viewer as the dive starts; each part
                 // fades itself (see `paneFade`).
                 exit: {
@@ -124,6 +151,7 @@ export default function HomePage() {
             >
               <motion.div variants={rise} className="w-full">
                 <RepoForm
+                  inputRef={inputRef}
                   value={draft}
                   onChange={setDraft}
                   onSubmit={(slug) => go(slug)}
@@ -140,11 +168,13 @@ export default function HomePage() {
                   <button
                     key={slug}
                     type="button"
-                    onClick={() => {
-                      setDraft(slug);
-                      go(slug);
-                    }}
-                    className="text-white/85 transition-colors duration-200 hover:text-white"
+                    onClick={() => suggest(slug)}
+                    className={cn(
+                      "relative transition-colors duration-300 after:absolute after:inset-x-0 after:-bottom-0.5 after:h-px after:origin-left after:bg-white/60 after:transition-transform after:duration-300 after:ease-[var(--ease-glass)] hover:text-white hover:after:scale-x-100",
+                      draft === slug
+                        ? "text-white after:scale-x-100"
+                        : "text-white/85 after:scale-x-0",
+                    )}
                   >
                     {slug}
                   </button>

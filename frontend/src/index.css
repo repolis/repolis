@@ -180,6 +180,15 @@ html[data-dragging] .hud-dim[data-glass] {
   }
 }
 
+/* Leaving for the landing page: the whole HUD fades while the clouds close. */
+html[data-leaving] .hud-dim:not(:has([data-glass])),
+html[data-leaving] .hud-dim [data-glass],
+html[data-leaving] .hud-dim[data-glass] {
+  opacity: 0 !important;
+  pointer-events: none;
+  transition-duration: 0.6s;
+}
+
 /* Controls: the rim catches a little more light under the pointer, and the
  * icon answers the hover and the press. No glow, no movement of the pill. */
 .glass-control .glass-rim {

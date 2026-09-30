@@ -66,7 +66,7 @@ export function InspectorPanel({
           params={GLASS.card}
           radius={24}
           fill="rgb(255 255 255 / 0.01)"
-          className="inspector-pos absolute right-10 z-40 flex w-[27.25rem] flex-col max-lg:right-5 max-sm:inset-x-3 max-sm:bottom-3 max-sm:w-auto"
+          className="inspector-pos hud-dim absolute right-10 z-40 flex w-[27.25rem] flex-col max-lg:right-5 max-sm:inset-x-3 max-sm:bottom-3 max-sm:w-auto"
           initial={{ opacity: 0, x: 32 }}
           animate={{ opacity: 1, x: 0 }}
           exit={{ opacity: 0, x: 24 }}
