@@ -3,14 +3,15 @@ import { useNavigate } from "@tanstack/react-router";
 import { AnimatePresence, motion } from "motion/react";
 
 import { parseRepo } from "@/shared/lib/format";
-import { reveal, spring, stagger } from "@/shared/lib/motion";
+import { reveal, rise, spring, stagger } from "@/shared/lib/motion";
 import { pushRecent, readRecent } from "@/shared/lib/recent";
 import { skyScenes } from "@/shared/sky/sky";
-import { Logo, StatusDot } from "@/shared/ui/brand";
-import { GlassButton } from "@/shared/ui/glass";
+import { GlowRing, Logo, Shimmer, StatusDot } from "@/shared/ui/brand";
+import { GlassLink } from "@/shared/ui/glass";
 import { IconGithub } from "@/shared/ui/icons";
 
 import { RepoForm } from "./repo-form";
+import { formatStars, useRepoLookup, type Lookup } from "./use-repo-lookup";
 
 /** Measured in the architecture notes: one per language. */
 const EXAMPLES = ["tsoding/nothing", "gin-gonic/gin", "BurntSushi/ripgrep"];
@@ -26,6 +27,9 @@ export default function HomePage() {
   }, []);
 
   const target = parseRepo(draft);
+  const lookup = useRepoLookup(
+    target ? `${target.owner}/${target.repo}` : null,
+  );
   const suggestions = [
     ...recent,
     ...EXAMPLES.filter((e) => !recent.includes(e)),
@@ -53,10 +57,10 @@ export default function HomePage() {
         {!leaving && (
           <motion.header
             key="header"
-            className="pointer-events-none absolute inset-x-0 top-0 flex items-center justify-between px-10 pt-10 max-md:px-5 max-md:pt-5"
+            className="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-center justify-between px-10 pt-10 max-md:px-5 max-md:pt-5"
             initial="hidden"
             animate="show"
-            exit={{ opacity: 0, transition: { duration: 0.3 } }}
+            exit="exit"
             variants={stagger(0.06, 0.1)}
           >
             <motion.a
@@ -70,49 +74,27 @@ export default function HomePage() {
 
             <motion.div
               variants={reveal}
-              className="type-hud absolute top-[3.25rem] left-1/2 flex -translate-x-1/2 items-center gap-2.5 whitespace-nowrap max-md:hidden"
+              className="type-hud absolute top-[3.25rem] left-1/2 flex -translate-x-1/2 flex-col items-center gap-1.5 whitespace-nowrap max-md:hidden"
             >
-              <StatusDot signal={target ? "live" : "idle"} className="-m-1" />
-              <AnimatePresence mode="popLayout" initial={false}>
-                <motion.span
-                  key={target ? "ready" : "idle"}
-                  className="flex items-center gap-3"
-                  initial={{ opacity: 0, y: 4 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -4 }}
-                  transition={spring.glass}
-                >
-                  {target ? (
-                    <>
-                      <span className="text-white/85">Ready to build</span>
-                      <span className="flex items-center gap-0.5">
-                        <IconGithub className="size-6" />
-                        <span className="text-white/65"> {target.owner}/</span>
-                        <span className="text-white/85">{target.repo}</span>
-                      </span>
-                    </>
-                  ) : (
-                    <span className="text-white/65">Not connected</span>
-                  )}
-                </motion.span>
-              </AnimatePresence>
+              <LandingStatus lookup={lookup} />
             </motion.div>
 
-            <motion.div variants={reveal} className="pointer-events-auto">
-              <GlassButton
+            <motion.div variants={rise} className="pointer-events-auto">
+              <GlassLink
+                href="https://github.com/repolis/repolis"
                 icon={<IconGithub />}
-                onClick={() =>
-                  window.open("https://github.com/repolis/repolis", "_blank")
-                }
+                aria-label="repolis on GitHub"
               >
                 <span className="max-md:hidden">Repository</span>
-              </GlassButton>
+              </GlassLink>
             </motion.div>
           </motion.header>
         )}
       </AnimatePresence>
 
-      <main className="absolute inset-0 flex items-center justify-center px-6">
+      {/* Full-screen for centring only: it must not swallow clicks meant for
+          the header, so only the hero itself takes the pointer. */}
+      <main className="pointer-events-none absolute inset-0 flex items-center justify-center px-6">
         {/* The overlay approach from the Figma frame, local to the hero:
             the scene darkens softly behind the field and the suggestions. */}
         <motion.div
@@ -126,21 +108,26 @@ export default function HomePage() {
           {!leaving && (
             <motion.section
               key="hero"
-              className="flex w-full max-w-[46rem] flex-col items-center"
+              className="pointer-events-auto flex w-full max-w-[46rem] flex-col items-center"
               initial="hidden"
               animate="show"
-              exit={{
-                opacity: 0,
-                scale: 1.04,
-                transition: { duration: 0.4, ease: [0.65, 0, 0.35, 1] },
+              exit="exit"
+              variants={{
+                ...stagger(0.08, 0.25),
+                // Grows toward the viewer as the dive starts; each part
+                // fades itself (see `paneFade`).
+                exit: {
+                  scale: 1.04,
+                  transition: { duration: 0.4, ease: [0.65, 0, 0.35, 1] },
+                },
               }}
-              variants={stagger(0.08, 0.25)}
             >
-              <motion.div variants={reveal} className="w-full">
+              <motion.div variants={rise} className="w-full">
                 <RepoForm
                   value={draft}
                   onChange={setDraft}
                   onSubmit={(slug) => go(slug)}
+                  lookup={lookup}
                 />
               </motion.div>
 
@@ -168,5 +155,117 @@ export default function HomePage() {
         </AnimatePresence>
       </main>
     </div>
+  );
+}
+
+/**
+ * The status under the halo, as on the city page: grey until a repository
+ * is typed, amber while GitHub is asked, green with its language and stars
+ * once it is found, red when there is nothing there.
+ */
+function LandingStatus({ lookup }: { lookup: Lookup }) {
+  const slug = lookup.state === "idle" ? null : lookup.slug;
+  const name = lookup.state === "found" ? lookup.facts.fullName : (slug ?? "");
+  const [owner, repo] = name.split("/");
+  const signal =
+    lookup.state === "found" || lookup.state === "unknown"
+      ? "live"
+      : lookup.state === "checking"
+        ? "busy"
+        : lookup.state === "missing"
+          ? "error"
+          : "idle";
+  const lead = {
+    idle: "Not connected",
+    checking: "Looking up",
+    found: "Connected to",
+    unknown: "Ready to build",
+    missing: "Nothing at",
+  }[lookup.state];
+  const note =
+    lookup.state === "found"
+      ? [
+          lookup.facts.language,
+          `${formatStars(lookup.facts.stars)} ${lookup.facts.stars === 1 ? "star" : "stars"}`,
+        ]
+          .filter(Boolean)
+          .join(" · ")
+      : lookup.state === "missing"
+        ? "Check the owner and the name, or paste the link"
+        : null;
+
+  return (
+    <>
+      <AnimatePresence>
+        {lookup.state === "found" && (
+          <motion.div
+            key="halo"
+            className="pointer-events-none absolute top-0 left-1/2 -translate-x-1/2"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.8 }}
+          >
+            <GlowRing signal="live" className="!-top-[34.3125rem]" />
+          </motion.div>
+        )}
+      </AnimatePresence>
+      <div className="relative flex items-center gap-2.5">
+        <StatusDot signal={signal} className="-m-1" />
+        <AnimatePresence mode="popLayout" initial={false}>
+          <motion.span
+            key={lead}
+            layout="position"
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={spring.glass}
+          >
+            {lookup.state === "checking" ? (
+              <Shimmer>{lead}</Shimmer>
+            ) : (
+              <span
+                className={
+                  lookup.state === "idle" ? "text-white/65" : "text-white/85"
+                }
+              >
+                {lead}
+              </span>
+            )}
+          </motion.span>
+        </AnimatePresence>
+        <AnimatePresence initial={false}>
+          {slug && (
+            <motion.span
+              key="repo"
+              layout="position"
+              initial={{ opacity: 0, x: -6 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -6 }}
+              transition={spring.glass}
+              className="ml-0.5 flex items-center gap-0.5"
+            >
+              <IconGithub className="size-6" />
+              <span className="text-white/65"> {owner}/</span>
+              <span className="text-white/85">{repo}</span>
+            </motion.span>
+          )}
+        </AnimatePresence>
+      </div>
+      <AnimatePresence initial={false}>
+        {note && (
+          <motion.div
+            key={note}
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -2 }}
+            transition={spring.glass}
+            className="text-[1.0625rem] text-white/65"
+          >
+            {note}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </>
   );
 }
