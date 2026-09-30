@@ -360,6 +360,22 @@ export default function RenderPage() {
     return () => window.clearInterval(id);
   }, [phase, mode, filter, timelineDay, selection]);
 
+  // A panic inside the engine surfaces as a wasm trap. Show it rather than
+  // waiting forever for a city that will not arrive; the instance is dead
+  // after a trap, so retrying means reloading the page.
+  const engineDead = useRef(false);
+  useEffect(() => {
+    const onError = (e: ErrorEvent) => {
+      if (!/unreachable|RuntimeError/.test(e.message ?? "")) return;
+      engineDead.current = true;
+      setError("The 3D engine stopped while building this city.");
+      setPhase("error");
+      setBusy(false);
+    };
+    window.addEventListener("error", onError);
+    return () => window.removeEventListener("error", onError);
+  }, []);
+
   // Deep link straight into a city: start inside the clouds, not the sky.
   useLayoutEffect(() => {
     if (sky.fog.get() < 0.9) skyScenes.cover();
@@ -434,6 +450,10 @@ export default function RenderPage() {
             status={status}
             error={error}
             onRetry={() => {
+              if (engineDead.current) {
+                window.location.reload();
+                return;
+              }
               setStage(null);
               void startAnalysis();
             }}

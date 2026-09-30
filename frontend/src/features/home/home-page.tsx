@@ -19,7 +19,6 @@ const EXAMPLES = [
   { slug: "tsoding/nothing", lang: "C" },
   { slug: "gin-gonic/gin", lang: "Go" },
   { slug: "BurntSushi/ripgrep", lang: "Rust" },
-  { slug: "rgamble/libcsv", lang: "C" },
 ];
 
 const HEADLINE = [
