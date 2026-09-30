@@ -8,6 +8,7 @@ use wasm_bindgen::prelude::*;
 
 mod camera;
 mod data;
+mod highlight;
 mod hover;
 mod layout;
 mod render;
@@ -197,7 +198,7 @@ pub fn add_city_systems(app: &mut App) {
             // carry the massing and the glowing roofs carry the churn.
             brightness: 170.0,
         })
-        .add_systems(Startup, setup_scene)
+        .add_systems(Startup, (setup_scene, highlight::spawn_hover_shell))
         .add_systems(
             Update,
             (
@@ -205,6 +206,7 @@ pub fn add_city_systems(app: &mut App) {
                 consume_commands,
                 camera_controls,
                 picking_system,
+                highlight::update_hover_shell,
                 refresh_view,
                 update_labels,
                 update_fog,
