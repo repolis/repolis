@@ -33,7 +33,8 @@ export function Regenerate({
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      if (ref.current && !ref.current.contains(e.target as Node))
+        setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
     window.addEventListener("mousedown", onDown);
@@ -67,7 +68,9 @@ export function Regenerate({
               }}
             >
               <div className="font-semibold text-gray-200">{r.label}</div>
-              <div className="mt-0.5 text-[10px] leading-snug text-gray-500">{r.hint}</div>
+              <div className="mt-0.5 text-[10px] leading-snug text-gray-500">
+                {r.hint}
+              </div>
             </button>
           ))}
         </div>

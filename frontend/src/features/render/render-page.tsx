@@ -2,28 +2,28 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "@tanstack/react-router";
 
 import init, {
-  load_city_data,
-  focus_symbol,
-  reset_camera,
+  camera_state,
   clear_selection,
+  focus_symbol,
+  load_city_data,
+  reset_camera,
+  set_camera_state,
   set_color_mode,
   set_filter,
-  show_path_to,
-  set_timeline,
   set_path_anchor,
-  camera_state,
-  set_camera_state,
+  set_timeline,
+  show_path_to,
 } from "@/wasm/engine";
 
 import { InspectorPanel } from "./inspector-panel";
 import { Legend } from "./legend";
-import { SearchBar } from "./search-bar";
-import { Tooltip } from "./tooltip";
-import { Timeline } from "./timeline";
-import { ViewControls, EMPTY_FILTER, type FilterState } from "./view-controls";
 import { PathBanner } from "./path-banner";
-import { decodeView, encodeView, isDefaultView } from "./url-state";
+import { SearchBar } from "./search-bar";
+import { Timeline } from "./timeline";
+import { Tooltip } from "./tooltip";
 import type { CitySummary, HoverInfo, PathInfo, SelectPayload } from "./types";
+import { decodeView, encodeView, isDefaultView } from "./url-state";
+import { EMPTY_FILTER, ViewControls, type FilterState } from "./view-controls";
 
 type Phase = "booting" | "working" | "ready" | "error";
 
@@ -53,7 +53,9 @@ export default function RenderPage() {
   const [summary, setSummary] = useState<CitySummary | null>(null);
   const [mode, setMode] = useState("typology");
   const [filter, setFilterState] = useState<FilterState>(EMPTY_FILTER);
-  const [anchor, setAnchor] = useState<{ id: string; name: string } | null>(null);
+  const [anchor, setAnchor] = useState<{ id: string; name: string } | null>(
+    null,
+  );
   const [path, setPath] = useState<PathInfo | null>(null);
 
   const startedRef = useRef(false);
@@ -65,11 +67,15 @@ export default function RenderPage() {
 
   // Engine -> UI events.
   useEffect(() => {
-    const onHover = (e: Event) => setHover((e as CustomEvent<HoverInfo | null>).detail ?? null);
+    const onHover = (e: Event) =>
+      setHover((e as CustomEvent<HoverInfo | null>).detail ?? null);
     const onSelect = (e: Event) => {
-      const payload = (e as CustomEvent<SelectPayload>).detail ?? { type: "None" };
+      const payload = (e as CustomEvent<SelectPayload>).detail ?? {
+        type: "None",
+      };
       setSelection(payload);
-      selectedIdRef.current = payload.type === "Building" ? payload.data.id : null;
+      selectedIdRef.current =
+        payload.type === "Building" ? payload.data.id : null;
     };
     const onPathEvent = (e: Event) =>
       setPath((e as CustomEvent<PathInfo | null>).detail ?? null);
@@ -101,7 +107,8 @@ export default function RenderPage() {
           if (v.timeline !== null) set_timeline(String(v.timeline));
           if (v.selected) focus_symbol(v.selected);
           // After focus_symbol, which moves the camera itself.
-          if (v.camera) setTimeout(() => set_camera_state(v.camera as string), 60);
+          if (v.camera)
+            setTimeout(() => set_camera_state(v.camera as string), 60);
         }
       }
     };
@@ -121,87 +128,93 @@ export default function RenderPage() {
     };
   }, []);
 
-  const startAnalysis = useCallback(async (refresh = "") => {
-    sourceRef.current?.close();
-    sourceRef.current = null;
-    setBusy(true);
-    setError(null);
-    // Only the first load takes over with the full-screen panel.
-    if (!refresh) setPhase("working");
-    setStatus(refresh ? "Regenerating\u2026" : "Contacting server\u2026");
-    try {
-      const res = await fetch("/api/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ repo_url: repoUrl, refresh }),
-      });
-      const data = await res.json();
+  const startAnalysis = useCallback(
+    async (refresh = "") => {
+      sourceRef.current?.close();
+      sourceRef.current = null;
+      setBusy(true);
+      setError(null);
+      // Only the first load takes over with the full-screen panel.
+      if (!refresh) setPhase("working");
+      setStatus(refresh ? "Regenerating\u2026" : "Contacting server\u2026");
+      try {
+        const res = await fetch("/api/analyze", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ repo_url: repoUrl, refresh }),
+        });
+        const data = await res.json();
 
-      if (!res.ok) {
-        setError(data.error ?? "Analysis failed");
-        setPhase("error");
-        setBusy(false);
-        return;
-      }
-
-      // A cached city comes straight back; otherwise we follow the job.
-      if (data.cityData) {
-        load_city_data(data.cityData);
-        setBusy(false);
-        return;
-      }
-      if (!data.job_id) {
-        setError("Server did not start an analysis");
-        setPhase("error");
-        setBusy(false);
-        return;
-      }
-
-      // The draft city arrives over SSE too: the deterministic pass lands in
-      // seconds and the LLM pass replaces it, so the city is usable long
-      // before the model finishes.
-      const src = new EventSource(`/api/jobs/${data.job_id}/events`, {
-        withCredentials: true,
-      });
-      sourceRef.current = src;
-
-      src.onmessage = (ev) => {
-        const msg = JSON.parse(ev.data);
-        switch (msg.type) {
-          case "stage": {
-            const label = STAGE_LABELS[msg.stage?.name] ?? msg.stage?.name ?? "Working";
-            setStatus(
-              msg.stage?.total > 0 ? `${label} ${msg.stage.done}/${msg.stage.total}` : `${label}…`,
-            );
-            break;
-          }
-          case "city":
-            load_city_data(msg.city);
-            setStatus(msg.refined ? "Done" : "Refining with the model…");
-            break;
-          case "error":
-            setError(msg.error ?? "Analysis failed");
-            setPhase("error");
-            setBusy(false);
-            src.close();
-            break;
-          case "done":
-            setBusy(false);
-            src.close();
-            break;
+        if (!res.ok) {
+          setError(data.error ?? "Analysis failed");
+          setPhase("error");
+          setBusy(false);
+          return;
         }
-      };
-      src.onerror = () => {
+
+        // A cached city comes straight back; otherwise we follow the job.
+        if (data.cityData) {
+          load_city_data(data.cityData);
+          setBusy(false);
+          return;
+        }
+        if (!data.job_id) {
+          setError("Server did not start an analysis");
+          setPhase("error");
+          setBusy(false);
+          return;
+        }
+
+        // The draft city arrives over SSE too: the deterministic pass lands in
+        // seconds and the LLM pass replaces it, so the city is usable long
+        // before the model finishes.
+        const src = new EventSource(`/api/jobs/${data.job_id}/events`, {
+          withCredentials: true,
+        });
+        sourceRef.current = src;
+
+        src.onmessage = (ev) => {
+          const msg = JSON.parse(ev.data);
+          switch (msg.type) {
+            case "stage": {
+              const label =
+                STAGE_LABELS[msg.stage?.name] ?? msg.stage?.name ?? "Working";
+              setStatus(
+                msg.stage?.total > 0
+                  ? `${label} ${msg.stage.done}/${msg.stage.total}`
+                  : `${label}…`,
+              );
+              break;
+            }
+            case "city":
+              load_city_data(msg.city);
+              setStatus(msg.refined ? "Done" : "Refining with the model…");
+              break;
+            case "error":
+              setError(msg.error ?? "Analysis failed");
+              setPhase("error");
+              setBusy(false);
+              src.close();
+              break;
+            case "done":
+              setBusy(false);
+              src.close();
+              break;
+          }
+        };
+        src.onerror = () => {
+          setBusy(false);
+          src.close();
+        };
+      } catch {
+        setError("Could not reach the server");
+        setPhase("error");
         setBusy(false);
-        src.close();
-      };
-    } catch {
-      setError("Could not reach the server");
-      setPhase("error");
-      setBusy(false);
-    }
-  }, [repoUrl]);
+      }
+    },
+    [repoUrl],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -210,9 +223,14 @@ export default function RenderPage() {
         await init();
       } catch (e: unknown) {
         const m = e instanceof Error ? e.message : "";
-        if (!m.includes("Using exceptions for control flow") && !m.includes("already initialized")) {
+        if (
+          !m.includes("Using exceptions for control flow") &&
+          !m.includes("already initialized")
+        ) {
           if (!cancelled) {
-            setError("The 3D engine failed to start. Your browser may not support WebGPU or WebGL2.");
+            setError(
+              "The 3D engine failed to start. Your browser may not support WebGPU or WebGL2.",
+            );
             setPhase("error");
           }
           return;
@@ -276,7 +294,10 @@ export default function RenderPage() {
     set_timeline(d === null ? "" : String(d));
   }, []);
 
-  const handlePick = useCallback((nameOrId: string) => focus_symbol(nameOrId), []);
+  const handlePick = useCallback(
+    (nameOrId: string) => focus_symbol(nameOrId),
+    [],
+  );
   const handleReset = useCallback(() => {
     reset_camera();
     setSelection({ type: "None" });
@@ -299,7 +320,10 @@ export default function RenderPage() {
         camera: camera_state() || null,
       });
       const next = window.location.pathname + window.location.search + hash;
-      if (next !== window.location.pathname + window.location.search + window.location.hash) {
+      if (
+        next !==
+        window.location.pathname + window.location.search + window.location.hash
+      ) {
         window.history.replaceState(null, "", next);
       }
     };
@@ -347,7 +371,10 @@ export default function RenderPage() {
             path={path}
             onClear={handleClearPath}
           />
-          <Tooltip hover={selection.type === "None" ? hover : null} pos={cursor} />
+          <Tooltip
+            hover={selection.type === "None" ? hover : null}
+            pos={cursor}
+          />
           <Timeline summary={summary} onChange={handleTimeline} />
           {(busy || !refined) && (
             <div className="absolute bottom-16 left-1/2 z-40 -translate-x-1/2 rounded border border-gray-700 bg-gray-900/95 px-3 py-1.5 text-xs text-gray-300">

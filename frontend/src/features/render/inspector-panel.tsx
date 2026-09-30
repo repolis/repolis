@@ -1,6 +1,11 @@
-import { useEffect, useState } from "react";
-import type { BuildingInfo, DistrictInfo, SelectPayload } from "./types";
-import { TYPOLOGY_COLORS } from "./types";
+import { useState } from "react";
+
+import {
+  TYPOLOGY_COLORS,
+  type BuildingInfo,
+  type DistrictInfo,
+  type SelectPayload,
+} from "./types";
 
 interface Props {
   selection: SelectPayload;
@@ -29,16 +34,17 @@ export function InspectorPanel({
   if (selection.type === "None") return null;
 
   return (
-    <div className="absolute right-4 top-4 z-50 flex max-h-[calc(100vh-2rem)] w-80 flex-col gap-3 overflow-y-auto overflow-x-hidden rounded border border-gray-700 bg-gray-900/95 p-4 text-xs text-gray-200">
+    <div className="absolute top-4 right-4 z-50 flex max-h-[calc(100vh-2rem)] w-80 flex-col gap-3 overflow-x-hidden overflow-y-auto rounded border border-gray-700 bg-gray-900/95 p-4 text-xs text-gray-200">
       <button
         onClick={onClose}
-        className="absolute right-3 top-3 text-gray-500 hover:text-gray-200"
+        className="absolute top-3 right-3 text-gray-500 hover:text-gray-200"
         title="Close (Esc)"
       >
         &times;
       </button>
       {selection.type === "Building" && (
         <BuildingInspector
+          key={selection.data.id}
           info={selection.data}
           repoUrl={repoUrl}
           onPick={onPick}
@@ -47,7 +53,9 @@ export function InspectorPanel({
           anchorId={anchorId}
         />
       )}
-      {selection.type === "District" && <DistrictInspector info={selection.data} onPick={onPick} />}
+      {selection.type === "District" && (
+        <DistrictInspector info={selection.data} onPick={onPick} />
+      )}
     </div>
   );
 }
@@ -70,7 +78,11 @@ function Chips({
     <div className="flex min-w-0 flex-wrap gap-1">
       {shown.map((v, i) =>
         onPick ? (
-          <button key={i} onClick={() => onPick(v)} className={`${chip} hover:bg-gray-700 hover:text-white`}>
+          <button
+            key={i}
+            onClick={() => onPick(v)}
+            className={`${chip} hover:bg-gray-700 hover:text-white`}
+          >
             {v}
           </button>
         ) : (
@@ -91,7 +103,13 @@ function Chips({
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
   return (
     <div className="flex min-w-0 flex-col gap-1 border-t border-gray-800 pt-2">
       <div className="font-semibold text-gray-400">{title}</div>
@@ -118,11 +136,6 @@ function BuildingInspector({
   const [explanation, setExplanation] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setExplanation(null);
-    setError(null);
-  }, [info.id]);
 
   // The larger model runs here and only here; nothing in the render path
   // waits on it.
@@ -155,14 +168,19 @@ function BuildingInspector({
 
   return (
     <div className="flex min-w-0 flex-col gap-3">
-      <div className="min-w-0 border-b border-gray-700 pb-2 pr-5">
+      <div className="min-w-0 border-b border-gray-700 pr-5 pb-2">
         <div className="flex items-center gap-2 text-[11px] text-gray-400">
           <span
             className="inline-block h-2 w-2 rounded-sm"
-            style={{ background: TYPOLOGY_COLORS[info.typology] ?? TYPOLOGY_COLORS.unknown }}
+            style={{
+              background:
+                TYPOLOGY_COLORS[info.typology] ?? TYPOLOGY_COLORS.unknown,
+            }}
           />
           <span>{info.kind === "module" ? "File module" : "Type"}</span>
-          {info.language && <span className="text-gray-500">{info.language}</span>}
+          {info.language && (
+            <span className="text-gray-500">{info.language}</span>
+          )}
           {info.cycle_id > 0 && (
             <span
               className="rounded border border-red-700 px-1 text-red-400"
@@ -180,9 +198,13 @@ function BuildingInspector({
             </span>
           )}
         </div>
-        <div className="mt-1 break-all text-sm font-bold text-white">{info.name}</div>
+        <div className="mt-1 text-sm font-bold break-all text-white">
+          {info.name}
+        </div>
         {info.source_file && (
-          <div className="break-all font-mono text-[11px] text-gray-400">{info.source_file}</div>
+          <div className="font-mono text-[11px] break-all text-gray-400">
+            {info.source_file}
+          </div>
         )}
         <div className="mt-1 text-gray-400">
           District: <span className="text-gray-200">{info.district_name}</span>
@@ -205,15 +227,19 @@ function BuildingInspector({
       </div>
       <div className="flex justify-between text-[11px] text-gray-400">
         <span title="Martin's instability: 0 = depended upon, 1 = depends on others">
-          Instability: <span className="text-gray-200">{info.instability.toFixed(2)}</span>
+          Instability:{" "}
+          <span className="text-gray-200">{info.instability.toFixed(2)}</span>
         </span>
         {info.hub && <span className="text-amber-400">hub</span>}
-        {info.sum_complexity > 0 && <span>total complexity {info.sum_complexity}</span>}
+        {info.sum_complexity > 0 && (
+          <span>total complexity {info.sum_complexity}</span>
+        )}
       </div>
 
       <div className="flex justify-between text-[11px] text-gray-400">
         <span>
-          Churn: <span className="text-gray-200">{info.commit_churn}</span> commits
+          Churn: <span className="text-gray-200">{info.commit_churn}</span>{" "}
+          commits
         </span>
         <span>
           Last edit: <span className="text-gray-200">{age}</span>
@@ -221,13 +247,16 @@ function BuildingInspector({
       </div>
       {info.primary_author && (
         <div className="text-[11px] text-gray-400">
-          Main author: <span className="text-gray-200">{info.primary_author}</span>
+          Main author:{" "}
+          <span className="text-gray-200">{info.primary_author}</span>
         </div>
       )}
 
       <div className="flex flex-col gap-1">
         {explanation ? (
-          <div className="rounded bg-gray-800 p-2 leading-relaxed text-gray-300">{explanation}</div>
+          <div className="rounded bg-gray-800 p-2 leading-relaxed text-gray-300">
+            {explanation}
+          </div>
         ) : (
           <button
             onClick={explain}
@@ -318,22 +347,32 @@ function DistrictInspector({
 }) {
   return (
     <div className="flex min-w-0 flex-col gap-3">
-      <div className="min-w-0 border-b border-gray-700 pb-2 pr-5">
+      <div className="min-w-0 border-b border-gray-700 pr-5 pb-2">
         <div className="flex items-center gap-2 text-[11px] text-gray-400">
           <span
             className="inline-block h-2 w-2 rounded-sm"
-            style={{ background: TYPOLOGY_COLORS[info.typology] ?? TYPOLOGY_COLORS.unknown }}
+            style={{
+              background:
+                TYPOLOGY_COLORS[info.typology] ?? TYPOLOGY_COLORS.unknown,
+            }}
           />
           <span>District &middot; {info.typology}</span>
         </div>
-        <div className="mt-1 break-all text-sm font-bold text-white">{info.name}</div>
-        {info.summary && <div className="mt-1 text-gray-300">{info.summary}</div>}
+        <div className="mt-1 text-sm font-bold break-all text-white">
+          {info.name}
+        </div>
+        {info.summary && (
+          <div className="mt-1 text-gray-300">{info.summary}</div>
+        )}
       </div>
 
       <div className="grid grid-cols-3 gap-2 text-center">
         <Metric label="Entities" value={String(info.building_count)} />
         <Metric label="Functions" value={String(info.total_methods)} />
-        <Metric label="Lines" value={info.total_lines_of_code.toLocaleString()} />
+        <Metric
+          label="Lines"
+          value={info.total_lines_of_code.toLocaleString()}
+        />
       </div>
 
       {info.tags.length > 0 && (

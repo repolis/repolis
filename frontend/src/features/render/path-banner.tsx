@@ -14,7 +14,7 @@ export function PathBanner({
   if (!anchorName && !path) return null;
 
   return (
-    <div className="absolute left-1/2 top-4 z-40 max-w-[40rem] -translate-x-1/2 rounded border border-gray-700 bg-gray-900/95 px-3 py-2 text-xs">
+    <div className="absolute top-4 left-1/2 z-40 max-w-[40rem] -translate-x-1/2 rounded border border-gray-700 bg-gray-900/95 px-3 py-2 text-xs">
       {path ? (
         path.hops.length > 0 ? (
           <div className="flex flex-col gap-1">
@@ -41,15 +41,17 @@ export function PathBanner({
         )
       ) : (
         <div className="text-gray-400">
-          Path start: <span className="text-gray-200">{anchorName}</span> &middot;{" "}
+          Path start: <span className="text-gray-200">{anchorName}</span>{" "}
+          &middot;{" "}
           <span className="text-gray-500">
-            now select another building and press &ldquo;trace path to here&rdquo;
+            now select another building and press &ldquo;trace path to
+            here&rdquo;
           </span>
         </div>
       )}
       <button
         onClick={onClear}
-        className="absolute right-2 top-1.5 text-gray-500 hover:text-gray-200"
+        className="absolute top-1.5 right-2 text-gray-500 hover:text-gray-200"
         title="Clear path"
       >
         &times;

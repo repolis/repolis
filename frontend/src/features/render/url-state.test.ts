@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
+
+import { decodeView, EMPTY_VIEW, encodeView, isDefaultView } from "./url-state";
 import { EMPTY_FILTER } from "./view-controls";
-import { decodeView, encodeView, isDefaultView, EMPTY_VIEW } from "./url-state";
 
 describe("url state", () => {
   it("round-trips everything that matters", () => {
@@ -40,6 +41,8 @@ describe("url state", () => {
   });
 
   it("keeps a well-formed camera", () => {
-    expect(decodeView("#c=1.5,-2.5,200,0.78,0.62").camera).toBe("1.5,-2.5,200,0.78,0.62");
+    expect(decodeView("#c=1.5,-2.5,200,0.78,0.62").camera).toBe(
+      "1.5,-2.5,200,0.78,0.62",
+    );
   });
 });

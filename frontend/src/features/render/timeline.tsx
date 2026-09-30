@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+
 import type { CitySummary } from "./types";
 
 /**
@@ -20,10 +21,15 @@ export function Timeline({
 
   const total = summary?.history_days ?? 0;
 
-  useEffect(() => {
+  // Resetting during render rather than in an effect: a new city must not be
+  // scrubbed to the previous one's position, and an effect would let one frame
+  // render with the stale day.
+  const [shown, setShown] = useState(summary);
+  if (shown !== summary) {
+    setShown(summary);
     setDay(null);
     setPlaying(false);
-  }, [summary]);
+  }
 
   useEffect(() => {
     if (!playing || total <= 0) return;

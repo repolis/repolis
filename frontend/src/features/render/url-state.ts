@@ -49,16 +49,36 @@ function decodeFilter(s: string): FilterState {
     const [k, ...rest] = part.split(":");
     const v = rest.join(":");
     switch (k) {
-      case "q": f.text = v; break;
-      case "lang": f.language = v; break;
-      case "dist": f.district = v; break;
-      case "kind": f.kind = v; break;
-      case "fn": f.min_methods = clampNum(v); break;
-      case "cx": f.min_complexity = clampNum(v); break;
-      case "churn": f.min_churn_pct = clampNum(v); break;
-      case "nocallers": f.only_no_callers = true; break;
-      case "hubs": f.only_hubs = true; break;
-      case "cycles": f.only_cycles = true; break;
+      case "q":
+        f.text = v;
+        break;
+      case "lang":
+        f.language = v;
+        break;
+      case "dist":
+        f.district = v;
+        break;
+      case "kind":
+        f.kind = v;
+        break;
+      case "fn":
+        f.min_methods = clampNum(v);
+        break;
+      case "cx":
+        f.min_complexity = clampNum(v);
+        break;
+      case "churn":
+        f.min_churn_pct = clampNum(v);
+        break;
+      case "nocallers":
+        f.only_no_callers = true;
+        break;
+      case "hubs":
+        f.only_hubs = true;
+        break;
+      case "cycles":
+        f.only_cycles = true;
+        break;
     }
   }
   return f;

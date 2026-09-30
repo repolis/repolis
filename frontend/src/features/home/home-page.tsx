@@ -36,7 +36,9 @@ export default function HomePage() {
           onSubmit={handleSubmit(onSubmit)}
           className="mx-auto flex w-150 flex-col gap-2 p-2"
         >
-          <h1 className="text-center text-4xl font-medium mb-5">Analyze your repo</h1>
+          <h1 className="mb-5 text-center text-4xl font-medium">
+            Analyze your repo
+          </h1>
 
           <div className="flex gap-2">
             <input
@@ -49,7 +51,7 @@ export default function HomePage() {
                   message: "Must be a valid GitHub URL",
                 },
               })}
-              className="flex-1 rounded-md border-2 text-white border-gray-200 px-4 py-2 transition-colors outline-none focus:border-blue-500"
+              className="flex-1 rounded-md border-2 border-gray-200 px-4 py-2 text-white transition-colors outline-none focus:border-blue-500"
             />
             <button
               type="submit"
