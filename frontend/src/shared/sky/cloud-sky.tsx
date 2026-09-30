@@ -7,7 +7,8 @@ import { isSkyVisible, sky } from "./sky";
  *
  * Added for repolis:
  *   - a full-screen billow blanket (u_fog) the city is built inside of
- *   - parting (u_part): clouds slide outward and dissolve from the centre
+ *   - distant moonlit wisps and low mist over the landing photograph (u_far)
+ *   - parting (u_part): a ragged opening from the centre, pushed through
  *   - a dive zoom (u_zoom) for the fall through the cloud bank
  *   - pointer parallax, nearer clouds moving more
  *   - premultiplied alpha, so the city canvas shows through as they part
@@ -29,6 +30,7 @@ varying vec2 v_uv;
 uniform vec2 u_res;
 uniform float u_time;
 uniform float u_sky;
+uniform float u_far;
 uniform float u_clouds;
 uniform float u_fog;
 uniform float u_part;
@@ -130,10 +132,6 @@ void main() {
   // Dive: everything scales toward the viewer around the centre.
   p = center + (p - center) / (1.0 + u_zoom * 0.9);
 
-  // Parting: sample further out so clouds appear to slide away from centre.
-  float side = sign(p.x - center.x);
-  p.x -= side * u_part * u_part * aspect * 0.55;
-
   float t = u_time;
   vec3 sky = mix(u_skyBottom, u_skyTop, smoothstep(0.0, 1.0, uv.y));
   sky = mix(sky, u_skyBottom * 1.04, smoothstep(0.38, 0.0, uv.y) * 0.5);
@@ -147,6 +145,27 @@ void main() {
   sky += vec3(star) * 0.45 * u_sky;
 
   vec4 clouds = vec4(0.0);
+
+  // Far away over the landing photograph: long wisps high in the sky, lit
+  // by the moon near it, and a thin mist drifting over the water.
+  if (u_far > 0.001) {
+    vec2 pm = vec2(uv.x * aspect, uv.y) + u_mouse * 0.012;
+    float band = smoothstep(0.5, 0.72, uv.y) * (1.0 - smoothstep(0.93, 1.0, uv.y));
+    float w1 = fbm(vec2(pm.x * 1.1 - t * 0.010, pm.y * 6.0 + 3.0));
+    float w2 = fbm(vec2(pm.x * 2.3 - t * 0.016, pm.y * 11.0 - 1.7));
+    float wisp = smoothstep(0.5, 0.85, w1 * 0.7 + w2 * 0.45) * band;
+    float md = length(vec2(uv.x * aspect, uv.y) - vec2(aspect * 0.85, 0.87));
+    float glow = exp(-md * md * 5.0);
+    vec3 wc = mix(vec3(0.20, 0.25, 0.36), vec3(0.62, 0.72, 0.92), glow);
+    float wa = wisp * (0.22 + 0.4 * glow) * u_far;
+
+    float mistBand = smoothstep(0.18, 0.28, uv.y) * (1.0 - smoothstep(0.34, 0.44, uv.y));
+    float m = fbm(vec2(pm.x * 1.6 + t * 0.012, pm.y * 7.0));
+    float mist = smoothstep(0.45, 0.8, m) * mistBand * 0.16 * u_far;
+
+    clouds = over(vec4(vec3(0.42, 0.50, 0.62) * mist, mist), clouds);
+    clouds = over(vec4(wc * wa, wa), clouds);
+  }
 
   if (u_clouds > 0.001) {
     float cirrusBand = smoothstep(0.55, 0.8, uv.y) * (1.0 - smoothstep(0.92, 1.0, uv.y));
@@ -172,12 +191,14 @@ void main() {
   }
 
   // The blanket: two decks of billows, the near one larger and faster, so
-  // the cloud bank has depth. Only computed once the camera is inside it.
-  if (u_fog > 0.2) {
-    float lo = mix(0.7, 0.4, u_fog);
+  // the cloud bank has depth. It gathers at the edges of the view first and
+  // closes in toward the centre, as when flying into a bank of cloud.
+  if (u_fog > 0.05) {
+    float rim = length((uv - 0.5) * vec2(1.25, 1.0));
+    float lo = mix(0.7, 0.4, u_fog) - rim * 0.3 * (1.0 - u_fog);
     vec3 shadowCol = mix(u_cloud * 0.4, u_skyTop, 0.45);
     vec3 litCol = u_cloud * 1.02;
-    float grow = smoothstep(0.2, 0.55, u_fog);
+    float grow = smoothstep(0.1, 0.55, u_fog + rim * 0.35 * (1.0 - u_fog));
 
     // Far deck: smaller cells, drifting slowly, lit from above.
     vec2 q = p * 2.3 + vec2(t * 0.018, -t * 0.004) + u_mouse * 0.04;
@@ -192,23 +213,30 @@ void main() {
     vec2 n = p * 1.15 + vec2(t * 0.045, t * 0.004) + u_mouse * 0.1 + 11.3;
     n += 0.6 * vec2(fbm3(n * 0.8 - t * 0.03), fbm3(n * 0.8 + t * 0.025 + 5.7));
     float bn = billow4(n);
-    float aN = smoothstep(lo + 0.05, lo + 0.25, bn) * smoothstep(0.35, 0.9, u_fog) * 0.72;
+    float aN = smoothstep(lo + 0.05, lo + 0.25, bn) * smoothstep(0.3, 0.9, u_fog + rim * 0.3 * (1.0 - u_fog)) * 0.72;
     float litN = smoothstep(0.5, 1.0, bn) * 0.8 + uv.y * 0.3;
     vec3 colN = mix(shadowCol * 0.96, litCol, clamp(litN, 0.0, 1.0));
     clouds = over(vec4(colN * aN, aN), clouds);
   }
 
-  // Part like curtains: a gap opens at the centre line and widens to the
-  // sides, its edge ragged with the cloud texture, while the rest thins out.
-  float ragged = (fbm(vec2(uv.y * 3.2, t * 0.05)) - 0.5) * 0.35;
-  float gap = abs(uv.x - 0.5) * 2.0 + ragged;
-  float edge = u_part * 1.5;
-  float keep = smoothstep(edge - 0.4, edge, gap);
-  keep *= 1.0 - smoothstep(0.55, 1.0, u_part);
-  clouds *= keep;
-
   vec4 skyLayer = vec4(sky * u_sky, u_sky);
-  gl_FragColor = over(clouds, skyLayer);
+  vec4 color = over(clouds, skyLayer);
+
+  // Reveal: an opening grows from the centre, its edge shaped by the cloud
+  // texture, while the camera pushes through (u_zoom). It cuts through the
+  // painted sky as well, so the city shows through it directly. Symmetric
+  // and continuous: no line where two halves meet.
+  if (u_part > 0.0) {
+    vec2 q = (uv - 0.5) * vec2(aspect, 1.0);
+    float dist = length(q) / length(vec2(aspect, 1.0) * 0.5);
+    float ragged = (fbm(p * 2.4 + vec2(t * 0.04, -t * 0.03)) - 0.47) * 0.5;
+    float edge = u_part * 1.45 - 0.15;
+    float keep = smoothstep(edge - 0.3, edge + 0.05, dist + ragged);
+    keep *= 1.0 - smoothstep(0.7, 1.0, u_part);
+    color *= mix(1.0, keep, smoothstep(0.0, 0.06, u_part));
+  }
+
+  gl_FragColor = color;
 }
 `;
 
@@ -286,6 +314,7 @@ export function CloudSky() {
       res: u("u_res"),
       time: u("u_time"),
       sky: u("u_sky"),
+      far: u("u_far"),
       clouds: u("u_clouds"),
       fog: u("u_fog"),
       part: u("u_part"),
@@ -350,6 +379,7 @@ export function CloudSky() {
       gl.uniform1f(loc.time, clock + 40);
       gl.uniform1f(loc.sky, sky.sky.get());
       gl.uniform1f(loc.clouds, sky.clouds.get());
+      gl.uniform1f(loc.far, sky.far.get());
       gl.uniform1f(loc.fog, sky.fog.get());
       gl.uniform1f(loc.part, sky.part.get());
       gl.uniform1f(loc.zoom, sky.zoom.get());

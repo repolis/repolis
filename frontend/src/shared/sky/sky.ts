@@ -12,6 +12,8 @@ export interface SkyState {
   sky: MotionValue<number>;
   /** Opacity of the drifting clouds high in the sky (not the blanket). */
   clouds: MotionValue<number>;
+  /** Distant wisps and mist drawn over the landing photograph. */
+  far: MotionValue<number>;
   /** Density of the full-screen cloud blanket. 0 is a clear sky. */
   fog: MotionValue<number>;
   /** 0..1: clouds slide outward and dissolve from the centre. */
@@ -26,6 +28,7 @@ export const sky: SkyState = {
   photo: motionValue(0),
   sky: motionValue(1),
   clouds: motionValue(1),
+  far: motionValue(0),
   fog: motionValue(0.14),
   part: motionValue(0),
   zoom: motionValue(0),
@@ -47,7 +50,8 @@ function to(
 }
 
 export function isSkyVisible(): boolean {
-  const covered = sky.fog.get() > 0.001 || sky.clouds.get() > 0.001;
+  const covered =
+    sky.fog.get() > 0.001 || sky.clouds.get() > 0.001 || sky.far.get() > 0.001;
   return sky.sky.get() > 0.001 || (covered && sky.part.get() < 0.999);
 }
 
@@ -65,7 +69,16 @@ export const skyScenes = {
   landing: () => {
     scene++;
     return to(
-      { photo: 1, sky: 0, clouds: 0, fog: 0, part: 0, zoom: 0, speed: 1 },
+      {
+        photo: 1,
+        far: 1,
+        sky: 0,
+        clouds: 0,
+        fog: 0,
+        part: 0,
+        zoom: 0,
+        speed: 1,
+      },
       1.4,
     );
   },
@@ -93,6 +106,7 @@ export const skyScenes = {
     if (diving) await diving;
     if (id !== scene) return;
     sky.photo.jump(0);
+    sky.far.jump(0);
     await to(
       { sky: 1, clouds: 1, fog: 1, part: 0, zoom: 0.95, speed: 1.2 },
       2.4,
@@ -104,6 +118,7 @@ export const skyScenes = {
   cover: () => {
     scene++;
     sky.photo.jump(0);
+    sky.far.jump(0);
     sky.sky.jump(1);
     sky.clouds.jump(1);
     sky.fog.jump(1);
