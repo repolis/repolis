@@ -2,7 +2,13 @@ import type { HoverInfo } from "./types";
 
 /** Cursor tooltip, deliberately tiny: hover detail vanishes the moment the
  * pointer moves toward it, so the full record lives in the pinned inspector. */
-export function Tooltip({ hover, pos }: { hover: HoverInfo | null; pos: { x: number; y: number } }) {
+export function Tooltip({
+  hover,
+  pos,
+}: {
+  hover: HoverInfo | null;
+  pos: { x: number; y: number };
+}) {
   if (!hover) return null;
   return (
     <div

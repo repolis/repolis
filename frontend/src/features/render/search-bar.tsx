@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+
 import { Regenerate } from "./regenerate";
 import type { CitySummary, IndexEntry } from "./types";
 
@@ -38,7 +39,7 @@ export function SearchBar({
   }, [summary, query]);
 
   return (
-    <div className="absolute left-4 top-4 z-40 w-[26rem] text-xs">
+    <div className="absolute top-4 left-4 z-40 w-[26rem] text-xs">
       <div className="flex gap-2">
         <input
           value={query}
@@ -79,7 +80,9 @@ export function SearchBar({
               }}
             >
               <span className="truncate font-mono text-gray-200">{r.name}</span>
-              <span className="shrink-0 text-[10px] text-gray-500">{r.district}</span>
+              <span className="shrink-0 text-[10px] text-gray-500">
+                {r.district}
+              </span>
             </button>
           ))}
         </div>

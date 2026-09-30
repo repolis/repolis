@@ -6,31 +6,55 @@ on:
   pull_request:
     branches: ["main"]
 
+# A second push supersedes the first. The engine job builds Bevy in release and
+# can run ~18 minutes, so letting superseded runs finish is expensive.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least privilege: nothing here writes to the repository.
+permissions:
+  contents: read
+
+# Deliberately no `paths:` filters. Required status checks never report for a
+# skipped job, so a filtered job leaves every PR that does not touch its paths
+# waiting forever. Cost is controlled by caching and cancel-in-progress instead.
+
 jobs:
   backend:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: ./backend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
-          # Must match backend/go.mod. These drifted apart (go.mod asked for
-          # 1.26 while CI pinned 1.22), so the build could not have passed.
+          # Must match backend/go.mod. These drifted apart once (go.mod asked
+          # for 1.26 while CI pinned 1.22) and the build could not have passed.
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt needed for:"; echo "$unformatted"; exit 1
+          fi
       - run: go build -v ./...
       - run: go vet ./...
-      - run: go test -v ./...
+      # -race matters here: single-flight job dedup, the SSE broadcast and the
+      # atomic cache writes are all concurrent.
+      - run: go test -race -v ./...
 
   engine:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: ./engine
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
@@ -40,36 +64,47 @@ jobs:
           workspaces: engine
       - name: install alsa and udev
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev
+      # Pinned and cached, rather than piping an unversioned installer to sh
+      # on every run.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack@0.15.0
+      # Clippy first: it populates the same build cache the tests then reuse.
+      - run: cargo clippy --release --all-targets -- -D warnings
       # Layout invariants (no overlapping buildings, everything inside its
       # district) run on the host target; wasm is only the delivery format.
       - run: cargo test --release
-      - run: cargo clippy --release -- -D warnings
-      - name: install wasm-pack
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
       - run: ./build-wasm.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: wasm
           path: frontend/src/wasm
+          retention-days: 7
 
   frontend:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: engine
     defaults:
       run:
         working-directory: ./frontend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
-          node-version: "20"
+          # Read from frontend/.nvmrc for the same reason Go reads go.mod.
+          node-version-file: frontend/.nvmrc
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: wasm
           path: frontend/src/wasm
       - run: npm ci
+      - run: npx prettier --check .
+      # Errors fail the build; the remaining warnings are the WebGPU shims in
+      # main.tsx, where `any` is the honest type for patching browser globals.
+      - run: npm run lint
       - run: npx tsc --noEmit
       - run: npm test
       - run: npm run build

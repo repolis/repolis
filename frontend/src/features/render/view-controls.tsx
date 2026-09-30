@@ -1,4 +1,5 @@
 import { useState } from "react";
+
 import type { CitySummary } from "./types";
 
 export const COLOR_MODES = [
@@ -92,11 +93,13 @@ export function ViewControls({
   if (!summary) return null;
 
   const n = activeCount(filter);
-  const set = (patch: Partial<FilterState>) => onFilter({ ...filter, ...patch });
-  const toggle = (k: keyof FilterState) => set({ [k]: !filter[k] } as Partial<FilterState>);
+  const set = (patch: Partial<FilterState>) =>
+    onFilter({ ...filter, ...patch });
+  const toggle = (k: keyof FilterState) =>
+    set({ [k]: !filter[k] } as Partial<FilterState>);
 
   return (
-    <div className="absolute left-4 top-14 z-40 w-[26rem] text-xs">
+    <div className="absolute top-14 left-4 z-40 w-[26rem] text-xs">
       <div className="flex items-center gap-2 rounded border border-gray-700 bg-gray-900/95 px-2 py-1.5">
         <span className="text-gray-500">Colour</span>
         <select
@@ -131,8 +134,20 @@ export function ViewControls({
         <div className="mt-1 flex flex-col gap-2 rounded border border-gray-700 bg-gray-900/95 p-2.5">
           <div className="flex flex-wrap items-center gap-1">
             <span className="w-16 text-gray-500">Shape</span>
-            <Chip on={filter.kind === "type"} label="types" onClick={() => set({ kind: filter.kind === "type" ? "" : "type" })} />
-            <Chip on={filter.kind === "module"} label="modules" onClick={() => set({ kind: filter.kind === "module" ? "" : "module" })} />
+            <Chip
+              on={filter.kind === "type"}
+              label="types"
+              onClick={() =>
+                set({ kind: filter.kind === "type" ? "" : "type" })
+              }
+            />
+            <Chip
+              on={filter.kind === "module"}
+              label="modules"
+              onClick={() =>
+                set({ kind: filter.kind === "module" ? "" : "module" })
+              }
+            />
           </div>
 
           {summary.languages?.length > 1 && (
@@ -143,7 +158,9 @@ export function ViewControls({
                   key={name}
                   on={filter.language === name}
                   label={name}
-                  onClick={() => set({ language: filter.language === name ? "" : name })}
+                  onClick={() =>
+                    set({ language: filter.language === name ? "" : name })
+                  }
                 />
               ))}
             </div>
@@ -151,13 +168,21 @@ export function ViewControls({
 
           <div className="flex flex-wrap items-center gap-1">
             <span className="w-16 text-gray-500">Graph</span>
-            <Chip on={filter.only_hubs} label="hubs" onClick={() => toggle("only_hubs")} />
+            <Chip
+              on={filter.only_hubs}
+              label="hubs"
+              onClick={() => toggle("only_hubs")}
+            />
             <Chip
               on={filter.only_no_callers}
               label="no callers"
               onClick={() => toggle("only_no_callers")}
             />
-            <Chip on={filter.only_cycles} label="in a cycle" onClick={() => toggle("only_cycles")} />
+            <Chip
+              on={filter.only_cycles}
+              label="in a cycle"
+              onClick={() => toggle("only_cycles")}
+            />
           </div>
 
           <div className="flex items-center gap-2">
@@ -186,7 +211,9 @@ export function ViewControls({
               className="flex-1"
             />
             <span className="w-10 text-right text-gray-400">
-              {filter.min_churn_pct > 0 ? `top ${100 - filter.min_churn_pct}%` : "any"}
+              {filter.min_churn_pct > 0
+                ? `top ${100 - filter.min_churn_pct}%`
+                : "any"}
             </span>
           </div>
 
@@ -207,8 +234,9 @@ export function ViewControls({
 
           <div className="border-t border-gray-800 pt-1.5 text-[10px] leading-snug text-gray-500">
             Buildings that do not match fade out rather than disappear, so a
-            match is still read in context. &quot;No callers&quot; is a question,
-            not a verdict: a library&apos;s whole public surface has none.
+            match is still read in context. &quot;No callers&quot; is a
+            question, not a verdict: a library&apos;s whole public surface has
+            none.
           </div>
         </div>
       )}

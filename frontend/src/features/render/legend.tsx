@@ -1,14 +1,18 @@
 import { useState } from "react";
+
 import { TYPOLOGY_COLORS, type CitySummary } from "./types";
 
 /** Five visual channels are in use at once, and an encoding nobody can decode
  * is decoration. */
 const MODE_HELP: Record<string, string> = {
-  complexity: "Colour = worst cyclomatic complexity in the building. Pale is simple, red is branchy.",
+  complexity:
+    "Colour = worst cyclomatic complexity in the building. Pale is simple, red is branchy.",
   age: "Colour = recency. Red was edited recently, pale has not changed in a long time.",
   churn: "Colour = commit churn percentile. Red is edited constantly.",
-  fanin: "Colour = how many other buildings depend on this one. Red is depended on heavily.",
-  instability: "Colour = Martin's instability. Pale is depended upon, red depends on others.",
+  fanin:
+    "Colour = how many other buildings depend on this one. Red is depended on heavily.",
+  instability:
+    "Colour = Martin's instability. Pale is depended upon, red depends on others.",
   language: "Colour = source language.",
 };
 
@@ -25,7 +29,7 @@ export function Legend({
   const used = new Set(summary.districts.map((d) => d.typology));
 
   return (
-    <div className="absolute bottom-4 right-4 z-40 w-64 rounded border border-gray-700 bg-gray-900/95 text-xs text-gray-200">
+    <div className="absolute right-4 bottom-4 z-40 w-64 rounded border border-gray-700 bg-gray-900/95 text-xs text-gray-200">
       <button
         className="flex w-full items-center justify-between px-3 py-2 text-left font-semibold"
         onClick={() => setOpen(!open)}
@@ -37,7 +41,9 @@ export function Legend({
       {open && (
         <div className="flex flex-col gap-3 border-t border-gray-800 p-3">
           <div className="flex flex-col gap-1">
-            <div className="text-[10px] uppercase tracking-wide text-gray-500">Shape</div>
+            <div className="text-[10px] tracking-wide text-gray-500 uppercase">
+              Shape
+            </div>
             <div className="text-gray-300">Height = functions</div>
             <div className="text-gray-300">Footprint = fields</div>
             <div className="text-gray-300">Pale = not edited recently</div>
@@ -58,7 +64,7 @@ export function Legend({
           <div className="flex flex-col gap-1">
             {mode !== "typology" ? (
               <>
-                <div className="text-[10px] uppercase tracking-wide text-gray-500">
+                <div className="text-[10px] tracking-wide text-gray-500 uppercase">
                   Colour
                 </div>
                 <div className="text-gray-300">{MODE_HELP[mode]}</div>
@@ -66,17 +72,25 @@ export function Legend({
               </>
             ) : (
               <>
-            <div className="text-[10px] uppercase tracking-wide text-gray-500">Colour = district purpose</div>
-            <div className="flex flex-wrap gap-1">
-              {Object.entries(TYPOLOGY_COLORS)
-                .filter(([t]) => used.has(t))
-                .map(([t, c]) => (
-                  <span key={t} className="flex items-center gap-1 rounded bg-gray-800 px-1.5 py-0.5">
-                    <span className="inline-block h-2 w-2 rounded-sm" style={{ background: c }} />
-                    {t}
-                  </span>
-                ))}
-            </div>
+                <div className="text-[10px] tracking-wide text-gray-500 uppercase">
+                  Colour = district purpose
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {Object.entries(TYPOLOGY_COLORS)
+                    .filter(([t]) => used.has(t))
+                    .map(([t, c]) => (
+                      <span
+                        key={t}
+                        className="flex items-center gap-1 rounded bg-gray-800 px-1.5 py-0.5"
+                      >
+                        <span
+                          className="inline-block h-2 w-2 rounded-sm"
+                          style={{ background: c }}
+                        />
+                        {t}
+                      </span>
+                    ))}
+                </div>
               </>
             )}
           </div>
@@ -87,19 +101,23 @@ export function Legend({
               {summary.total_modules} modules)
             </div>
             <div>
-              {summary.total_files} files &middot; {summary.total_loc.toLocaleString()} lines
+              {summary.total_files} files &middot;{" "}
+              {summary.total_loc.toLocaleString()} lines
             </div>
             {summary.languages?.length > 0 && (
               <div>
-                {summary.languages.map(([name, n]) => `${name} ${n}`).join(" \u00b7 ")}
+                {summary.languages
+                  .map(([name, n]) => `${name} ${n}`)
+                  .join(" \u00b7 ")}
               </div>
             )}
             <div>
-              {summary.total_methods} functions attributed &middot; {summary.orphans} unattached
+              {summary.total_methods} functions attributed &middot;{" "}
+              {summary.orphans} unattached
             </div>
             <div>
-              by rule {summary.methods_by_rule} &middot; by model {summary.methods_by_llm} &middot;{" "}
-              {summary.llm_calls} LLM calls
+              by rule {summary.methods_by_rule} &middot; by model{" "}
+              {summary.methods_by_llm} &middot; {summary.llm_calls} LLM calls
             </div>
             {summary.cycles?.length > 0 && (
               <div className="text-red-400">
@@ -111,7 +129,9 @@ export function Legend({
             {summary.skipped_dirs.length > 0 && (
               <div className="text-gray-500">
                 skipped: {summary.skipped_dirs.slice(0, 3).join(", ")}
-                {summary.skipped_dirs.length > 3 ? ` +${summary.skipped_dirs.length - 3}` : ""}
+                {summary.skipped_dirs.length > 3
+                  ? ` +${summary.skipped_dirs.length - 3}`
+                  : ""}
               </div>
             )}
           </div>

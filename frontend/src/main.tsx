@@ -25,10 +25,16 @@ if (typeof window !== "undefined") {
   const GPUAdapterClass = (window as any).GPUAdapter;
   if (GPUAdapterClass?.prototype?.requestDevice) {
     const origProtoReqDevice = GPUAdapterClass.prototype.requestDevice;
-    GPUAdapterClass.prototype.requestDevice = async function (descriptor?: any) {
+    GPUAdapterClass.prototype.requestDevice = async function (
+      descriptor?: any,
+    ) {
       sanitizeLimits(descriptor, this.limits);
       const device = await origProtoReqDevice.call(this, descriptor);
-      console.log("%c[repolis] WebGPU device successfully initialized", "color: #00ff88; font-weight: bold;", device);
+      console.log(
+        "%c[repolis] WebGPU device successfully initialized",
+        "color: #00ff88; font-weight: bold;",
+        device,
+      );
       return device;
     };
   }
@@ -43,7 +49,11 @@ if (typeof window !== "undefined") {
         adapter.requestDevice = async function (descriptor?: any) {
           sanitizeLimits(descriptor, this.limits);
           const device = await origReqDevice.call(this, descriptor);
-          console.log("%c[repolis] WebGPU device successfully initialized", "color: #00ff88; font-weight: bold;", device);
+          console.log(
+            "%c[repolis] WebGPU device successfully initialized",
+            "color: #00ff88; font-weight: bold;",
+            device,
+          );
           return device;
         };
       }
