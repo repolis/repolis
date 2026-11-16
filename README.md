@@ -95,7 +95,7 @@ claims its extension, and they share one call graph.
 | Distance between districts | how tightly they are coupled |
 
 Drag to orbit, scroll to zoom, WASD to pan, click to select, Esc to clear,
-`F` for fly mode, `R` to reset. The legend in the bottom right repeats all of
+`R` to reset. The legend in the bottom right repeats all of
 this, along with how much of the analysis was deterministic.
 
 ## Regenerating a city

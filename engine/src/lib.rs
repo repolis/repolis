@@ -491,7 +491,7 @@ fn process_city_data(
     for mut text in help_q.iter_mut() {
         // ASCII only: the bundled font has no middle dot or ellipsis.
         text.sections[0].value =
-            "drag: orbit | scroll: zoom | WASD: pan | click: select | Esc: clear | F: fly | R: reset".into();
+            "drag: orbit | scroll: zoom | WASD: pan | click: select | Esc: clear | R: reset".into();
     }
 
     dispatch_city(&build_summary(&city, &result));
