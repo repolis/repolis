@@ -67,8 +67,7 @@ func CreateSession(sessionID, userID, repoURL, clonePath, commitHash string) err
 	return err
 }
 
-// FindClone returns any existing checkout of a repo at a commit, whoever made
-// it: a clone is immutable and addressed by commit.
+// Whoever made it: a clone is immutable and addressed by commit.
 func FindClone(repoURL, commitHash string) (string, string, bool) {
 	var id, path string
 	err := DB.QueryRow(
@@ -83,8 +82,6 @@ func FindClone(repoURL, commitHash string) (string, string, bool) {
 	return id, path, true
 }
 
-// StaleClones lists checkouts past the cutoff, so an analysis does not leak
-// its temp directory forever.
 func StaleClones(olderThan time.Duration) map[string]string {
 	out := make(map[string]string)
 	rows, err := DB.Query(

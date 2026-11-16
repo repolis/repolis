@@ -48,7 +48,6 @@ func TestGoAssociationIsSyntacticOnly(t *testing.T) {
 		byName[a.Fn.Name] = a
 	}
 
-	// Pointer and value receivers both attribute to the same type.
 	for _, m := range []string{"Run", "Stop"} {
 		a := byName[m]
 		if a == nil {
@@ -65,7 +64,6 @@ func TestGoAssociationIsSyntacticOnly(t *testing.T) {
 		}
 	}
 
-	// `func NewStore() *Store` has no receiver, so it owns nothing.
 	if a := byName["NewStore"]; a == nil || a.Chosen != "" {
 		t.Errorf("NewStore was attached to %q; Go says it is a free function",
 			st.TypeName(byName["NewStore"].Chosen))
@@ -152,7 +150,6 @@ func TestGoTypesAndFields(t *testing.T) {
 	if fields["Runner"] != 2 {
 		t.Errorf("Runner has %d members, want 2", fields["Runner"])
 	}
-	// Free functions land in their file's module building.
 	if methods["main.go"] != 1 {
 		t.Errorf("main.go module has %d functions, want 1 (New)", methods["main.go"])
 	}

@@ -3,8 +3,6 @@ import { useMemo, useState } from "react";
 import { Regenerate } from "./regenerate";
 import type { CitySummary, IndexEntry } from "./types";
 
-/** Makes the city addressable: without it a named symbol can only be found by
- * flying around by hand. */
 export function SearchBar({
   summary,
   busy,
@@ -39,7 +37,7 @@ export function SearchBar({
   }, [summary, query]);
 
   return (
-    <div className="absolute top-4 left-4 z-40 w-[26rem] text-xs">
+    <div className="absolute top-4 left-4 z-50 w-[26rem] text-xs">
       <div className="flex gap-2">
         <input
           value={query}

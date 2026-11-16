@@ -7,8 +7,6 @@ import (
 	"github.com/repolis/repolis/backend/internal/analyzer/lang"
 )
 
-// Visibility ranks. A symbol the caller can actually reach outranks an
-// identically named one it cannot.
 const (
 	visOwn       = 4 // defined in the caller's own namespace
 	visImported  = 3 // named by an import in this file
@@ -18,10 +16,6 @@ const (
 	maxReachable = 400
 )
 
-// scopes is the resolved import graph: which namespaces each file can see, and
-// what its local aliases stand for. Resolving imports is what makes more than
-// one language possible: bare-name lookup across the repo works for C's single
-// global namespace, but cannot tell `layout::new` from `camera::new`.
 type scopes struct {
 	sep          string
 	nsByFile     map[string]string            // file -> namespace its symbols belong to
@@ -32,9 +26,8 @@ type scopes struct {
 	bySuffix     map[string][]string          // final segment -> namespaces, for import matching
 }
 
-// lastSegment takes the final path component, using whichever separator
-// appears last: Go's separator is "." but its import paths contain a host
-// name, so preferring the separator yields "com/owner/repo/internal/x".
+// Uses whichever separator appears last: Go's is "." but its import paths
+// contain a host name, so preferring it yields "com/owner/repo/internal/x".
 func lastSegment(p, sep string) string {
 	iSlash := strings.LastIndex(p, "/")
 	iSep := -1
@@ -62,20 +55,8 @@ func buildScopes(raw *RawExtraction) *scopes {
 
 	// A repo can hold several languages, but the separator only splits
 	// qualified references, so the dominant language's is a fine default.
-	counts := map[string]int{}
-	for _, f := range raw.Files {
-		counts[f.Language]++
-	}
-	best, bestN := "", 0
-	for name, n := range counts {
-		if n > bestN || (n == bestN && name < best) {
-			best, bestN = name, n
-		}
-	}
-	for _, l := range lang.All() {
-		if l.Name() == best {
-			sc.sep = l.Separator()
-		}
+	if l := lang.ByName(raw.DominantLanguage()); l != nil {
+		sc.sep = l.Separator()
 	}
 
 	for _, f := range raw.Files {
@@ -87,7 +68,6 @@ func buildScopes(raw *RawExtraction) *scopes {
 		}
 	}
 
-	// Direct imports, plus the graph they induce.
 	edges := make(map[string][]string, len(raw.Files))
 	for _, f := range raw.Files {
 		l := lang.ForFile(f.Path)
@@ -161,9 +141,8 @@ func buildScopes(raw *RawExtraction) *scopes {
 	return sc
 }
 
-// match finds the namespaces an import refers to: exact, then by path suffix,
-// which maps `#include "git2/oid.h"` onto `include/git2/oid.h` and leaves
-// external crates unmatched.
+// Exact, then by path suffix, which maps `#include "git2/oid.h"` onto
+// `include/git2/oid.h` and leaves external crates unmatched.
 func (sc *scopes) match(target string) []string {
 	if target == "" {
 		return nil
@@ -203,8 +182,7 @@ func (sc *scopes) rank(fromFile, ns string) int {
 	return visAnywhere
 }
 
-// expand turns a written qualifier into candidate namespaces, best first. The
-// final segment is often a type rather than a module (`Lot::area`), so the
+// The final segment is often a type rather than a module (`Lot::area`), so the
 // parent path is offered too and the caller takes whichever resolves.
 func (sc *scopes) expand(qualifier, fromFile string) []string {
 	if qualifier == "" {
@@ -212,7 +190,6 @@ func (sc *scopes) expand(qualifier, fromFile string) []string {
 	}
 	q := qualifier
 
-	// A leading alias stands for a longer path.
 	if aliases, ok := sc.aliases[fromFile]; ok {
 		head, rest := q, ""
 		if sc.sep != "" {
@@ -252,9 +229,8 @@ func (sc *scopes) IsModuleScoped(fromFile string) bool { return sc.moduleScoped[
 
 func (sc *scopes) OwnNamespace(fromFile string) string { return sc.nsByFile[fromFile] }
 
-// aliasTarget resolves a local alias to the real symbol name and where to look
-// for it. A bare `circle_area(1.0)` under `use ...::area as circle_area` names
-// neither the module nor the real name, so the edge is otherwise lost.
+// A bare `circle_area(1.0)` under `use ...::area as circle_area` names neither
+// the module nor the real name, so without this the edge is lost.
 func (sc *scopes) aliasTarget(name, fromFile string) (string, []string) {
 	aliases := sc.aliases[fromFile]
 	if aliases == nil {
@@ -277,8 +253,6 @@ func (sc *scopes) aliasTarget(name, fromFile string) (string, []string) {
 	return real, sc.match(parent)
 }
 
-// qualifierType returns a qualifier's trailing segment, which for `Camera::new`
-// is the receiver's type name.
 func (sc *scopes) qualifierType(qualifier, fromFile string) string {
 	if qualifier == "" {
 		return ""

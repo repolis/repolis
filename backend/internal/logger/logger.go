@@ -33,7 +33,6 @@ func init() {
 	}
 }
 
-// SetLevel raises the minimum level that will be printed.
 func SetLevel(l Level) { minLevel.Store(int32(l)) }
 
 func Log(level Level, format string, args ...any) {

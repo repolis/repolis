@@ -1,15 +1,13 @@
-// Command analyze runs the deterministic extraction pipeline against a local
-// checkout and prints a diagnostic report. No LLM, no server, no network —
-// this is the fast loop for working on extraction quality.
 package main
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
-	"sort"
+	"slices"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -17,9 +15,10 @@ import (
 	"github.com/repolis/repolis/backend/internal/git"
 	"github.com/repolis/repolis/backend/internal/llm"
 	"github.com/repolis/repolis/backend/internal/logger"
+	"github.com/repolis/repolis/backend/internal/models"
 )
 
-func runRefine(path string, raw *analyzer.RawExtraction, history map[string]*git.FileHistory) {
+func runRefine(raw *analyzer.RawExtraction, history map[string]*git.FileHistory) {
 	_ = godotenv.Load()
 	logger.SetLevel(logger.InfoLevel)
 
@@ -43,7 +42,7 @@ func runRefine(path string, raw *analyzer.RawExtraction, history map[string]*git
 	tLabel := time.Since(t)
 
 	fmt.Printf("\n== LLM refinement ==\n")
-	fmt.Printf("calls       %d (%d cached)\n", client.Calls(), client.CacheHits())
+	fmt.Printf("calls       %d (%d cached, %d rate-limit retries)\n", client.Calls(), client.CacheHits(), client.Retries())
 	fmt.Printf("timing      adjudicate %6.0fms (%d applied) | label %6.0fms\n",
 		ms(tAssoc), applied, ms(tLabel))
 	fmt.Println("districts:")
@@ -163,27 +162,14 @@ func main() {
 	}
 
 	fmt.Println("\ntop buildings by methods:")
-	top := append([]struct {
-		n string
-		m int
-		f int
-		k string
-	}{}, nil...)
-	for _, b := range draft.Buildings {
-		top = append(top, struct {
-			n string
-			m int
-			f int
-			k string
-		}{b.Name, b.NumMethods, b.NumFields, b.Kind})
-	}
-	sort.Slice(top, func(i, j int) bool { return top[i].m > top[j].m })
-	for i := 0; i < len(top) && i < 10; i++ {
-		fmt.Printf("  %-32s %s  methods=%-4d fields=%d\n", trunc(top[i].n, 32), top[i].k, top[i].m, top[i].f)
+	top := slices.Clone(draft.Buildings)
+	slices.SortStableFunc(top, func(a, b models.Building) int { return cmp.Compare(b.NumMethods, a.NumMethods) })
+	for _, b := range top[:min(len(top), 10)] {
+		fmt.Printf("  %-32s %s  methods=%-4d fields=%d\n", trunc(b.Name, 32), b.Kind, b.NumMethods, b.NumFields)
 	}
 
 	if *useLLM {
-		runRefine(path, raw, history)
+		runRefine(raw, history)
 	}
 
 	if *out != "" {

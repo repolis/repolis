@@ -1,6 +1,9 @@
 package analyzer
 
 import (
+	"cmp"
+	"math"
+	"slices"
 	"sort"
 	"strings"
 
@@ -15,7 +18,6 @@ const (
 	lpIterations    = 12
 )
 
-// Cluster is a district before it has been named.
 type Cluster struct {
 	Buildings []string // building IDs
 	TopDirs   []string
@@ -23,28 +25,17 @@ type Cluster struct {
 	// Codebase-wide symbol prefix ("git_"), stripped before the model sees
 	// the symbols: with it, every libgit2 district was named "Git Something".
 	SymbolPrefix string
-	// Noise holds the words every district here shares.
-	Noise []string
-	// Language names the code being described, for the prompt.
-	Language string
+	Noise        []string
+	Language     string
 }
 
-// DistinctDirs returns the directory segments that separate this cluster from
-// the rest, dropping path components every cluster shares.
 func (c Cluster) DistinctDirs(common []string) []string {
 	out := make([]string, 0, len(c.TopDirs))
 	for _, d := range c.TopDirs {
 		parts := strings.Split(d, "/")
 		kept := parts[:0]
 		for _, p := range parts {
-			shared := false
-			for _, cm := range common {
-				if p == cm {
-					shared = true
-					break
-				}
-			}
-			if !shared {
+			if !slices.Contains(common, p) {
 				kept = append(kept, p)
 			}
 		}
@@ -57,7 +48,6 @@ func (c Cluster) DistinctDirs(common []string) []string {
 	return out
 }
 
-// SplitIdentifier breaks an identifier into lower-case words.
 func SplitIdentifier(name string) []string {
 	var words []string
 	var cur []rune
@@ -86,10 +76,9 @@ func SplitIdentifier(name string) []string {
 	return words
 }
 
-// CommonSymbolTokens finds words appearing in most clusters' symbols, which
-// therefore identify none of them. Measured per cluster, not as a global
-// prefix: libgit2's test suite dilutes "git_" below any global threshold, yet
-// "git" is still in every district and swamped every name the model produced.
+// Measured per cluster, not as a global prefix: libgit2's test suite dilutes
+// "git_" below any global threshold, yet "git" is in every district and swamped
+// every name the model produced.
 func CommonSymbolTokens(clusters []Cluster) []string {
 	if len(clusters) < 3 {
 		return nil
@@ -107,10 +96,7 @@ func CommonSymbolTokens(clusters []Cluster) []string {
 			}
 		}
 	}
-	threshold := (len(clusters) * 3) / 5
-	if threshold < 2 {
-		threshold = 2
-	}
+	threshold := max(len(clusters)*3/5, 2)
 	var out []string
 	for w, n := range counts {
 		if n >= threshold {
@@ -121,8 +107,6 @@ func CommonSymbolTokens(clusters []Cluster) []string {
 	return out
 }
 
-// CommonDirSegments finds path components present in most clusters, which
-// therefore say nothing about any individual one.
 func CommonDirSegments(clusters []Cluster) []string {
 	counts := map[string]int{}
 	for _, c := range clusters {
@@ -160,11 +144,8 @@ type clEdge struct {
 	w  float64
 }
 
-// ClusterBuildings partitions buildings into districts by weighted label
-// propagation over the call graph plus directory affinity. Deterministic on
-// purpose: community detection is a graph problem with a correct answer, and
-// asking a 4B model to emit the partition collapsed sqlite into one
-// 221-building district.
+// Deterministic on purpose: asking a 4B model to emit the partition collapsed
+// sqlite into one 221-building district.
 func ClusterBuildings(buildings []models.Building, edges []models.DependencyEdge) []Cluster {
 	if len(buildings) == 0 {
 		return nil
@@ -222,7 +203,6 @@ func ClusterBuildings(buildings []models.Building, edges []models.DependencyEdge
 		}
 	}
 
-	// Initial labels: one per directory.
 	dirLabel := make(map[string]int, len(dirKeys))
 	for i, d := range dirKeys {
 		dirLabel[d] = i
@@ -257,11 +237,7 @@ func ClusterBuildings(buildings []models.Building, edges []models.DependencyEdge
 			}
 			bestLabel, bestScore := labels[i], -1.0
 			for l, s := range score {
-				sz := sizes[l]
-				if sz < 1 {
-					sz = 1
-				}
-				weighted := s / sqrtInt(sz)
+				weighted := s / math.Sqrt(float64(max(sizes[l], 1)))
 				if weighted > bestScore || (weighted == bestScore && l < bestLabel) {
 					bestLabel, bestScore = l, weighted
 				}
@@ -279,23 +255,11 @@ func ClusterBuildings(buildings []models.Building, edges []models.DependencyEdge
 	}
 
 	groups := regroup(nodes, labels)
-	groups = mergeSmall(groups, nodes, index, adj)
+	groups = mergeSmall(groups, nodes, adj)
 	groups = splitLarge(groups, nodes)
-	groups = capCount(groups, nodes, index, adj)
+	groups = capCount(groups, nodes, adj)
 
-	return finalize(groups, nodes, buildings, index)
-}
-
-func sqrtInt(n int) float64 {
-	f := float64(n)
-	if f <= 1 {
-		return 1
-	}
-	x := f
-	for i := 0; i < 12; i++ {
-		x = 0.5 * (x + f/x)
-	}
-	return x
+	return finalize(groups, nodes, buildings)
 }
 
 func regroup(nodes []clNode, labels []int) [][]int {
@@ -317,7 +281,6 @@ func regroup(nodes []clNode, labels []int) [][]int {
 	return out
 }
 
-// strongestNeighbour returns the index of the group most connected to g.
 func strongestNeighbour(g []int, groupOf []int, adj [][]clEdge, self int) int {
 	score := make(map[int]float64)
 	for _, n := range g {
@@ -350,7 +313,7 @@ func groupIndex(groups [][]int, total int) []int {
 	return groupOf
 }
 
-func mergeSmall(groups [][]int, nodes []clNode, _ map[string]int, adj [][]clEdge) [][]int {
+func mergeSmall(groups [][]int, nodes []clNode, adj [][]clEdge) [][]int {
 	for {
 		groupOf := groupIndex(groups, len(nodes))
 		victim := -1
@@ -412,10 +375,7 @@ func splitLarge(groups [][]int, nodes []clNode) [][]int {
 					current = nil
 					room = maxDistrictSize
 				}
-				take := len(part)
-				if take > room {
-					take = room
-				}
+				take := min(len(part), room)
 				current = append(current, part[:take]...)
 				part = part[take:]
 			}
@@ -427,7 +387,7 @@ func splitLarge(groups [][]int, nodes []clNode) [][]int {
 	return out
 }
 
-func capCount(groups [][]int, nodes []clNode, _ map[string]int, adj [][]clEdge) [][]int {
+func capCount(groups [][]int, nodes []clNode, adj [][]clEdge) [][]int {
 	groups = compact(groups)
 	for len(groups) > maxDistricts {
 		groupOf := groupIndex(groups, len(nodes))
@@ -470,7 +430,7 @@ func compact(groups [][]int) [][]int {
 	return out
 }
 
-func finalize(groups [][]int, nodes []clNode, buildings []models.Building, index map[string]int) []Cluster {
+func finalize(groups [][]int, nodes []clNode, buildings []models.Building) []Cluster {
 	out := make([]Cluster, 0, len(groups))
 	for _, g := range groups {
 		c := Cluster{}
@@ -484,14 +444,11 @@ func finalize(groups [][]int, nodes []clNode, buildings []models.Building, index
 			id := nodes[n].id
 			c.Buildings = append(c.Buildings, id)
 			dirCount[nodes[n].dir]++
-			b := buildings[index[id]]
+			b := buildings[n]
 			names = append(names, nb{b.Name, b.NumMethods*3 + b.NumFields})
 		}
-		sort.Slice(names, func(i, j int) bool {
-			if names[i].w != names[j].w {
-				return names[i].w > names[j].w
-			}
-			return names[i].name < names[j].name
+		slices.SortFunc(names, func(a, b nb) int {
+			return cmp.Or(cmp.Compare(b.w, a.w), strings.Compare(a.name, b.name))
 		})
 		for i := 0; i < len(names) && i < 12; i++ {
 			c.TopNames = append(c.TopNames, names[i].name)
@@ -505,11 +462,8 @@ func finalize(groups [][]int, nodes []clNode, buildings []models.Building, index
 		for d, n := range dirCount {
 			dirs = append(dirs, dc{d, n})
 		}
-		sort.Slice(dirs, func(i, j int) bool {
-			if dirs[i].n != dirs[j].n {
-				return dirs[i].n > dirs[j].n
-			}
-			return dirs[i].d < dirs[j].d
+		slices.SortFunc(dirs, func(a, b dc) int {
+			return cmp.Or(cmp.Compare(b.n, a.n), strings.Compare(a.d, b.d))
 		})
 		for i := 0; i < len(dirs) && i < 3; i++ {
 			c.TopDirs = append(c.TopDirs, dirs[i].d)
@@ -517,11 +471,8 @@ func finalize(groups [][]int, nodes []clNode, buildings []models.Building, index
 		out = append(out, c)
 	}
 
-	sort.Slice(out, func(i, j int) bool {
-		if len(out[i].Buildings) != len(out[j].Buildings) {
-			return len(out[i].Buildings) > len(out[j].Buildings)
-		}
-		return out[i].Buildings[0] < out[j].Buildings[0]
+	slices.SortFunc(out, func(a, b Cluster) int {
+		return cmp.Or(cmp.Compare(len(b.Buildings), len(a.Buildings)), strings.Compare(a.Buildings[0], b.Buildings[0]))
 	})
 	return out
 }

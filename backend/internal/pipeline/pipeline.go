@@ -1,20 +1,9 @@
-// Package pipeline turns a checkout into a CityMap.
-//
-// It runs in two publishable passes:
-//
-//	Pass 1 (deterministic, seconds): AST extraction, rule-based association,
-//	        call graph, git history, graph clustering, fallback district names.
-//	        This city is complete and navigable on its own.
-//	Pass 2 (LLM, tens of seconds): adjudicate the ambiguous associations and
-//	        name the districts, then re-assemble.
-//
-// Publishing pass 1 immediately decouples "the city is usable" from "the model
-// has finished", and degrades an LLM outage to directory-named districts.
 package pipeline
 
 import (
 	"context"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/repolis/repolis/backend/internal/analyzer"
@@ -24,7 +13,6 @@ import (
 	"github.com/repolis/repolis/backend/internal/models"
 )
 
-// Stage reports progress to the SSE channel.
 type Stage struct {
 	Name  string `json:"name"`
 	Done  int    `json:"done"`
@@ -33,16 +21,14 @@ type Stage struct {
 
 type Reporter func(Stage)
 
-// State carries everything the two passes share.
 type State struct {
-	Raw       *analyzer.RawExtraction
-	History   map[string]*git.FileHistory
-	Symbols   *analyzer.SymbolTable
-	ClonePath string
+	Raw     *analyzer.RawExtraction
+	History map[string]*git.FileHistory
+	Symbols *analyzer.SymbolTable
 }
 
-// Extract runs the deterministic half and returns both the reusable state and
-// a fully renderable city.
+// Publishing this pass at once decouples "usable" from "the model has
+// finished", and degrades an LLM outage to directory-named districts.
 func Extract(clonePath string, report Reporter) (*State, *models.CityMap, error) {
 	t0 := time.Now()
 	report(Stage{Name: "parsing"})
@@ -64,11 +50,10 @@ func Extract(clonePath string, report Reporter) (*State, *models.CityMap, error)
 	draft := analyzer.BuildDraft(raw, history, st)
 	draft.Stats.ExtractMillis = time.Since(t0).Milliseconds()
 
-	city := compose(draft, fallbackLabels(draft.Clusters), false)
-	return &State{Raw: raw, History: history, Symbols: st, ClonePath: clonePath}, city, nil
+	city := compose(draft, llm.FallbackLabels(draft.Clusters), false)
+	return &State{Raw: raw, History: history, Symbols: st}, city, nil
 }
 
-// Refine runs the LLM half and returns the improved city.
 func Refine(ctx context.Context, s *State, client *llm.Client, report Reporter) *models.CityMap {
 	t0 := time.Now()
 
@@ -93,41 +78,6 @@ func Refine(ctx context.Context, s *State, client *llm.Client, report Reporter) 
 	return city
 }
 
-func fallbackLabels(clusters []analyzer.Cluster) []llm.Label {
-	out := make([]llm.Label, len(clusters))
-	for i, c := range clusters {
-		out[i] = llm.Label{
-			Name:     c.FallbackName(),
-			Typology: c.FallbackTypology(),
-			Summary:  c.FallbackSummary(),
-			Tags:     []string{},
-		}
-	}
-	// Fallback names come from directory basenames and can collide.
-	seen := map[string]int{}
-	for i := range out {
-		if n := seen[out[i].Name]; n > 0 {
-			seen[out[i].Name] = n + 1
-			out[i].Name += " " + itoa(n+1)
-		} else {
-			seen[out[i].Name] = 1
-		}
-	}
-	return out
-}
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var b []byte
-	for n > 0 {
-		b = append([]byte{byte('0' + n%10)}, b...)
-		n /= 10
-	}
-	return string(b)
-}
-
 func compose(d *analyzer.Draft, labels []llm.Label, refined bool) *models.CityMap {
 	byID := make(map[string]models.Building, len(d.Buildings))
 	for _, b := range d.Buildings {
@@ -138,13 +88,7 @@ func compose(d *analyzer.Draft, labels []llm.Label, refined bool) *models.CityMa
 	assigned := make(map[string]bool, len(d.Buildings))
 
 	for i, cl := range d.Clusters {
-		l := llm.Label{Name: cl.FallbackName(), Typology: cl.FallbackTypology(), Summary: cl.FallbackSummary()}
-		if i < len(labels) {
-			l = labels[i]
-		}
-		if l.Tags == nil {
-			l.Tags = []string{}
-		}
+		l := labels[i]
 
 		bs := make([]models.Building, 0, len(cl.Buildings))
 		for _, id := range cl.Buildings {
@@ -159,7 +103,7 @@ func compose(d *analyzer.Draft, labels []llm.Label, refined bool) *models.CityMa
 		sort.Slice(bs, func(a, b int) bool { return bs[a].ID < bs[b].ID })
 
 		districts = append(districts, models.District{
-			ID:        "d" + itoa(i),
+			ID:        "d" + strconv.Itoa(i),
 			Name:      l.Name,
 			Typology:  l.Typology,
 			Summary:   l.Summary,

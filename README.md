@@ -46,15 +46,7 @@ go run ./cmd/analyze -llm /path/to/a/checkout
 # Tests
 cd backend && go test ./...
 cd engine  && cargo test --release
-
-# Verify the layout invariants against a real generated city
-cd engine && cargo run --release --example layout_check -- \
-  ../backend/data/cities/<hash>.json
 ```
-
-`layout_check` asserts that no two buildings overlap, that every building is
-inside its own district, that nothing was dropped, and that height carries
-signal. It is the headless substitute for looking at the city.
 
 ## Adding a language
 
@@ -97,13 +89,10 @@ claims its extension, and they share one call graph.
 | Footprint | number of fields |
 | Hue | district purpose (core, data, network, security, …) |
 | Saturation | recency — old code fades toward grey |
-| Glowing orange roof cap | commit churn; brighter cap = more commits |
-| Dark plinth underneath | a file module rather than a type |
 | District ground area | amount of code in that district |
-| Distance between districts | how tightly they are coupled |
 
 Drag to orbit, scroll to zoom, WASD to pan, click to select, Esc to clear,
-`F` for fly mode, `R` to reset. The legend in the bottom right repeats all of
+`R` to reset. The legend in the bottom right repeats all of
 this, along with how much of the analysis was deterministic.
 
 ## Regenerating a city

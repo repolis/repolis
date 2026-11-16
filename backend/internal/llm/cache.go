@@ -5,8 +5,8 @@ import (
 	"sync"
 )
 
-// Cache persists every LLM decision, keyed by the hash of its exact inputs, so
-// a re-analysis, a later commit or a shared vendored library costs nothing.
+// Keyed by the hash of the exact inputs, so a re-analysis, a later commit or a
+// shared vendored library costs nothing.
 type Cache struct {
 	db *sql.DB
 	mu sync.RWMutex
@@ -41,20 +41,6 @@ func (c *Cache) Get(key string) (string, bool) {
 	c.mem[key] = out
 	c.mu.Unlock()
 	return out, true
-}
-
-// Invalidate drops a stored answer, so a bypassed regeneration replaces it
-// even if the fresh call fails.
-func (c *Cache) Invalidate(key string) {
-	if c == nil {
-		return
-	}
-	c.mu.Lock()
-	delete(c.mem, key)
-	c.mu.Unlock()
-	if c.db != nil {
-		_, _ = c.db.Exec(`DELETE FROM llm_cache WHERE key = ?`, key)
-	}
 }
 
 func (c *Cache) Put(key, value string) {

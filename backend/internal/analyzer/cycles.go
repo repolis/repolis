@@ -1,7 +1,10 @@
 package analyzer
 
 import (
+	"cmp"
+	"slices"
 	"sort"
+	"strings"
 
 	"github.com/repolis/repolis/backend/internal/models"
 )
@@ -10,10 +13,6 @@ import (
 // up to this size a cycle is verifiable by hand against the source.
 const maxReliableCycle = 12
 
-// FindCycles labels every strongly connected component of more than one
-// building (Tarjan). A dependency cycle is the clearest thing a city shows
-// that a file tree cannot, and the edge set already has everything needed.
-//
 // Iterative on purpose: recursion depth would be bounded by the graph's
 // longest path, and a blown stack here takes the whole request down.
 func FindCycles(buildings []models.Building, edges []models.DependencyEdge) []models.Cycle {
@@ -85,7 +84,6 @@ func FindCycles(buildings []models.Building, edges []models.DependencyEdge) []mo
 				continue
 			}
 
-			// v is finished: close its component if it is a root.
 			if low[v] == disc[v] {
 				var comp []int
 				for {
@@ -113,16 +111,8 @@ func FindCycles(buildings []models.Building, edges []models.DependencyEdge) []mo
 		}
 	}
 
-	// Largest first: those are worth looking at.
-	sort.Slice(components, func(i, j int) bool {
-		if len(components[i]) != len(components[j]) {
-			return len(components[i]) > len(components[j])
-		}
-		return components[i][0] < components[j][0]
-	})
-
 	out := make([]models.Cycle, 0, len(components))
-	for i, comp := range components {
+	for _, comp := range components {
 		members := make([]string, 0, len(comp))
 		namespaces := map[string]bool{}
 		for _, n := range comp {
@@ -130,7 +120,6 @@ func FindCycles(buildings []models.Building, edges []models.DependencyEdge) []mo
 			namespaces[buildings[n].Namespace] = true
 		}
 		out = append(out, models.Cycle{
-			ID:         i + 1,
 			Size:       len(comp),
 			Members:    members,
 			Namespaces: len(namespaces),
@@ -138,17 +127,16 @@ func FindCycles(buildings []models.Building, edges []models.DependencyEdge) []mo
 		})
 	}
 
-	// Reliable cross-module cycles are the actionable findings; then by size.
-	sort.SliceStable(out, func(i, j int) bool {
-		ai := out[i].Reliable && out[i].CrossModule()
-		aj := out[j].Reliable && out[j].CrossModule()
-		if ai != aj {
-			return ai
-		}
-		if out[i].CrossModule() != out[j].CrossModule() {
-			return out[i].CrossModule()
-		}
-		return out[i].Size > out[j].Size
+	// Reliable cross-module cycles are the actionable findings, then the
+	// largest; the first member breaks ties so the order is stable.
+	actionable := func(c models.Cycle) bool { return c.Reliable && c.CrossModule() }
+	slices.SortFunc(out, func(a, b models.Cycle) int {
+		return cmp.Or(
+			boolDesc(actionable(a), actionable(b)),
+			boolDesc(a.CrossModule(), b.CrossModule()),
+			cmp.Compare(b.Size, a.Size),
+			strings.Compare(a.Members[0], b.Members[0]),
+		)
 	})
 	for i := range out {
 		out[i].ID = i + 1
@@ -156,7 +144,6 @@ func FindCycles(buildings []models.Building, edges []models.DependencyEdge) []mo
 	return out
 }
 
-// MarkCycles tags each member building and every edge running between two
 // members. An edge leaving the component is not part of the cycle.
 func MarkCycles(buildings []models.Building, edges []models.DependencyEdge, cycles []models.Cycle) {
 	// Only findings are drawn: a 68-building tangle would bury the
@@ -177,4 +164,15 @@ func MarkCycles(buildings []models.Building, edges []models.DependencyEdge, cycl
 		src := of[edges[i].Source]
 		edges[i].InCycle = src != 0 && src == of[edges[i].Target]
 	}
+}
+
+// boolDesc orders true before false.
+func boolDesc(a, b bool) int {
+	switch {
+	case a == b:
+		return 0
+	case a:
+		return -1
+	}
+	return 1
 }

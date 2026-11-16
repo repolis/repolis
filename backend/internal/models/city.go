@@ -1,7 +1,6 @@
 package models
 
-// Building is one node of the city: a concrete type, or a "module" standing
-// in for the free functions of a file.
+// A concrete type, or a "module" standing in for a file's free functions.
 type Building struct {
 	// "<source_file>::<name>". Edges reference buildings by ID, never by Name:
 	// C allows two file-scoped structs to share a name.
@@ -47,8 +46,7 @@ type Building struct {
 	AssocSource string `json:"assoc_source"`
 }
 
-// District is a cluster of the call graph, named by the LLM. Not a directory,
-// though directories weight the clustering.
+// Not a directory, though directories weight the clustering.
 type District struct {
 	ID        string     `json:"id"`
 	Name      string     `json:"name"`
@@ -58,7 +56,7 @@ type District struct {
 	Buildings []Building `json:"buildings"`
 }
 
-// DependencyEdge is a call-site-accurate edge. Kind is "call" or "type".
+// Kind is "call" or "type".
 type DependencyEdge struct {
 	Source string `json:"source"` // building ID
 	Target string `json:"target"` // building ID
@@ -68,8 +66,7 @@ type DependencyEdge struct {
 	InCycle bool `json:"in_cycle"`
 }
 
-// Cycle is a strongly connected component of the call graph with more than one
-// member.
+// A strongly connected component with more than one member.
 type Cycle struct {
 	ID      int      `json:"id"`
 	Size    int      `json:"size"`
@@ -84,8 +81,6 @@ type Cycle struct {
 
 func (c Cycle) CrossModule() bool { return c.Namespaces > 1 }
 
-// CityStats is surfaced in the UI so the analysis is auditable: what was
-// skipped, what was inferred, how much the LLM was used.
 type CityStats struct {
 	TotalBuildings  int            `json:"total_buildings"`
 	TotalTypes      int            `json:"total_types"`
@@ -110,7 +105,6 @@ type CityStats struct {
 	Cycles          []Cycle        `json:"cycles"`
 }
 
-// CityMap is the payload consumed by the Rust/Wasm renderer.
 type CityMap struct {
 	Districts    []District       `json:"districts"`
 	Dependencies []DependencyEdge `json:"dependencies"`

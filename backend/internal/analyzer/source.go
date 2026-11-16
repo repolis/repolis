@@ -9,9 +9,7 @@ import (
 	sitter "github.com/smacker/go-tree-sitter"
 )
 
-// ExtractSymbolSource returns the source of the named symbols, for /api/explain
-// only - nothing in the main pipeline sends source to a model. It works off the
-// byte spans each language reports, so it knows nothing about any grammar.
+// For /api/explain only: nothing in the main pipeline sends source to a model.
 func ExtractSymbolSource(fullPath string, symbolNames []string) string {
 	l := lang.ForFile(fullPath)
 	if l == nil {
@@ -63,8 +61,6 @@ func ExtractSymbolSource(fullPath string, symbolNames []string) string {
 	return strings.TrimSpace(res)
 }
 
-// condense keeps a definition readable without spending the prompt budget on
-// one long body.
 func condense(s string) string {
 	const max = 1200
 	if len(s) <= max {

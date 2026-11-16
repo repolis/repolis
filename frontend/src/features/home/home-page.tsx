@@ -1,56 +1,41 @@
+import { useActionState } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { useForm } from "react-hook-form";
 
-interface RepoForm {
-  repoUrl: string;
-}
+const GITHUB_REPO = /^https?:\/\/(www\.)?github\.com\/([^/]+)\/([^/]+)/;
+
 export default function HomePage() {
   const navigate = useNavigate();
-  const {
-    register,
-    handleSubmit,
-    formState: { errors },
-  } = useForm<RepoForm>();
 
-  const onSubmit = (data: RepoForm) => {
-    const cleanPath = data.repoUrl.replace(
-      /^https?:\/\/(www\.)?github\.com\//,
-      "",
-    );
-    const parts = cleanPath.split("/");
-    if (parts.length >= 2) {
+  // Returns the value too, since a form action resets its inputs.
+  const [state, submit] = useActionState(
+    (_: unknown, form: FormData) => {
+      const repoUrl = String(form.get("repoUrl") ?? "").trim();
+      const match = GITHUB_REPO.exec(repoUrl);
+      if (!match) return { error: "Must be a valid GitHub URL", repoUrl };
       navigate({
         to: "/city/$owner/$repo",
-        params: {
-          owner: parts[0],
-          repo: parts[1],
-        },
+        params: { owner: match[2], repo: match[3] },
       });
-    }
-  };
+      return { error: null, repoUrl };
+    },
+    { error: null as string | null, repoUrl: "" },
+  );
 
   return (
     <div className="bg-[#202020] text-white">
       <div className="flex h-screen w-full items-center justify-center">
-        <form
-          onSubmit={handleSubmit(onSubmit)}
-          className="mx-auto flex w-150 flex-col gap-2 p-2"
-        >
+        <form action={submit} className="mx-auto flex w-150 flex-col gap-2 p-2">
           <h1 className="mb-5 text-center text-4xl font-medium">
             Analyze your repo
           </h1>
 
           <div className="flex gap-2">
             <input
+              name="repoUrl"
               type="url"
+              required
+              defaultValue={state.repoUrl}
               placeholder="https://github.com/username/repo"
-              {...register("repoUrl", {
-                required: "A repository URL is required",
-                pattern: {
-                  value: /^https?:\/\/(www\.)?github\.com\/.+\/.+/,
-                  message: "Must be a valid GitHub URL",
-                },
-              })}
               className="flex-1 rounded-md border-2 border-gray-200 px-4 py-2 text-white transition-colors outline-none focus:border-blue-500"
             />
             <button
@@ -61,9 +46,9 @@ export default function HomePage() {
             </button>
           </div>
 
-          {errors.repoUrl && (
+          {state.error && (
             <span className="text-sm font-medium text-red-500">
-              {errors.repoUrl.message}
+              {state.error}
             </span>
           )}
         </form>

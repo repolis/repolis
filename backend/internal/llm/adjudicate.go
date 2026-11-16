@@ -20,14 +20,13 @@ Reply with exactly one name copied from the list, or NONE.
 Pick the type the function reads or modifies most: usually the one it is named after, or the type of its first pointer parameter.
 Reply with the name only. No punctuation, no explanation.`
 
-// AdjudicateAssociations settles what the rules could not - typically where
-// the naming and first-parameter conventions disagree, as in sqlite's
-// `vdbeCommit(sqlite3 *db, Vdbe *p)`. The rules handle 485 of nothing's 496
-// functions alone.
-//
 // Every answer must both appear in the candidate list and survive the AST
 // verifier; an unverifiable one becomes an orphan, not a wrong height.
 func (c *Client) AdjudicateAssociations(ctx context.Context, st *analyzer.SymbolTable, progress func(done, total int)) int {
+	if !c.adjudicate {
+		logger.Log(logger.InfoLevel, "LLM adjudication disabled (LLM_ADJUDICATE=false); association rules decide alone")
+		return 0
+	}
 	residual := st.Residual()
 	if len(residual) == 0 {
 		return 0
@@ -80,25 +79,9 @@ func (c *Client) AdjudicateAssociations(ctx context.Context, st *analyzer.Symbol
 		"Adjudicating %d ambiguous associations (%d settled confidently by rule, %d kept at rule default over budget)",
 		len(questions), len(st.Assocs)-len(questions)-skipped, skipped)
 
-	var done int
-	answers := runBatch(ctx, c.concurrency, len(questions), func(i int) string {
+	answers := runBatch(ctx, c.concurrency, len(questions), progress, func(i int) string {
 		q := questions[i]
-		user := fmt.Sprintf("Function: %s%s\nChoices: %s, NONE\nAnswer:",
-			q.assoc.Fn.Name, truncate(q.assoc.Fn.Signature, 100),
-			strings.Join(q.options, ", "))
-
-		out, err := c.complete(ctx, request{
-			kind:      "assoc.v3",
-			model:     c.fastModel,
-			system:    fmt.Sprintf(adjudicateSystemFmt, st.Language()),
-			user:      user,
-			maxTokens: 8,
-			stop:      []string{"\n"},
-		})
-		if progress != nil {
-			done++
-			progress(done, len(questions))
-		}
+		out, err := c.complete(ctx, c.adjudicateRequest(st.Language(), q.assoc.Fn.Name, q.assoc.Fn.Signature, q.options))
 		if err != nil {
 			logger.Log(logger.DebugLevel, "Adjudication failed for %s: %v", q.assoc.Fn.Name, err)
 			return ""
@@ -115,26 +98,40 @@ func (c *Client) AdjudicateAssociations(ctx context.Context, st *analyzer.Symbol
 		case ans == "":
 			// No answer at all: keep the rule's tentative choice.
 		case ans == "NONE":
-			st.ClearTentative(questions[i].assoc)
+			questions[i].assoc.Detach()
 			detached++
 		default:
-			id, known := questions[i].nameToID[ans]
-			if !known {
-				rejected++
-				continue
-			}
-			if st.ApplyLLM(questions[i].assoc, id) {
+			// An unknown name is a rejection like any other.
+			switch st.ApplyLLM(questions[i].assoc, questions[i].nameToID[ans]) {
+			case analyzer.LLMApplied:
 				changed++
-			} else {
+			case analyzer.LLMUnchanged:
 				confirmed++
+			case analyzer.LLMRejected:
+				rejected++
 			}
 		}
 	}
 
 	logger.Log(logger.InfoLevel,
-		"Adjudication: %d reassigned, %d confirmed, %d detached, %d rejected by verifier",
+		"Adjudication: %d reassigned, %d confirmed, %d detached, %d rejected",
 		changed, confirmed, detached, rejected)
 	return changed
+}
+
+func (c *Client) adjudicateRequest(language, fn, signature string, options []string) request {
+	return request{
+		kind:   "assoc.v3",
+		model:  c.fastModel,
+		system: fmt.Sprintf(adjudicateSystemFmt, language),
+		user: fmt.Sprintf("Function: %s%s\nChoices: %s, NONE\nAnswer:",
+			fn, truncate(signature, 100), strings.Join(options, ", ")),
+		// The "\n" stop ends a good answer after 2-6 tokens. The headroom is
+		// for long identifiers and for providers that bill hidden reasoning
+		// against the cap: at 8, gemini-3.5-flash-lite returned "git_diff_".
+		maxTokens: 16,
+		stop:      []string{"\n"},
+	}
 }
 
 func cleanAnswer(s string) string {

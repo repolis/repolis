@@ -19,8 +19,6 @@ func (rustLang) Separator() string         { return "::" }
 func (rustLang) SyntacticMethods() bool    { return true }
 func (rustLang) ModuleScoped() bool        { return true }
 
-// Namespace maps a file to its module path.
-//
 //	src/lib.rs, src/main.rs      -> crate
 //	src/layout.rs                -> crate::layout
 //	src/layout/mod.rs            -> crate::layout
@@ -46,7 +44,6 @@ func (rustLang) Namespace(relPath string) string {
 	var mod []string
 	switch {
 	case root >= 0:
-		// The segment just before the source root names the crate.
 		if root > 0 {
 			crate = parts[root-1]
 		}
@@ -77,23 +74,18 @@ func (rustLang) Namespace(relPath string) string {
 	return crate + "::" + strings.Join(mod, "::")
 }
 
-// ImportTargets expands a `use`. The last segment is often a type rather than
-// a module, so the parent path is offered too and the resolver picks.
 func (rustLang) ImportTargets(imp Import, from string) []string {
 	p := imp.Path
 	if p == "" {
 		return nil
 	}
 
-	// Relative forms are resolved against the importing module.
 	switch {
 	case strings.HasPrefix(p, "self::"):
 		p = from + "::" + strings.TrimPrefix(p, "self::")
 	case strings.HasPrefix(p, "super::"):
-		parent := from
-		if i := strings.LastIndex(parent, "::"); i != -1 {
-			parent = parent[:i]
-		} else {
+		parent, _, ok := splitLast(from)
+		if !ok {
 			parent = "crate"
 		}
 		p = parent + "::" + strings.TrimPrefix(p, "super::")
@@ -102,70 +94,44 @@ func (rustLang) ImportTargets(imp Import, from string) []string {
 	case !strings.HasPrefix(p, "crate::") && p != "crate":
 		// A 2015-style bare `use foo::bar`, or an external crate: offer the
 		// crate-relative reading too, since an external one matches nothing.
-		out := []string{p}
-		if parent := trimLast(p); parent != "" {
-			out = append(out, parent)
-		}
+		out := withParent(nil, p)
 		// A workspace sibling is written as its package name, by convention
 		// <project>_<crate>, while its namespace is just <crate>.
-		if head, rest := splitHead(p); strings.Contains(head, "_") {
-			if i := strings.Index(head, "_"); i > 0 && i+1 < len(head) {
-				short := head[i+1:]
-				out = append(out, short)
-				if rest != "" {
-					out = append(out, short+"::"+rest)
-				}
+		head, rest, _ := strings.Cut(p, "::")
+		if project, short, ok := strings.Cut(head, "_"); ok && project != "" && short != "" {
+			out = append(out, short)
+			if rest != "" {
+				out = append(out, short+"::"+rest)
 			}
 		}
-		out = append(out, "crate::"+p)
-		if parent := trimLast("crate::" + p); parent != "" {
-			out = append(out, parent)
-		}
-		return out
+		return withParent(out, "crate::"+p)
 	}
 
-	out := []string{p}
-	if parent := trimLast(p); parent != "" {
+	return withParent(nil, p)
+}
+
+// The last segment of a `use` is often a type rather than a module, so the
+// parent is offered too.
+func withParent(out []string, p string) []string {
+	out = append(out, p)
+	if parent, _, _ := splitLast(p); parent != "" {
 		out = append(out, parent)
 	}
 	return out
 }
 
-func lastRustSegment(p string) string {
-	if i := strings.LastIndex(p, "::"); i != -1 {
-		return p[i+2:]
-	}
-	return p
-}
-
-func splitHead(p string) (string, string) {
-	if i := strings.Index(p, "::"); i > 0 {
-		return p[:i], p[i+2:]
-	}
-	return p, ""
-}
-
-func trimLast(p string) string {
-	if i := strings.LastIndex(p, "::"); i > 0 {
-		return p[:i]
-	}
-	return ""
-}
-
 func (rustLang) Parse(root *sitter.Node, src []byte) FileFacts {
 	var out FileFacts
 
-	// The enclosing impl names the receiver: what C guesses at with three
-	// rules and an LLM is a field lookup here.
 	var scan func(n *sitter.Node, receiver string)
 	scan = func(n *sitter.Node, receiver string) {
-		Children(n, func(_ int, ch *sitter.Node) {
+		for ch := range Children(n) {
 			switch ch.Type() {
 			case "use_declaration":
 				if a := ch.ChildByFieldName("argument"); a != nil {
 					rustUse(a, src, "", &out.Imports)
 				}
-				return
+				continue
 
 			case "struct_item", "enum_item", "union_item", "trait_item":
 				if t := rustTypeDef(ch, src); t != nil {
@@ -177,7 +143,7 @@ func (rustLang) Parse(root *sitter.Node, src []byte) FileFacts {
 						scan(body, Text(ch.ChildByFieldName("name"), src))
 					}
 				}
-				return
+				continue
 
 			case "impl_item":
 				// `impl Trait for Type` attributes to the concrete type.
@@ -186,13 +152,13 @@ func (rustLang) Parse(root *sitter.Node, src []byte) FileFacts {
 				if body := ch.ChildByFieldName("body"); body != nil {
 					scan(body, recv)
 				}
-				return
+				continue
 
 			case "function_item", "function_signature_item":
 				if f := rustFunc(ch, src, receiver); f != nil {
 					out.Funcs = append(out.Funcs, *f)
 				}
-				return
+				continue
 
 			case "mod_item":
 				// Inline `mod x { ... }`: its contents live in this file, so
@@ -200,20 +166,19 @@ func (rustLang) Parse(root *sitter.Node, src []byte) FileFacts {
 				if body := ch.ChildByFieldName("body"); body != nil {
 					scan(body, receiver)
 				}
-				return
+				continue
 
 			case "static_item", "const_item":
 				out.ScopeVar++
-				return
+				continue
 			}
 			scan(ch, receiver)
-		})
+		}
 	}
 	scan(root, "")
 	return out
 }
 
-// rustUse flattens one use-tree into flat imports.
 func rustUse(n *sitter.Node, src []byte, prefix string, out *[]Import) {
 	join := func(a, b string) string {
 		if a == "" {
@@ -227,7 +192,8 @@ func rustUse(n *sitter.Node, src []byte, prefix string, out *[]Import) {
 		full := join(prefix, Text(n, src))
 		// `use a::b::c` brings `c` into scope; the implicit alias is what
 		// lets a later bare `c()` find it.
-		*out = append(*out, Import{Path: full, Alias: lastRustSegment(full)})
+		_, last, _ := splitLast(full)
+		*out = append(*out, Import{Path: full, Alias: last})
 
 	case "use_as_clause":
 		p := Text(n.ChildByFieldName("path"), src)
@@ -236,29 +202,29 @@ func rustUse(n *sitter.Node, src []byte, prefix string, out *[]Import) {
 
 	case "use_wildcard":
 		p := ""
-		Children(n, func(_ int, ch *sitter.Node) {
+		for ch := range Children(n) {
 			if ch.Type() != "*" {
-				p = Text(ch, src)
+				p = Text(ch, src) // the last non-* child is the path
 			}
-		})
+		}
 		*out = append(*out, Import{Path: join(prefix, p), Wildcard: true})
 
 	case "scoped_use_list":
 		p := join(prefix, Text(n.ChildByFieldName("path"), src))
 		if list := n.ChildByFieldName("list"); list != nil {
-			Children(list, func(_ int, ch *sitter.Node) {
-				if ch.IsNamed() {
-					rustUse(ch, src, p, out)
-				}
-			})
+			rustUseList(list, src, p, out)
 		}
 
 	case "use_list":
-		Children(n, func(_ int, ch *sitter.Node) {
-			if ch.IsNamed() {
-				rustUse(ch, src, prefix, out)
-			}
-		})
+		rustUseList(n, src, prefix, out)
+	}
+}
+
+func rustUseList(list *sitter.Node, src []byte, prefix string, out *[]Import) {
+	for ch := range Children(list) {
+		if ch.IsNamed() {
+			rustUse(ch, src, prefix, out)
+		}
 	}
 }
 
@@ -275,7 +241,7 @@ func rustTypeDef(n *sitter.Node, src []byte) *TypeDef {
 
 	fields := make([]string, 0, body.ChildCount())
 	types := make([]string, 0, body.ChildCount())
-	Children(body, func(_ int, ch *sitter.Node) {
+	for ch := range Children(body) {
 		switch ch.Type() {
 		case "field_declaration":
 			if id := ch.ChildByFieldName("name"); id != nil {
@@ -294,12 +260,9 @@ func rustTypeDef(n *sitter.Node, src []byte) *TypeDef {
 				fields = append(fields, Text(id, src))
 			}
 		}
-	})
-
-	return &TypeDef{
-		Name: name, Fields: fields, FieldTypes: types, LOC: Lines(n),
-		Start: n.StartByte(), End: n.EndByte(),
 	}
+
+	return newType(n, name, fields, types)
 }
 
 func rustFunc(n *sitter.Node, src []byte, receiver string) *FuncDef {
@@ -308,34 +271,17 @@ func rustFunc(n *sitter.Node, src []byte, receiver string) *FuncDef {
 		return nil
 	}
 
-	var paramTypes []string
-	signature := ""
-	if params := n.ChildByFieldName("parameters"); params != nil {
-		signature = Collapse(Text(params, src))
-		Children(params, func(_ int, p *sitter.Node) {
-			switch p.Type() {
-			case "parameter":
-				paramTypes = append(paramTypes, rustTypeName(p.ChildByFieldName("type"), src))
-			case "self_parameter":
-				paramTypes = append(paramTypes, receiver)
-			}
-		})
-	}
-
-	fn := &FuncDef{
-		Name:       name,
-		Receiver:   receiver,
-		Signature:  signature,
-		ReturnType: rustTypeName(n.ChildByFieldName("return_type"), src),
-		ParamTypes: paramTypes,
-		LOC:        Lines(n),
-		Start:      n.StartByte(),
-		End:        n.EndByte(),
-	}
-	if body := n.ChildByFieldName("body"); body != nil {
-		rustBodyRefs(body, src, fn)
-		fn.Complexity = 1 + CountBranches(body, src, rustBranchNodes, "binary_expression")
-	}
+	fn := newFunc(n, n.ChildByFieldName("parameters"), src, name, receiver, func(p *sitter.Node) (string, bool) {
+		switch p.Type() {
+		case "parameter":
+			return rustTypeName(p.ChildByFieldName("type"), src), true
+		case "self_parameter":
+			return receiver, true
+		}
+		return "", false
+	})
+	fn.ReturnType = rustTypeName(n.ChildByFieldName("return_type"), src)
+	fn.scanBody(n.ChildByFieldName("body"), src, rustBranchNodes, rustBodyRefs)
 	return fn
 }
 
@@ -382,8 +328,7 @@ func rustBodyRefs(n *sitter.Node, src []byte, fn *FuncDef) {
 	})
 }
 
-// rustTypeName reduces a type node to a bare user-defined name, "" for
-// primitives. `&mut Vec<Rect>` yields "Vec".
+// "" for primitives; `&mut Vec<Rect>` yields "Vec".
 func rustTypeName(t *sitter.Node, src []byte) string {
 	if t == nil {
 		return ""
@@ -400,18 +345,19 @@ func rustTypeName(t *sitter.Node, src []byte) string {
 	case "scoped_type_identifier":
 		return Text(t.ChildByFieldName("name"), src)
 	case "tuple_type":
-		var first string
-		Children(t, func(_ int, ch *sitter.Node) {
-			if first == "" && ch.IsNamed() {
-				first = rustTypeName(ch, src)
+		for ch := range Children(t) {
+			if !ch.IsNamed() {
+				continue
 			}
-		})
-		return first
+			if name := rustTypeName(ch, src); name != "" {
+				return name
+			}
+		}
+		return ""
 	}
 	return rustBareType(Text(t, src))
 }
 
-// rustBareType strips generics, references and paths from written type text.
 func rustBareType(s string) string {
 	s = strings.TrimSpace(s)
 	s = strings.TrimPrefix(s, "&")

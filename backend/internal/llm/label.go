@@ -9,13 +9,11 @@ import (
 	"github.com/repolis/repolis/backend/internal/logger"
 )
 
-// Label is the naming the LLM contributes for one district.
 type Label struct {
 	Name     string
 	Typology string
 	Summary  string
 	Tags     []string
-	FromLLM  bool
 }
 
 // The prompt says nothing about cities: told it was naming neighbourhoods,
@@ -44,20 +42,11 @@ const (
 	exampleDesc = "reads and writes packed object storage"
 )
 
-// LabelClusters names each district in one small, independent call: ~150
-// tokens, inside a small model's effective context, cached and retried on its
-// own, and a failure costs one name rather than the city's. Membership was
-// already decided deterministically, so the model cannot damage the structure.
+// One small call per district: ~150 tokens, inside a small model's effective
+// context, cached and retried alone, so a failure costs one name rather than
+// the city's.
 func (c *Client) LabelClusters(ctx context.Context, clusters []analyzer.Cluster, progress func(done, total int)) []Label {
-	labels := make([]Label, len(clusters))
-	for i, cl := range clusters {
-		labels[i] = Label{
-			Name:     cl.FallbackName(),
-			Typology: cl.FallbackTypology(),
-			Summary:  cl.FallbackSummary(),
-			Tags:     fallbackTags(cl),
-		}
-	}
+	labels := fallbacks(clusters)
 	if len(clusters) == 0 {
 		return labels
 	}
@@ -71,39 +60,15 @@ func (c *Client) LabelClusters(ctx context.Context, clusters []analyzer.Cluster,
 	// Strip what every cluster shares: seeing "git_repository, git_index..."
 	// in all sixteen prompts, the model named all sixteen "Git <something>".
 	common := analyzer.CommonDirSegments(clusters)
-	// The project's own name, and anything else true of the whole codebase.
 	noise := append([]string(nil), clusters[0].Noise...)
 	if p := strings.Trim(clusters[0].SymbolPrefix, "_0123456789"); p != "" {
 		noise = append(noise, strings.ToLower(p))
 	}
 
-	var done int
-	out := runBatch(ctx, c.concurrency, len(clusters), func(i int) *Label {
+	out := runBatch(ctx, c.concurrency, len(clusters), progress, func(i int) *Label {
 		cl := clusters[i]
-
-		var b strings.Builder
-		fmt.Fprintf(&b, "Symbols: %s\n", strings.Join(stripNoise(cl.TopNames, noise), ", "))
-		if dirs := cl.DistinctDirs(common); len(dirs) > 0 {
-			fmt.Fprintf(&b, "Folders: %s\n", strings.Join(dirs, ", "))
-		}
-		fmt.Fprintf(&b, "Size: %d entities\n", len(cl.Buildings))
-		if len(noise) > 0 {
-			fmt.Fprintf(&b, "Banned words (true of every group here): %s\n",
-				strings.Join(noise, ", "))
-		}
-
-		resp, err := c.complete(ctx, request{
-			kind:      "label.v3",
-			model:     c.fastModel,
-			system:    fmt.Sprintf(labelSystemFmt, language),
-			user:      b.String(),
-			maxTokens: 48,
-			stop:      []string{"\n\n"},
-		})
-		if progress != nil {
-			done++
-			progress(done, len(clusters))
-		}
+		req := c.labelRequest(language, stripNoise(cl.TopNames, noise), cl.DistinctDirs(common), len(cl.Buildings), noise)
+		resp, err := c.complete(ctx, req)
 		if err != nil {
 			logger.Log(logger.WarnLevel, "District %d labelling failed, keeping fallback name: %v", i+1, err)
 			return nil
@@ -142,11 +107,35 @@ func (c *Client) LabelClusters(ctx context.Context, clusters []analyzer.Cluster,
 				}
 			}
 		}
-		labels[i].FromLLM = true
 	}
+	uniqueNames(labels, clusters)
 
-	// Names are how a user identifies a place; duplicates make them useless.
-	seen := make(map[string]int)
+	logger.Log(logger.InfoLevel, "Districts named: %d by model, %d by fallback", named, len(clusters)-named)
+	return labels
+}
+
+func FallbackLabels(clusters []analyzer.Cluster) []Label {
+	labels := fallbacks(clusters)
+	uniqueNames(labels, clusters)
+	return labels
+}
+
+func fallbacks(clusters []analyzer.Cluster) []Label {
+	labels := make([]Label, len(clusters))
+	for i, cl := range clusters {
+		labels[i] = Label{
+			Name:     cl.FallbackName(),
+			Typology: cl.FallbackTypology(),
+			Summary:  cl.FallbackSummary(),
+			Tags:     fallbackTags(cl),
+		}
+	}
+	return labels
+}
+
+func uniqueNames(labels []Label, clusters []analyzer.Cluster) {
+	common := analyzer.CommonDirSegments(clusters)
+	seen := make(map[string]bool)
 	for i := range labels {
 		base := labels[i].Name
 		candidates := []string{base}
@@ -161,29 +150,42 @@ func (c *Client) LabelClusters(ctx context.Context, clusters []analyzer.Cluster,
 			candidates = append(candidates, fmt.Sprintf("%s %d", base, n))
 		}
 		for _, cand := range candidates {
-			key := strings.ToLower(cand)
-			if seen[key] == 0 {
+			if key := strings.ToLower(cand); !seen[key] {
 				labels[i].Name = cand
-				seen[key] = 1
+				seen[key] = true
 				break
 			}
 		}
 	}
-
-	logger.Log(logger.InfoLevel, "Districts named: %d by model, %d by fallback", named, len(clusters)-named)
-	return labels
 }
 
-// Labels that describe every cluster equally and so identify none. A rejected
-// name falls back to the dominant directory, which at least locates it.
+func (c *Client) labelRequest(language string, symbols, dirs []string, size int, noise []string) request {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Symbols: %s\n", strings.Join(symbols, ", "))
+	if len(dirs) > 0 {
+		fmt.Fprintf(&b, "Folders: %s\n", strings.Join(dirs, ", "))
+	}
+	fmt.Fprintf(&b, "Size: %d entities\n", size)
+	if len(noise) > 0 {
+		fmt.Fprintf(&b, "Banned words (true of every group here): %s\n",
+			strings.Join(noise, ", "))
+	}
+	return request{
+		kind:      "label.v3",
+		model:     c.fastModel,
+		system:    fmt.Sprintf(labelSystemFmt, language),
+		user:      b.String(),
+		maxTokens: 64,
+		stop:      []string{"\n\n"},
+	}
+}
+
 var vagueNames = map[string]bool{
 	"library": true, "subsystem": true, "system": true, "module": true,
 	"core": true, "utilities": true, "utility": true, "misc": true,
 	"components": true, "code": true, "implementation": true,
 }
 
-// isVague: once the project's own token is removed, does anything
-// distinguishing remain?
 func isVague(name string, noise []string) bool {
 	banned := make(map[string]bool, len(noise))
 	for _, w := range noise {
@@ -200,8 +202,8 @@ func isVague(name string, noise []string) bool {
 	return kept == 0
 }
 
-// stripProjectToken removes the project's own name: every libgit2 district is
-// "Git something", and the word crowds out the two that carry information.
+// Every libgit2 district is "Git something", and the word crowds out the two
+// that carry information.
 func stripProjectToken(name string, noise []string) string {
 	if len(noise) == 0 {
 		return name
@@ -238,13 +240,12 @@ func parseLabel(s string) *Label {
 			l.Summary = cleanLabel(line[5:], 90)
 		}
 	}
-	if l.Name == "" && l.Typology == "" && l.Summary == "" {
+	if l.Name == "" && l.Summary == "" {
 		return nil
 	}
 	return l
 }
 
-// stripNoise drops codebase-wide words from the symbols shown to the model.
 func stripNoise(names, noise []string) []string {
 	if len(noise) == 0 {
 		return names

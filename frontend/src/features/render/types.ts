@@ -10,15 +10,13 @@ export interface BuildingInfo {
   num_fields: number;
   num_methods: number;
   lines_of_code: number;
-  /** Worst cyclomatic complexity among this building's functions. */
   max_complexity: number;
   sum_complexity: number;
-  /** How many other buildings depend on this one, and it on them. */
   fan_in: number;
   fan_out: number;
   /** Martin's instability: 0 depended upon, 1 depends on others. */
   instability: number;
-  /** In the top few percent by fan-in for this repository. */
+  /** Top few percent by fan-in for this repository. */
   hub: boolean;
   commit_churn: number;
   churn_rank: number;
@@ -27,9 +25,9 @@ export interface BuildingInfo {
   born_day: number;
   primary_author: string;
   summary: string;
-  /** How this building's functions were attributed: rule | llm | none. */
+  /** rule | llm | none */
   assoc_source: string;
-  /** Dependency cycle this building belongs to, or 0. */
+  /** 0 when not in a cycle. */
   cycle_id: number;
   fields: string[];
   methods: string[];
@@ -90,7 +88,6 @@ export interface PathInfo {
   from_name: string;
   to_id: string;
   to_name: string;
-  /** Building names in order. Empty when no path exists. */
   hops: string[];
 }
 
@@ -104,25 +101,3 @@ export type SelectPayload =
   | { type: "Building"; data: BuildingInfo }
   | { type: "District"; data: DistrictInfo }
   | { type: "None" };
-
-/** Matches the Rust `typology_rgb` table so the legend cannot drift from the scene. */
-export const TYPOLOGY_COLORS: Record<string, string> = {
-  core: "rgb(117,140,184)",
-  data: "rgb(77,158,107)",
-  network: "rgb(71,133,199)",
-  security: "rgb(199,89,84)",
-  interface: "rgb(217,168,77)",
-  utility: "rgb(173,158,128)",
-  config: "rgb(133,138,158)",
-  test: "rgb(148,102,189)",
-  example: "rgb(97,173,184)",
-  unknown: "rgb(158,158,163)",
-};
-
-/** Matches the Rust `language_rgb` table so the legend cannot drift from the scene. */
-export const LANGUAGE_COLORS: Record<string, string> = {
-  C: "rgb(97,140,199)",
-  Rust: "rgb(204,120,71)",
-  Go: "rgb(89,184,194)",
-  unknown: "rgb(158,158,163)",
-};

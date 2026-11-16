@@ -8,7 +8,6 @@ RUN go mod download
 COPY ./backend .
 RUN CGO_ENABLED=1 GOOS=linux go build -o main ./cmd/api
 
-# runtime
 FROM alpine:latest
 RUN apk add --no-cache git openssh-client
 

@@ -1,10 +1,8 @@
-// Package jobs runs analyses in the background and streams progress, so a
-// client disconnect cannot abort minutes of work and two tabs on one
-// repository share a single run.
 package jobs
 
 import (
 	"encoding/json"
+	"fmt"
 	"sync"
 	"time"
 
@@ -48,7 +46,6 @@ func newJob(id, repoURL, commit string) *Job {
 	}
 }
 
-// Emit records an event and fans it out to every subscriber.
 func (j *Job) Emit(e Event) {
 	j.mu.Lock()
 	// Only the latest city of each kind is worth replaying; stages are
@@ -85,8 +82,7 @@ func (j *Job) Emit(e Event) {
 
 func (j *Job) Stage(s pipeline.Stage) { j.Emit(Event{Type: EventStage, Stage: &s}) }
 
-// Subscribe pre-loads the events so far, so a late client still gets the
-// draft city.
+// Pre-loads the events so far, so a late client still gets the draft city.
 func (j *Job) Subscribe() (<-chan Event, func()) {
 	ch := make(chan Event, 32)
 	j.mu.Lock()
@@ -108,9 +104,7 @@ func (j *Job) Subscribe() (<-chan Event, func()) {
 
 	return ch, func() {
 		j.mu.Lock()
-		if _, ok := j.subs[ch]; ok {
-			delete(j.subs, ch)
-		}
+		delete(j.subs, ch)
 		j.mu.Unlock()
 	}
 }
@@ -139,8 +133,7 @@ func NewManager() *Manager {
 	return m
 }
 
-// GetOrStart returns the existing job for key or starts one, reporting whether
-// this call created it.
+// The bool reports whether this call created the job.
 func (m *Manager) GetOrStart(key, id, repoURL, commit string, run func(*Job)) (*Job, bool) {
 	m.mu.Lock()
 	if j, ok := m.byKey[key]; ok && !j.Done() {
@@ -188,16 +181,11 @@ func (m *Manager) reap() {
 	}
 }
 
-// MarshalSSE renders one SSE frame. Compact JSON, since a newline in the
-// payload breaks the framing.
+// Compact JSON, since a newline in the payload breaks SSE framing.
 func MarshalSSE(e Event) ([]byte, error) {
 	b, err := json.Marshal(e)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]byte, 0, len(b)+16)
-	out = append(out, "data: "...)
-	out = append(out, b...)
-	out = append(out, '\n', '\n')
-	return out, nil
+	return fmt.Appendf(nil, "data: %s\n\n", b), nil
 }

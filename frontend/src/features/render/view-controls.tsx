@@ -1,16 +1,7 @@
 import { useState } from "react";
 
+import { COLOR_MODES } from "./appearance";
 import type { CitySummary } from "./types";
-
-export const COLOR_MODES = [
-  { id: "typology", label: "Purpose" },
-  { id: "complexity", label: "Complexity" },
-  { id: "age", label: "Recency" },
-  { id: "churn", label: "Churn" },
-  { id: "fanin", label: "Depended on" },
-  { id: "instability", label: "Instability" },
-  { id: "language", label: "Language" },
-] as const;
 
 export interface FilterState {
   text: string;
@@ -39,20 +30,11 @@ export const EMPTY_FILTER: FilterState = {
 };
 
 function activeCount(f: FilterState): number {
-  let n = 0;
-  if (f.language) n++;
-  if (f.district) n++;
-  if (f.kind) n++;
-  if (f.min_methods > 0) n++;
-  if (f.min_complexity > 0) n++;
-  if (f.min_churn_pct > 0) n++;
-  if (f.only_no_callers) n++;
-  if (f.only_hubs) n++;
-  if (f.only_cycles) n++;
-  return n;
+  return (Object.keys(EMPTY_FILTER) as (keyof FilterState)[]).filter(
+    (k) => k !== "text" && f[k] !== EMPTY_FILTER[k],
+  ).length;
 }
 
-/** A toggle chip. Clicking sets the value, clicking again clears it. */
 function Chip({
   on,
   label,
@@ -80,14 +62,18 @@ export function ViewControls({
   summary,
   mode,
   filter,
+  links,
   onMode,
   onFilter,
+  onLinks,
 }: {
   summary: CitySummary | null;
   mode: string;
   filter: FilterState;
+  links: boolean;
   onMode: (m: string) => void;
   onFilter: (f: FilterState) => void;
+  onLinks: (on: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
   if (!summary) return null;
@@ -128,6 +114,7 @@ export function ViewControls({
             &times;
           </button>
         )}
+        <Chip on={links} label="Links" onClick={() => onLinks(!links)} />
       </div>
 
       {open && (

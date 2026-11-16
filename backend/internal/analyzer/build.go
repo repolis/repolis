@@ -3,6 +3,7 @@ package analyzer
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -11,9 +12,8 @@ import (
 	"github.com/repolis/repolis/backend/internal/models"
 )
 
-// Draft is the fully deterministic city: everything derivable from the AST,
-// the call graph and git history, with no LLM at all. It is renderable on its
-// own, which is what lets the API stream a usable city in seconds.
+// Renderable on its own with no LLM, which is what lets the API stream a usable
+// city in seconds.
 type Draft struct {
 	Buildings []models.Building
 	Edges     []models.DependencyEdge
@@ -24,19 +24,15 @@ type Draft struct {
 
 	firstCommit time.Time
 	lastCommit  time.Time
-
-	byID map[string]int
 }
 
-// BuildDraft assembles the deterministic city. The symbol table is passed in
-// so the pipeline can assemble twice from it: once with rule-only
-// associations, again after the LLM has settled the ambiguous ones.
+// The symbol table is passed in so the pipeline can build twice: with rule-only
+// associations, then after the LLM has settled the ambiguous ones.
 func BuildDraft(raw *RawExtraction, history map[string]*git.FileHistory, st *SymbolTable) *Draft {
 	if st == nil {
 		st = BuildSymbolTable(raw)
 	}
 
-	// Owner of every function: its associated type, else its file's module.
 	ownerOf := make(map[string]string, len(raw.Functions))
 	for _, a := range st.Assocs {
 		if a.Chosen != "" {
@@ -46,7 +42,7 @@ func BuildDraft(raw *RawExtraction, history map[string]*git.FileHistory, st *Sym
 		}
 	}
 
-	d := &Draft{Symbols: st, byID: make(map[string]int)}
+	d := &Draft{Symbols: st}
 	d.assemble(raw, st, ownerOf)
 	d.Edges = BuildDependencies(raw, st, ownerOf)
 	d.attachHistory(history)
@@ -108,7 +104,6 @@ func (d *Draft) assemble(raw *RawExtraction, st *SymbolTable, ownerOf map[string
 		fileNS[f.Path] = f.Namespace
 	}
 
-	// One building per concrete type definition.
 	for _, t := range st.Types {
 		methods := methodsOf[t.ID]
 		sort.Strings(methods)
@@ -116,7 +111,7 @@ func (d *Draft) assemble(raw *RawExtraction, st *SymbolTable, ownerOf map[string
 		if src == "" {
 			src = "none"
 		}
-		d.add(models.Building{
+		d.Buildings = append(d.Buildings, models.Building{
 			ID: t.ID, Name: t.Name, Kind: "type",
 			SourceFile: t.SourceFile, Dir: t.Dir, Namespace: t.Namespace,
 			NumFields: len(t.Fields), NumMethods: len(methods),
@@ -145,7 +140,7 @@ func (d *Draft) assemble(raw *RawExtraction, st *SymbolTable, ownerOf map[string
 	for _, f := range files {
 		fns := moduleFuncs[f]
 		sort.Strings(fns)
-		d.add(models.Building{
+		d.Buildings = append(d.Buildings, models.Building{
 			ID: moduleID(f), Name: filepath.Base(f), Kind: "module",
 			SourceFile: f, Dir: dirOf(f), Namespace: fileNS[f],
 			NumFields: fileVars[f], NumMethods: len(fns),
@@ -156,15 +151,7 @@ func (d *Draft) assemble(raw *RawExtraction, st *SymbolTable, ownerOf map[string
 		})
 	}
 
-	sort.Slice(d.Buildings, func(i, j int) bool { return d.Buildings[i].ID < d.Buildings[j].ID })
-	d.byID = make(map[string]int, len(d.Buildings))
-	for i := range d.Buildings {
-		d.byID[d.Buildings[i].ID] = i
-	}
-}
-
-func (d *Draft) add(b models.Building) {
-	d.Buildings = append(d.Buildings, b)
+	slices.SortFunc(d.Buildings, func(a, b models.Building) int { return strings.Compare(a.ID, b.ID) })
 }
 
 func nonNil(s []string) []string {
@@ -174,8 +161,8 @@ func nonNil(s []string) []string {
 	return s
 }
 
-// attachHistory copies git metrics onto each building, turning raw churn into
-// a percentile so the renderer gets a bounded signal whatever the repo's pace.
+// Churn becomes a percentile so the renderer gets a bounded signal whatever the
+// repo's pace.
 func (d *Draft) attachHistory(history map[string]*git.FileHistory) {
 	now := time.Now()
 	churns := make([]int, 0, len(d.Buildings))
@@ -212,11 +199,7 @@ func (d *Draft) attachHistory(history map[string]*git.FileHistory) {
 		}
 		if !h.LastModified.IsZero() {
 			b.LastModified = h.LastModified.Format(time.RFC3339)
-			days := int(now.Sub(h.LastModified).Hours() / 24)
-			if days < 0 {
-				days = 0
-			}
-			b.AgeDays = days
+			b.AgeDays = max(0, int(now.Sub(h.LastModified).Hours()/24))
 		}
 		churns = append(churns, h.Churn)
 	}
@@ -277,10 +260,8 @@ func (d *Draft) computeStats(raw *RawExtraction, st *SymbolTable) {
 	d.Stats = s
 }
 
-// computeCoupling derives fan-in, fan-out and instability from the finished
-// edge set. Deliberately absent: a "dead code" flag - zero fan-in usually
-// means a library's public API, not dead code, and that judgement is the
-// user's to make from the numbers.
+// Deliberately no "dead code" flag: zero fan-in usually means a library's
+// public API, and that judgement is the user's.
 func (d *Draft) computeCoupling() {
 	in := make(map[string]int, len(d.Buildings))
 	out := make(map[string]int, len(d.Buildings))
@@ -303,21 +284,18 @@ func (d *Draft) computeCoupling() {
 	// Relative to this repo: "heavily depended upon" differs wildly between
 	// a library and an application.
 	sort.Ints(fanIns)
-	cutoff := 0
+	cutoff := 3
 	if n := len(fanIns); n > 0 {
-		cutoff = fanIns[(n*95)/100]
-	}
-	if cutoff < 3 {
-		cutoff = 3
+		cutoff = max(3, fanIns[n*95/100])
 	}
 	for i := range d.Buildings {
 		d.Buildings[i].Hub = d.Buildings[i].FanIn >= cutoff
 	}
 }
 
-// FallbackName derives a district name with no LLM. It has to be good: it is
-// the name before the model answers, without a model, and after a vague model
-// answer. The dominant directory locates the code, the largest symbol names it.
+// This name shows before the model answers, without a model, and after a vague
+// answer, so it has to be good. The dominant directory locates the code, the
+// largest symbol names it.
 func (c Cluster) FallbackName() string {
 	banned := make(map[string]bool, len(c.Noise))
 	for _, w := range c.Noise {
@@ -367,7 +345,6 @@ func (c Cluster) FallbackName() string {
 	}
 }
 
-// titleize turns snake_case or a bare path segment into display words.
 func titleize(s string) string {
 	s = strings.ReplaceAll(strings.ReplaceAll(s, "_", " "), "-", " ")
 	parts := strings.Fields(s)
@@ -384,7 +361,6 @@ func titleize(s string) string {
 	return strings.Join(parts, " ")
 }
 
-// FallbackTypology guesses a typology from directory and symbol names.
 func (c Cluster) FallbackTypology() string {
 	joined := ""
 	for _, d := range c.TopDirs {
@@ -404,12 +380,4 @@ func (c Cluster) FallbackSummary() string {
 		return fmt.Sprintf("%d entities, mostly in %s", len(c.Buildings), c.TopDirs[0])
 	}
 	return fmt.Sprintf("%d related code entities", len(c.Buildings))
-}
-
-// BuildingByID gives the pipeline and /api/explain a lookup.
-func (d *Draft) BuildingByID(id string) (models.Building, bool) {
-	if i, ok := d.byID[id]; ok {
-		return d.Buildings[i], true
-	}
-	return models.Building{}, false
 }
