@@ -24,6 +24,7 @@ pub(crate) fn spawn_city(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
+    facades: &mut Assets<FacadeMaterial>,
     index: &mut CityIndex,
     result: LayoutResult,
 ) {
@@ -105,14 +106,15 @@ pub(crate) fn spawn_city(
     }
 
     // Neutral until the frontend's first appearance arrives, a frame later.
-    let neutral = material_set(materials, &mut index.materials, [0.62, 0.62, 0.64]).normal;
+    let neutral = material_set(facades, &mut index.materials, [0.62, 0.62, 0.64]).normal;
+    let building = meshes.add(building_mesh());
     for b in &result.buildings {
         let base = Vec3::new(b.center.x, BUILDING_BASE, b.center.y);
         let half = Vec3::new(b.size.x, 0.0, b.size.z) * 0.5;
         let (min, max) = (base - half, base + half + Vec3::Y * b.size.y);
         commands.spawn((
-            PbrBundle {
-                mesh: cube.clone(),
+            MaterialMeshBundle {
+                mesh: building.clone(),
                 material: neutral.clone(),
                 transform: box_transform((min, max)),
                 ..default()

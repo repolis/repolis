@@ -18,6 +18,7 @@ mod treemap;
 
 pub use api::queue_city_for_test;
 pub use data::CityMap;
+pub use render::FacadeMaterial;
 
 use api::{consume_commands, publish_camera, publish_labels, take_pending_city};
 use appearance::{apply_appearance, Appearance, ShowLinks};
@@ -25,7 +26,7 @@ use camera::{camera_controls, CityCamera};
 use events::*;
 use layout::Link;
 use picking::{picking_system, Hovered};
-use render::BuildingMaterials;
+use render::{BuildingMaterials, FACADE_SHADER};
 use spawn::spawn_city;
 
 pub const SKY_COLOR: Color = Color::srgb(0.62, 0.71, 0.80);
@@ -51,7 +52,7 @@ struct CityIndex {
     links: Vec<Link>,
     labels: Vec<Vec3>,
     materials: HashMap<u32, BuildingMaterials>,
-    faded: Option<Handle<StandardMaterial>>,
+    faded: Option<Handle<FacadeMaterial>>,
     radius: f32,
 }
 
@@ -109,6 +110,8 @@ pub fn run_bevy_app() {
                 ..default()
             }),
     );
+    bevy::asset::load_internal_asset!(app, FACADE_SHADER, "shaders/facade.wgsl", Shader::from_wgsl);
+    app.add_plugins(MaterialPlugin::<FacadeMaterial>::default());
     add_city_systems(&mut app);
     app.run();
 }
@@ -174,6 +177,7 @@ fn process_city_data(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut facades: ResMut<Assets<FacadeMaterial>>,
     mut index: ResMut<CityIndex>,
     mut hovered: ResMut<Hovered>,
     mut look: ResMut<Appearance>,
@@ -202,6 +206,7 @@ fn process_city_data(
         &mut commands,
         &mut meshes,
         &mut materials,
+        &mut facades,
         &mut index,
         result,
     );

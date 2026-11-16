@@ -34,7 +34,7 @@ fn rgb_key(rgb: [f32; 3]) -> u32 {
 }
 
 pub(crate) fn material_set(
-    materials: &mut Assets<StandardMaterial>,
+    materials: &mut Assets<FacadeMaterial>,
     cache: &mut HashMap<u32, BuildingMaterials>,
     rgb: [f32; 3],
 ) -> BuildingMaterials {
@@ -51,11 +51,13 @@ fn rgb_at(v: &[f32], i: usize) -> Option<[f32; 3]> {
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn apply_appearance(
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut facades: ResMut<Assets<FacadeMaterial>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut index: ResMut<CityIndex>,
     look: Res<Appearance>,
     show: Res<ShowLinks>,
-    mut pickables: Query<(&Pickable, &mut Handle<StandardMaterial>)>,
+    mut buildings: Query<(&Pickable, &mut Handle<FacadeMaterial>)>,
+    grounds: Query<(&Pickable, &Handle<StandardMaterial>)>,
     highlight_q: Query<&Handle<Mesh>, With<HighlightLinkLayer>>,
     mut link_layers: Query<&mut Visibility, With<LinkLayer>>,
 ) {
@@ -78,36 +80,35 @@ pub(crate) fn apply_appearance(
     let faded = index
         .faded
         .get_or_insert_with(|| {
-            materials.add(StandardMaterial {
+            facades.add(facade(StandardMaterial {
                 base_color: Color::srgba(0.42, 0.43, 0.46, 0.16),
                 alpha_mode: AlphaMode::Blend,
                 perceptual_roughness: 1.0,
                 ..default()
-            })
+            }))
         })
         .clone();
 
-    for (p, mut handle) in &mut pickables {
-        match p.target {
-            Target::Building(i) => {
-                let Some(rgb) = rgb_at(&look.colors, i) else {
-                    continue;
-                };
-                let set = material_set(&mut materials, &mut index.materials, rgb);
-                *handle = match look.states.get(i).copied() {
-                    Some(DIM) => set.dim,
-                    Some(BRIGHT) => set.bright,
-                    Some(FADED) => faded.clone(),
-                    _ => set.normal,
-                };
-            }
-            // Each ground owns its material, so the colour is set in place.
-            Target::District(i) => {
-                if let (Some(rgb), Some(m)) =
-                    (rgb_at(&look.grounds, i), materials.get_mut(&*handle))
-                {
-                    m.base_color = Color::srgb(rgb[0], rgb[1], rgb[2]);
-                }
+    for (p, mut handle) in &mut buildings {
+        let Target::Building(i) = p.target else {
+            continue;
+        };
+        let Some(rgb) = rgb_at(&look.colors, i) else {
+            continue;
+        };
+        let set = material_set(&mut facades, &mut index.materials, rgb);
+        *handle = match look.states.get(i).copied() {
+            Some(DIM) => set.dim,
+            Some(BRIGHT) => set.bright,
+            Some(FADED) => faded.clone(),
+            _ => set.normal,
+        };
+    }
+    // Each ground owns its material, so the colour is set in place.
+    for (p, handle) in &grounds {
+        if let Target::District(i) = p.target {
+            if let (Some(rgb), Some(m)) = (rgb_at(&look.grounds, i), materials.get_mut(handle)) {
+                m.base_color = Color::srgb(rgb[0], rgb[1], rgb[2]);
             }
         }
     }

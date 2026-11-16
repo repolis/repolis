@@ -19,6 +19,7 @@ fn headless_app() -> App {
     ));
     // Registered by PbrPlugin in the real app, which needs a GPU.
     app.init_asset::<StandardMaterial>();
+    app.init_asset::<engine::FacadeMaterial>();
     engine::add_city_systems(&mut app);
     // Single-threaded like the wasm build: the city is handed over through a
     // thread_local, which a worker thread would never see.

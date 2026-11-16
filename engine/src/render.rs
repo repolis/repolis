@@ -1,32 +1,97 @@
+use bevy::pbr::{ExtendedMaterial, MaterialExtension};
 use bevy::prelude::*;
 use bevy::render::mesh::{Indices, PrimitiveTopology};
 use bevy::render::render_asset::RenderAssetUsages;
+use bevy::render::render_resource::{AsBindGroup, ShaderRef};
 
 use crate::layout::Link;
 
+pub const FACADE_SHADER: Handle<Shader> =
+    Handle::weak_from_u128(0x5e1f_a3ad_e000_4b1d_9c3a_7f02_b11d_0001);
+
+/// Floor height and window column width, in world units.
+const FACADE_GRID: Vec4 = Vec4::new(1.3, 1.5, 0.0, 0.0);
+
+/// Draws floors and windows on walls in the shader, so the whole city stays one cube mesh.
+#[derive(Asset, AsBindGroup, Reflect, Debug, Clone)]
+pub struct Facade {
+    #[uniform(100)]
+    grid: Vec4,
+}
+
+impl MaterialExtension for Facade {
+    fn fragment_shader() -> ShaderRef {
+        FACADE_SHADER.into()
+    }
+}
+
+pub type FacadeMaterial = ExtendedMaterial<StandardMaterial, Facade>;
+
+pub fn facade(base: StandardMaterial) -> FacadeMaterial {
+    ExtendedMaterial {
+        base,
+        extension: Facade { grid: FACADE_GRID },
+    }
+}
+
+/// Unit cube whose walls all run u across and v bottom to top, which the
+/// facade shader relies on; Bevy's cuboid orients each face differently.
+pub fn building_mesh() -> Mesh {
+    let mut positions: Vec<[f32; 3]> = Vec::new();
+    let mut normals: Vec<[f32; 3]> = Vec::new();
+    let mut uvs: Vec<[f32; 2]> = Vec::new();
+    let mut indices: Vec<u32> = Vec::new();
+    let mut face = |normal: Vec3, right: Vec3, up: Vec3| {
+        let base = positions.len() as u32;
+        for (u, v) in [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)] {
+            let p = normal * 0.5 + right * (u - 0.5) + up * (v - 0.5);
+            positions.push(p.to_array());
+            normals.push(normal.to_array());
+            uvs.push([u, v]);
+        }
+        indices.extend([base, base + 1, base + 2, base, base + 2, base + 3]);
+    };
+    face(Vec3::Z, Vec3::X, Vec3::Y);
+    face(Vec3::NEG_Z, Vec3::NEG_X, Vec3::Y);
+    face(Vec3::X, Vec3::NEG_Z, Vec3::Y);
+    face(Vec3::NEG_X, Vec3::Z, Vec3::Y);
+    face(Vec3::Y, Vec3::X, Vec3::NEG_Z);
+    face(Vec3::NEG_Y, Vec3::X, Vec3::Z);
+
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_indices(Indices::U32(indices));
+    mesh
+}
+
 #[derive(Clone)]
 pub struct BuildingMaterials {
-    pub normal: Handle<StandardMaterial>,
-    pub dim: Handle<StandardMaterial>,
-    pub bright: Handle<StandardMaterial>,
+    pub normal: Handle<FacadeMaterial>,
+    pub dim: Handle<FacadeMaterial>,
+    pub bright: Handle<FacadeMaterial>,
 }
 
 pub fn make_building_materials(
-    materials: &mut Assets<StandardMaterial>,
+    materials: &mut Assets<FacadeMaterial>,
     rgb: [f32; 3],
 ) -> BuildingMaterials {
-    let normal = materials.add(StandardMaterial {
+    let normal = materials.add(facade(StandardMaterial {
         base_color: Color::srgb(rgb[0], rgb[1], rgb[2]),
         perceptual_roughness: 0.78,
         metallic: 0.02,
         ..default()
-    });
-    let dim = materials.add(StandardMaterial {
+    }));
+    let dim = materials.add(facade(StandardMaterial {
         base_color: Color::srgb(rgb[0] * 0.30, rgb[1] * 0.30, rgb[2] * 0.32),
         perceptual_roughness: 0.95,
         ..default()
-    });
-    let bright = materials.add(StandardMaterial {
+    }));
+    let bright = materials.add(facade(StandardMaterial {
         base_color: Color::srgb(
             (rgb[0] * 1.35).min(1.0),
             (rgb[1] * 1.35).min(1.0),
@@ -35,7 +100,7 @@ pub fn make_building_materials(
         emissive: LinearRgba::new(0.55, 1.15, 1.7, 1.0),
         perceptual_roughness: 0.3,
         ..default()
-    });
+    }));
     BuildingMaterials {
         normal,
         dim,
