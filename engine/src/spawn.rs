@@ -12,22 +12,6 @@ use crate::view::{self, ColorMode, Scales};
 use crate::{treemap, CityElement, CityIndex, HighlightLinkLayer, LinkLayer};
 use crate::{BUILDING_BASE, DISTRICT_TOP, GROUND_Y, STREET_Y};
 
-/// Replaces characters Bevy's bundled subset font cannot draw. District names
-/// come from a language model, so they carry dashes, quotes and accents.
-fn ascii_only(s: &str) -> String {
-    s.replace('\u{2026}', "...")
-        .chars()
-        .map(|c| match c {
-            '\u{2013}' | '\u{2014}' | '\u{2212}' => '-',
-            '\u{2018}' | '\u{2019}' => '\'',
-            '\u{201c}' | '\u{201d}' => '"',
-            '\u{00b7}' | '\u{2022}' => '-',
-            c if c.is_ascii() => c,
-            _ => '?',
-        })
-        .collect()
-}
-
 pub(crate) fn spawn_city(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
@@ -80,10 +64,9 @@ pub(crate) fn spawn_city(
         ));
     }
 
-    for (i, d) in result.districts.iter().enumerate() {
+    for (i, &g) in result.districts.iter().enumerate() {
         let district = &city.districts[i];
         let rgb = district_ground_rgb(&district.typology);
-        let g = d.ground;
         commands.spawn((
             PbrBundle {
                 mesh: cube.clone(),
@@ -103,27 +86,8 @@ pub(crate) fn spawn_city(
             },
         ));
 
-        // One world-space label per district: without text, a district can
-        // only be identified by hovering it.
         let (x, z) = g.center();
-        commands.spawn((
-            TextBundle::from_section(
-                ascii_only(&format!("{} ({})", district.name, d.building_count)),
-                TextStyle {
-                    font_size: 15.0,
-                    color: Color::srgb(1.0, 0.99, 0.94),
-                    ..default()
-                },
-            )
-            .with_style(Style {
-                position_type: PositionType::Absolute,
-                ..default()
-            }),
-            DistrictLabel {
-                world: Vec3::new(x as f32, BUILDING_BASE + 6.0, z as f32),
-            },
-            CityElement,
-        ));
+        index.labels.push(Vec3::new(x as f32, BUILDING_BASE + 6.0, z as f32));
     }
 
     for pb in &result.buildings {

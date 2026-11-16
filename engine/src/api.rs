@@ -17,6 +17,7 @@ pub fn queue_city_for_test(city: CityMap) {
 
 thread_local! {
     static CAMERA_OUT: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+    static LABELS_OUT: std::cell::RefCell<Vec<f32>> = const { std::cell::RefCell::new(Vec::new()) };
     static PENDING_DATA: std::cell::RefCell<Option<CityMap>> = const { std::cell::RefCell::new(None) };
     // A queue, not a slot: restoring a URL issues several commands in one tick.
     static PENDING_COMMANDS: std::cell::RefCell<Vec<Command>> = const { std::cell::RefCell::new(Vec::new()) };
@@ -103,6 +104,13 @@ pub fn camera_state() -> String {
     CAMERA_OUT.with(|c| c.borrow().clone())
 }
 
+/// Screen position of each district label, as `x, y, alpha` per district in
+/// city order; alpha 0 means hidden. Read by the frontend every frame.
+#[wasm_bindgen]
+pub fn label_positions() -> Vec<f32> {
+    LABELS_OUT.with(|l| l.borrow().clone())
+}
+
 /// Restores a camera previously returned by `camera_state`.
 #[wasm_bindgen]
 pub fn set_camera_state(state: String) {
@@ -162,6 +170,32 @@ pub(crate) fn publish_camera(
         cam.focus.x, cam.focus.z, cam.radius, cam.alpha, cam.beta
     );
     CAMERA_OUT.with(|c| *c.borrow_mut() = text);
+}
+
+pub(crate) fn publish_labels(
+    camera_q: Query<(&Camera, &GlobalTransform), With<CityCamera>>,
+    index: Res<CityIndex>,
+) {
+    let Ok((camera, cam_tf)) = camera_q.get_single() else {
+        return;
+    };
+    let far = index.radius.max(1.0) * 6.0;
+    let out = index
+        .labels
+        .iter()
+        .flat_map(|&world| {
+            let dist = cam_tf.translation().distance(world);
+            match camera.world_to_viewport(cam_tf, world) {
+                // Hidden where labels would overlap into noise, and when
+                // zoomed right into one building.
+                Some(p) if dist > 12.0 && dist < far => {
+                    [p.x, p.y, (1.0 - dist / far).clamp(0.25, 1.0)]
+                }
+                _ => [0.0; 3],
+            }
+        })
+        .collect();
+    LABELS_OUT.with(|l| *l.borrow_mut() = out);
 }
 
 pub(crate) fn consume_commands(

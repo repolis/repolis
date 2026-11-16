@@ -44,11 +44,6 @@ pub struct PickableDistrict {
     pub district_idx: usize,
 }
 
-#[derive(Component)]
-pub struct DistrictLabel {
-    pub world: Vec3,
-}
-
 #[derive(Resource, Default)]
 pub struct SelectionState {
     pub hovered: Option<Entity>,

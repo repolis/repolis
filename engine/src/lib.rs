@@ -24,7 +24,7 @@ mod view;
 pub use api::queue_city_for_test;
 pub use data::CityMap;
 
-use api::{consume_commands, publish_camera, take_pending_city};
+use api::{consume_commands, publish_camera, publish_labels, take_pending_city};
 use appearance::refresh_view;
 use camera::{camera_controls, CityCamera};
 use events::*;
@@ -54,6 +54,8 @@ struct CityIndex {
     city: CityMap,
     by_id: HashMap<String, Entity>,
     links: Vec<Link>,
+    /// Where each district's label sits, in district order.
+    labels: Vec<Vec3>,
     materials: HashMap<u32, BuildingMaterials>,
     faded: Option<Handle<StandardMaterial>>,
     radius: f32,
@@ -110,7 +112,7 @@ pub fn add_city_systems(app: &mut App) {
                 camera_controls,
                 picking_system,
                 refresh_view,
-                update_labels,
+                publish_labels,
                 publish_camera,
             )
                 .chain(),
@@ -183,27 +185,7 @@ fn setup_scene(mut commands: Commands) {
         ..default()
     });
 
-    commands.spawn((
-        TextBundle::from_section(
-            "loading...",
-            TextStyle {
-                font_size: 15.0,
-                color: Color::srgba(1.0, 1.0, 1.0, 0.85),
-                ..default()
-            },
-        )
-        .with_style(Style {
-            position_type: PositionType::Absolute,
-            bottom: Val::Px(10.0),
-            left: Val::Px(12.0),
-            ..default()
-        }),
-        HelpText,
-    ));
 }
-
-#[derive(Component)]
-struct HelpText;
 
 #[allow(clippy::too_many_arguments)]
 fn process_city_data(
@@ -215,7 +197,6 @@ fn process_city_data(
     mut view_state: ResMut<ViewState>,
     mut camera_q: Query<(&mut Transform, &mut CityCamera)>,
     existing: Query<Entity, With<CityElement>>,
-    mut help_q: Query<&mut Text, With<HelpText>>,
 ) {
     let Some(city) = take_pending_city() else {
         return;
@@ -258,49 +239,6 @@ fn process_city_data(
         }
     }
 
-    for mut text in help_q.iter_mut() {
-        // ASCII only: the bundled font has no middle dot or ellipsis.
-        text.sections[0].value =
-            "drag: orbit | scroll: zoom | WASD: pan | click: select | Esc: clear | R: reset".into();
-    }
-
     index.city = city;
     dispatch_city();
-}
-
-/// Projects each district label to screen space. Text lives in Bevy's UI layer
-/// rather than being marshalled to JS every frame.
-fn update_labels(
-    camera_q: Query<(&Camera, &GlobalTransform), With<CityCamera>>,
-    mut labels: Query<(&DistrictLabel, &mut Style, &mut Visibility, &mut Text)>,
-    index: Res<CityIndex>,
-) {
-    let Ok((camera, cam_tf)) = camera_q.get_single() else {
-        return;
-    };
-    let cam_pos = cam_tf.translation();
-
-    for (label, mut style, mut vis, mut text) in labels.iter_mut() {
-        let Some(screen) = camera.world_to_viewport(cam_tf, label.world) else {
-            *vis = Visibility::Hidden;
-            continue;
-        };
-
-        let dist = cam_pos.distance(label.world);
-        // Fade out where labels would overlap into noise, and when zoomed
-        // right into one building.
-        let hide = dist > index.radius.max(1.0) * 6.0 || dist < 12.0;
-        *vis = if hide {
-            Visibility::Hidden
-        } else {
-            Visibility::Inherited
-        };
-
-        let alpha = (1.0 - (dist / (index.radius.max(1.0) * 6.0))).clamp(0.25, 1.0);
-        text.sections[0].style.color = Color::srgba(1.0, 0.99, 0.94, alpha);
-
-        let width = text.sections[0].value.chars().count() as f32 * 7.0;
-        style.left = Val::Px(screen.x - width * 0.5);
-        style.top = Val::Px(screen.y);
-    }
 }

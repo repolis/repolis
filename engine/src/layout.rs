@@ -26,11 +26,6 @@ pub struct PlacedBuilding {
     pub building_idx: usize,
 }
 
-pub struct PlacedDistrict {
-    pub ground: Rect,
-    pub building_count: usize,
-}
-
 /// A dependency drawn as an elevated arc rather than a ground road.
 #[derive(Default)]
 pub struct Link {
@@ -44,7 +39,8 @@ pub struct Link {
 
 #[derive(Default)]
 pub struct LayoutResult {
-    pub districts: Vec<PlacedDistrict>,
+    /// Each district's ground, in city order.
+    pub districts: Vec<Rect>,
     pub buildings: Vec<PlacedBuilding>,
     /// One slab per directory block.
     pub streets: Vec<Rect>,
@@ -122,10 +118,7 @@ pub fn compute_layout(city: &CityMap) -> LayoutResult {
         let plot = ground.inset((ground.w.min(ground.d) * 0.07).clamp(0.5, DISTRICT_PADDING));
         let mine: Vec<&Sized> = sized.iter().filter(|s| s.district_idx == i).collect();
         pack_district(&mine, &plot, &mut buildings, &mut streets);
-        districts.push(PlacedDistrict {
-            ground,
-            building_count: city.districts[i].buildings.len(),
-        });
+        districts.push(ground);
     }
 
     let links = build_links(city, &buildings);
@@ -384,7 +377,7 @@ mod tests {
         let c = city(&[("a", 30), ("b", 12), ("c", 80)]);
         let r = compute_layout(&c);
         for b in &r.buildings {
-            let g = r.districts[b.district_idx].ground;
+            let g = r.districts[b.district_idx];
             assert!(
                 b.center_x - b.width * 0.5 >= g.x
                     && b.center_x + b.width * 0.5 <= g.x + g.w
@@ -401,8 +394,8 @@ mod tests {
     fn district_area_scales_with_content() {
         let c = city(&[("big", 150), ("small", 6)]);
         let r = compute_layout(&c);
-        let big = r.districts[0].ground.area();
-        let small = r.districts[1].ground.area();
+        let big = r.districts[0].area();
+        let small = r.districts[1].area();
         assert!(big > small * 4.0, "big={big} small={small}");
     }
 

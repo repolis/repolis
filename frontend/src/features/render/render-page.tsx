@@ -28,6 +28,7 @@ import {
   type EngineSelect,
   type RawCity,
 } from "./city";
+import { DistrictLabels } from "./district-labels";
 import { InspectorPanel } from "./inspector-panel";
 import { Legend } from "./legend";
 import { PathBanner } from "./path-banner";
@@ -377,6 +378,11 @@ export default function RenderPage() {
 
       {phase === "ready" && (
         <>
+          <DistrictLabels districts={summary?.districts ?? []} />
+          <div className="pointer-events-none absolute bottom-2.5 left-3 z-30 font-mono text-[11px] text-white/80">
+            drag: orbit · scroll: zoom · WASD: pan · click: select · Esc: clear
+            · R: reset
+          </div>
           <SearchBar
             summary={summary}
             busy={busy}
