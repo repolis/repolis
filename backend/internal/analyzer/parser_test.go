@@ -235,11 +235,6 @@ func TestTypologyClosedSet(t *testing.T) {
 			t.Errorf("GuessTypology(%q) = %q, want %q", in, got, want)
 		}
 	}
-	for _, typ := range Typologies {
-		if !IsTypology(typ) {
-			t.Errorf("%q is in Typologies but IsTypology says otherwise", typ)
-		}
-	}
 }
 
 // A workspace member owns a licence and manifest exactly like a vendored

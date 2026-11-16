@@ -279,11 +279,11 @@ func ClusterBuildings(buildings []models.Building, edges []models.DependencyEdge
 	}
 
 	groups := regroup(nodes, labels)
-	groups = mergeSmall(groups, nodes, index, adj)
+	groups = mergeSmall(groups, nodes, adj)
 	groups = splitLarge(groups, nodes)
-	groups = capCount(groups, nodes, index, adj)
+	groups = capCount(groups, nodes, adj)
 
-	return finalize(groups, nodes, buildings, index)
+	return finalize(groups, nodes, buildings)
 }
 
 func sqrtInt(n int) float64 {
@@ -350,7 +350,7 @@ func groupIndex(groups [][]int, total int) []int {
 	return groupOf
 }
 
-func mergeSmall(groups [][]int, nodes []clNode, _ map[string]int, adj [][]clEdge) [][]int {
+func mergeSmall(groups [][]int, nodes []clNode, adj [][]clEdge) [][]int {
 	for {
 		groupOf := groupIndex(groups, len(nodes))
 		victim := -1
@@ -427,7 +427,7 @@ func splitLarge(groups [][]int, nodes []clNode) [][]int {
 	return out
 }
 
-func capCount(groups [][]int, nodes []clNode, _ map[string]int, adj [][]clEdge) [][]int {
+func capCount(groups [][]int, nodes []clNode, adj [][]clEdge) [][]int {
 	groups = compact(groups)
 	for len(groups) > maxDistricts {
 		groupOf := groupIndex(groups, len(nodes))
@@ -470,7 +470,7 @@ func compact(groups [][]int) [][]int {
 	return out
 }
 
-func finalize(groups [][]int, nodes []clNode, buildings []models.Building, index map[string]int) []Cluster {
+func finalize(groups [][]int, nodes []clNode, buildings []models.Building) []Cluster {
 	out := make([]Cluster, 0, len(groups))
 	for _, g := range groups {
 		c := Cluster{}
@@ -484,7 +484,7 @@ func finalize(groups [][]int, nodes []clNode, buildings []models.Building, index
 			id := nodes[n].id
 			c.Buildings = append(c.Buildings, id)
 			dirCount[nodes[n].dir]++
-			b := buildings[index[id]]
+			b := buildings[n]
 			names = append(names, nb{b.Name, b.NumMethods*3 + b.NumFields})
 		}
 		sort.Slice(names, func(i, j int) bool {

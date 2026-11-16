@@ -19,7 +19,7 @@ import (
 	"github.com/repolis/repolis/backend/internal/logger"
 )
 
-func runRefine(path string, raw *analyzer.RawExtraction, history map[string]*git.FileHistory) {
+func runRefine(raw *analyzer.RawExtraction, history map[string]*git.FileHistory) {
 	_ = godotenv.Load()
 	logger.SetLevel(logger.InfoLevel)
 
@@ -183,7 +183,7 @@ func main() {
 	}
 
 	if *useLLM {
-		runRefine(path, raw, history)
+		runRefine(raw, history)
 	}
 
 	if *out != "" {

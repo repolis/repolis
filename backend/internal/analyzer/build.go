@@ -24,8 +24,6 @@ type Draft struct {
 
 	firstCommit time.Time
 	lastCommit  time.Time
-
-	byID map[string]int
 }
 
 // BuildDraft assembles the deterministic city. The symbol table is passed in
@@ -46,7 +44,7 @@ func BuildDraft(raw *RawExtraction, history map[string]*git.FileHistory, st *Sym
 		}
 	}
 
-	d := &Draft{Symbols: st, byID: make(map[string]int)}
+	d := &Draft{Symbols: st}
 	d.assemble(raw, st, ownerOf)
 	d.Edges = BuildDependencies(raw, st, ownerOf)
 	d.attachHistory(history)
@@ -116,7 +114,7 @@ func (d *Draft) assemble(raw *RawExtraction, st *SymbolTable, ownerOf map[string
 		if src == "" {
 			src = "none"
 		}
-		d.add(models.Building{
+		d.Buildings = append(d.Buildings, models.Building{
 			ID: t.ID, Name: t.Name, Kind: "type",
 			SourceFile: t.SourceFile, Dir: t.Dir, Namespace: t.Namespace,
 			NumFields: len(t.Fields), NumMethods: len(methods),
@@ -145,7 +143,7 @@ func (d *Draft) assemble(raw *RawExtraction, st *SymbolTable, ownerOf map[string
 	for _, f := range files {
 		fns := moduleFuncs[f]
 		sort.Strings(fns)
-		d.add(models.Building{
+		d.Buildings = append(d.Buildings, models.Building{
 			ID: moduleID(f), Name: filepath.Base(f), Kind: "module",
 			SourceFile: f, Dir: dirOf(f), Namespace: fileNS[f],
 			NumFields: fileVars[f], NumMethods: len(fns),
@@ -157,14 +155,6 @@ func (d *Draft) assemble(raw *RawExtraction, st *SymbolTable, ownerOf map[string
 	}
 
 	sort.Slice(d.Buildings, func(i, j int) bool { return d.Buildings[i].ID < d.Buildings[j].ID })
-	d.byID = make(map[string]int, len(d.Buildings))
-	for i := range d.Buildings {
-		d.byID[d.Buildings[i].ID] = i
-	}
-}
-
-func (d *Draft) add(b models.Building) {
-	d.Buildings = append(d.Buildings, b)
 }
 
 func nonNil(s []string) []string {
@@ -404,12 +394,4 @@ func (c Cluster) FallbackSummary() string {
 		return fmt.Sprintf("%d entities, mostly in %s", len(c.Buildings), c.TopDirs[0])
 	}
 	return fmt.Sprintf("%d related code entities", len(c.Buildings))
-}
-
-// BuildingByID gives the pipeline and /api/explain a lookup.
-func (d *Draft) BuildingByID(id string) (models.Building, bool) {
-	if i, ok := d.byID[id]; ok {
-		return d.Buildings[i], true
-	}
-	return models.Building{}, false
 }

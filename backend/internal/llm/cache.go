@@ -43,20 +43,6 @@ func (c *Cache) Get(key string) (string, bool) {
 	return out, true
 }
 
-// Invalidate drops a stored answer, so a bypassed regeneration replaces it
-// even if the fresh call fails.
-func (c *Cache) Invalidate(key string) {
-	if c == nil {
-		return
-	}
-	c.mu.Lock()
-	delete(c.mem, key)
-	c.mu.Unlock()
-	if c.db != nil {
-		_, _ = c.db.Exec(`DELETE FROM llm_cache WHERE key = ?`, key)
-	}
-}
-
 func (c *Cache) Put(key, value string) {
 	if c == nil {
 		return

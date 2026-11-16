@@ -36,10 +36,9 @@ type Reporter func(Stage)
 
 // State carries everything the two passes share.
 type State struct {
-	Raw       *analyzer.RawExtraction
-	History   map[string]*git.FileHistory
-	Symbols   *analyzer.SymbolTable
-	ClonePath string
+	Raw     *analyzer.RawExtraction
+	History map[string]*git.FileHistory
+	Symbols *analyzer.SymbolTable
 }
 
 // Extract runs the deterministic half and returns both the reusable state and
@@ -66,7 +65,7 @@ func Extract(clonePath string, report Reporter) (*State, *models.CityMap, error)
 	draft.Stats.ExtractMillis = time.Since(t0).Milliseconds()
 
 	city := compose(draft, llm.FallbackLabels(draft.Clusters), false)
-	return &State{Raw: raw, History: history, Symbols: st, ClonePath: clonePath}, city, nil
+	return &State{Raw: raw, History: history, Symbols: st}, city, nil
 }
 
 // Refine runs the LLM half and returns the improved city.

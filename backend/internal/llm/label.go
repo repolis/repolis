@@ -253,7 +253,7 @@ func parseLabel(s string) *Label {
 			l.Summary = cleanLabel(line[5:], 90)
 		}
 	}
-	if l.Name == "" && l.Typology == "" && l.Summary == "" {
+	if l.Name == "" && l.Summary == "" {
 		return nil
 	}
 	return l

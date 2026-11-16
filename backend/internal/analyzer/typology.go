@@ -2,8 +2,7 @@ package analyzer
 
 import "strings"
 
-// Typologies is the closed set the renderer can colour, and the exact list
-// handed to the LLM so it picks rather than invents.
+// Typologies is the closed set the renderer can colour.
 var Typologies = []string{
 	"core", "data", "network", "security", "interface",
 	"utility", "config", "test", "example", "unknown",
@@ -16,9 +15,6 @@ var typologySet = func() map[string]bool {
 	}
 	return m
 }()
-
-// IsTypology reports whether t is exactly one of the allowed values.
-func IsTypology(t string) bool { return typologySet[strings.ToLower(strings.TrimSpace(t))] }
 
 // Most-specific first: checking "core" before "test" classifies "test system"
 // as core.
