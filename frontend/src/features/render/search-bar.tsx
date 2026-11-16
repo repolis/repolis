@@ -39,7 +39,7 @@ export function SearchBar({
   }, [summary, query]);
 
   return (
-    <div className="absolute top-4 left-4 z-40 w-[26rem] text-xs">
+    <div className="absolute top-4 left-4 z-50 w-[26rem] text-xs">
       <div className="flex gap-2">
         <input
           value={query}
