@@ -1,9 +1,6 @@
-import { QueryClient } from "@tanstack/react-query";
-import { createRootRouteWithContext, Outlet } from "@tanstack/react-router";
+import { createRootRoute, Outlet } from "@tanstack/react-router";
 
-export const Route = createRootRouteWithContext<{
-  queryClient: QueryClient;
-}>()({
+export const Route = createRootRoute({
   component: () => (
     <div className="w-full space-y-1">
       <Outlet />
