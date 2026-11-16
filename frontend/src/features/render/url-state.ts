@@ -21,67 +21,55 @@ export const EMPTY_VIEW: ViewURL = {
   camera: null,
 };
 
-/** Compact filter encoding: only what differs from the default is written. */
-function encodeFilter(f: FilterState): string {
-  const parts: string[] = [];
-  if (f.text) parts.push(`q:${f.text}`);
-  if (f.language) parts.push(`lang:${f.language}`);
-  if (f.district) parts.push(`dist:${f.district}`);
-  if (f.kind) parts.push(`kind:${f.kind}`);
-  if (f.min_methods > 0) parts.push(`fn:${f.min_methods}`);
-  if (f.min_complexity > 0) parts.push(`cx:${f.min_complexity}`);
-  if (f.min_churn_pct > 0) parts.push(`churn:${f.min_churn_pct}`);
-  if (f.only_no_callers) parts.push("nocallers");
-  if (f.only_hubs) parts.push("hubs");
-  if (f.only_cycles) parts.push("cycles");
-  return parts.join(";");
-}
+/** Short URL names for the filter fields. A new field needs one entry here. */
+const FILTER_CODES: Record<keyof FilterState, string> = {
+  text: "q",
+  language: "lang",
+  district: "dist",
+  kind: "kind",
+  min_methods: "fn",
+  min_complexity: "cx",
+  min_churn_pct: "churn",
+  only_no_callers: "nocallers",
+  only_hubs: "hubs",
+  only_cycles: "cycles",
+};
+const FILTER_KEYS = Object.keys(FILTER_CODES) as (keyof FilterState)[];
 
-function clampNum(v: string): number {
-  const n = Number(v);
-  return Number.isFinite(n) && n > 0 ? n : 0;
+/** Compact filter encoding: only what differs from the default is written,
+ * a flag as its bare name and anything else as `name:value`. */
+function encodeFilter(f: FilterState): string {
+  return FILTER_KEYS.filter((k) => f[k] !== EMPTY_FILTER[k])
+    .map((k) =>
+      typeof f[k] === "boolean"
+        ? FILTER_CODES[k]
+        : `${FILTER_CODES[k]}:${f[k]}`,
+    )
+    .join(";");
 }
 
 function decodeFilter(s: string): FilterState {
-  const f: FilterState = { ...EMPTY_FILTER };
-  if (!s) return f;
+  const f: Record<string, unknown> = { ...EMPTY_FILTER };
   for (const part of s.split(";")) {
-    const [k, ...rest] = part.split(":");
-    const v = rest.join(":");
-    switch (k) {
-      case "q":
-        f.text = v;
+    const [code, ...rest] = part.split(":");
+    const key = FILTER_KEYS.find((k) => FILTER_CODES[k] === code);
+    if (!key) continue;
+    const value = rest.join(":");
+    switch (typeof EMPTY_FILTER[key]) {
+      case "boolean":
+        f[key] = true;
         break;
-      case "lang":
-        f.language = v;
+      case "number": {
+        // A truncated or hand-edited link degrades to "no limit".
+        const n = Number(value);
+        f[key] = Number.isFinite(n) && n > 0 ? n : 0;
         break;
-      case "dist":
-        f.district = v;
-        break;
-      case "kind":
-        f.kind = v;
-        break;
-      case "fn":
-        f.min_methods = clampNum(v);
-        break;
-      case "cx":
-        f.min_complexity = clampNum(v);
-        break;
-      case "churn":
-        f.min_churn_pct = clampNum(v);
-        break;
-      case "nocallers":
-        f.only_no_callers = true;
-        break;
-      case "hubs":
-        f.only_hubs = true;
-        break;
-      case "cycles":
-        f.only_cycles = true;
-        break;
+      }
+      default:
+        f[key] = value;
     }
   }
-  return f;
+  return f as unknown as FilterState;
 }
 
 export function encodeView(v: ViewURL): string {

@@ -29,18 +29,11 @@ export const EMPTY_FILTER: FilterState = {
   only_cycles: false,
 };
 
+/** Filters set in the panel; the text search has no control here. */
 function activeCount(f: FilterState): number {
-  let n = 0;
-  if (f.language) n++;
-  if (f.district) n++;
-  if (f.kind) n++;
-  if (f.min_methods > 0) n++;
-  if (f.min_complexity > 0) n++;
-  if (f.min_churn_pct > 0) n++;
-  if (f.only_no_callers) n++;
-  if (f.only_hubs) n++;
-  if (f.only_cycles) n++;
-  return n;
+  return (Object.keys(EMPTY_FILTER) as (keyof FilterState)[]).filter(
+    (k) => k !== "text" && f[k] !== EMPTY_FILTER[k],
+  ).length;
 }
 
 /** A toggle chip. Clicking sets the value, clicking again clears it. */
