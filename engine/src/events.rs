@@ -1,48 +1,14 @@
-//! Engine -> UI events. Only ids cross the boundary: the frontend already
-//! holds the city, so names and metrics are looked up there.
+//! Engine -> UI events. Buildings and districts are named by their position in
+//! city order, the order the frontend's arrays use, so only numbers cross.
 
-use bevy::prelude::*;
 use serde::Serialize;
 
-#[derive(Serialize)]
-pub struct Hover {
-    pub kind: &'static str, // "building" | "district"
-    pub id: String,
-}
-
-#[derive(Serialize)]
-#[serde(tag = "type", content = "id")]
-pub enum SelectPayload {
-    None,
-    Building(String),
-    District(String),
-}
-
-/// Marks a building entity and carries everything picking and selection need.
-#[derive(Component)]
-pub struct Pickable {
-    pub district_idx: usize,
-    pub building_idx: usize,
-    /// Position in city order, the order the frontend's appearance arrays use.
-    pub order: usize,
-    /// World-space bounding box.
-    pub min: Vec3,
-    pub max: Vec3,
-}
-
-#[derive(Component)]
-pub struct PickableDistrict {
-    /// Ground rectangle, as (x, z).
-    pub min: Vec2,
-    pub max: Vec2,
-    pub district_idx: usize,
-}
-
-#[derive(Resource, Default)]
-pub struct SelectionState {
-    pub hovered: Option<Entity>,
-    pub last_cursor: Option<Vec2>,
-    pub last_camera: Option<(Vec3, Quat)>,
+/// What the cursor is over, or what was clicked.
+#[derive(Serialize, Clone, Copy, PartialEq, Debug)]
+#[serde(tag = "type", content = "index")]
+pub enum Target {
+    Building(usize),
+    District(usize),
 }
 
 fn dispatch(event_name: &str, payload: &impl Serialize) {
@@ -65,12 +31,14 @@ fn dispatch(event_name: &str, payload: &impl Serialize) {
     }
 }
 
-pub fn dispatch_hover(p: &Option<Hover>) {
-    dispatch("repolis:hover", p);
+pub fn dispatch_hover(target: Option<Target>) {
+    dispatch("repolis:hover", &target);
 }
-pub fn dispatch_select(p: &SelectPayload) {
-    dispatch("repolis:select", p);
+
+pub fn dispatch_select(target: Option<Target>) {
+    dispatch("repolis:select", &target);
 }
+
 /// The city finished loading.
 pub fn dispatch_city() {
     dispatch("repolis:city", &());

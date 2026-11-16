@@ -39,7 +39,11 @@ pub fn make_building_materials(
         perceptual_roughness: 0.3,
         ..default()
     });
-    BuildingMaterials { normal, dim, bright }
+    BuildingMaterials {
+        normal,
+        dim,
+        bright,
+    }
 }
 
 /// Unlit and translucent, so arcs read as overlays rather than structure.
@@ -73,48 +77,31 @@ pub fn build_link_mesh(links: &[&Link], vertical: f32) -> Mesh {
         if pts.len() < 2 {
             continue;
         }
-        let half = (link.width as f32) * 0.5;
         let base = positions.len() as u32;
-
-        for i in 0..pts.len() {
-            let (px, py, pz) = pts[i];
-            let (nx, nz) = tangent_normal(pts, i);
-            positions.push([
-                px as f32 + nx * half,
-                py as f32 + vertical,
-                pz as f32 + nz * half,
-            ]);
-            positions.push([
-                px as f32 - nx * half,
-                py as f32 + vertical,
-                pz as f32 - nz * half,
-            ]);
-            normals.push([0.0, 1.0, 0.0]);
-            normals.push([0.0, 1.0, 0.0]);
+        for (i, &p) in pts.iter().enumerate() {
+            // Half the ribbon's width, sideways to the arc on the ground plane.
+            let along = pts[(i + 1).min(pts.len() - 1)] - pts[i.saturating_sub(1)];
+            let side = along.xz().normalize_or_zero().perp() * (link.width * 0.5);
+            let side = Vec3::new(side.x, 0.0, side.y);
+            let p = p + Vec3::Y * vertical;
+            positions.extend([(p + side).to_array(), (p - side).to_array()]);
+            normals.extend([[0.0, 1.0, 0.0]; 2]);
             let t = i as f32 / (pts.len() - 1) as f32;
-            uvs.push([0.0, t]);
-            uvs.push([1.0, t]);
-
+            uvs.extend([[0.0, t], [1.0, t]]);
             if i + 1 < pts.len() {
                 let a = base + (i as u32) * 2;
-                indices.extend_from_slice(&[a, a + 1, a + 3, a, a + 3, a + 2]);
+                indices.extend([a, a + 1, a + 3, a, a + 3, a + 2]);
             }
         }
     }
 
-    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
     mesh.insert_indices(Indices::U32(indices));
     mesh
-}
-
-fn tangent_normal(pts: &[(f64, f64, f64)], i: usize) -> (f32, f32) {
-    let (ax, _, az) = pts[i.saturating_sub(1)];
-    let (bx, _, bz) = pts[(i + 1).min(pts.len() - 1)];
-    let dx = (bx - ax) as f32;
-    let dz = (bz - az) as f32;
-    let len = (dx * dx + dz * dz).sqrt().max(1e-4);
-    (-dz / len, dx / len)
 }

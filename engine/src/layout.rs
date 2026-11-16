@@ -1,40 +1,46 @@
 //! Places districts, directory blocks and buildings as three nested squarified
 //! treemaps, so nothing can overlap and everything stays axis aligned.
+//!
+//! Buildings are numbered in city order (each district's buildings in turn),
+//! the same order the frontend uses, and that number is the only way the rest
+//! of the engine refers to one.
 
 use crate::data::CityMap;
-use crate::treemap::{squarify, Item, Rect};
+use crate::treemap::{area, inset, squarify};
+use bevy::math::{Rect, Vec2, Vec3};
 use std::collections::HashMap;
 
-const MIN_FOOTPRINT: f64 = 4.0;
-const MIN_HEIGHT: f64 = 3.0;
+const MIN_FOOTPRINT: f32 = 4.0;
+const MIN_HEIGHT: f32 = 3.0;
 // Gap left around each building lot; becomes the alley between buildings.
-const LOT_MARGIN: f64 = 1.1;
+const LOT_MARGIN: f32 = 1.1;
 // Gap left around each directory block; becomes a street.
-const STREET_WIDTH: f64 = 4.5;
+const STREET_WIDTH: f32 = 4.5;
 // Gap between a district's ground and its built-up area.
-const DISTRICT_PADDING: f64 = 7.0;
+const DISTRICT_PADDING: f32 = 7.0;
 // Open land between neighbouring districts.
-const DISTRICT_GAP: f64 = 8.0;
+const DISTRICT_GAP: f32 = 8.0;
 
 pub struct PlacedBuilding {
-    pub center_x: f64,
-    pub center_z: f64,
-    pub width: f64,
-    pub height: f64,
-    pub depth: f64,
-    pub district_idx: usize,
-    pub building_idx: usize,
+    /// Position in city order.
+    pub order: usize,
+    pub district: usize,
+    /// Footprint centre on the ground plane (world x, z).
+    pub center: Vec2,
+    /// Width, height and depth.
+    pub size: Vec3,
 }
 
 /// A dependency drawn as an elevated arc rather than a ground road.
 #[derive(Default)]
 pub struct Link {
-    pub points: Vec<(f64, f64, f64)>,
-    pub width: f64,
+    pub points: Vec<Vec3>,
+    pub width: f32,
     /// Both ends sit in the same reported dependency cycle.
     pub in_cycle: bool,
-    pub source: String,
-    pub target: String,
+    /// Building order of each end.
+    pub source: usize,
+    pub target: usize,
 }
 
 #[derive(Default)]
@@ -45,30 +51,39 @@ pub struct LayoutResult {
     /// One slab per directory block.
     pub streets: Vec<Rect>,
     pub links: Vec<Link>,
-    pub radius: f64,
+    pub radius: f32,
 }
 
-struct Sized {
-    district_idx: usize,
-    building_idx: usize,
-    width: f64,
-    depth: f64,
-    height: f64,
-    dir: String,
+/// A building's intended size, before its lot is known.
+struct Sized<'a> {
+    order: usize,
+    district: usize,
+    dir: &'a str,
+    size: Vec3,
 }
 
-impl Sized {
-    fn lot_area(&self) -> f64 {
-        (self.width + LOT_MARGIN * 2.0) * (self.depth + LOT_MARGIN * 2.0)
+impl Sized<'_> {
+    fn lot_area(&self) -> f32 {
+        (self.size.x + LOT_MARGIN * 2.0) * (self.size.z + LOT_MARGIN * 2.0)
     }
 }
 
-fn hash01(name: &str, seed: u64) -> f64 {
+fn hash01(name: &str, seed: u64) -> f32 {
     let mut h: u64 = seed;
     for b in name.bytes() {
         h = h.wrapping_mul(1099511628211).wrapping_add(b as u64);
     }
-    ((h >> 11) % 100_000) as f64 / 100_000.0
+    ((h >> 11) % 100_000) as f32 / 100_000.0
+}
+
+/// Above `cap`, a value grows only by the `power` of its excess, so one huge
+/// type cannot dwarf the city.
+fn soften(v: f32, cap: f32, power: f32) -> f32 {
+    if v > cap {
+        cap + (v - cap).powf(power)
+    } else {
+        v
+    }
 }
 
 /// The city is centred on the origin.
@@ -81,43 +96,41 @@ pub fn compute_layout(city: &CityMap) -> LayoutResult {
         };
     }
 
-    // Area each district must accommodate, including its streets and padding.
-    let n = city.districts.len();
-    let mut needed = vec![0.0_f64; n];
+    // Area each district must accommodate. Streets, gutters and the gap to
+    // the neighbours are real area: budget for them, or the plot is sized for
+    // the footprints alone.
+    let mut footprint = vec![0.0; city.districts.len()];
     for s in &sized {
-        needed[s.district_idx] += s.lot_area();
+        footprint[s.district] += s.lot_area();
     }
-    let items: Vec<Item> = needed
+    let needed: Vec<f32> = footprint
         .iter()
-        .enumerate()
-        .map(|(i, a)| {
-            let count = city.districts[i].buildings.len().max(1) as f64;
-            // Streets, gutters and the gap to the neighbours are real area:
-            // budget for them, or the plot is sized for the footprints alone.
-            let area = a * 1.45 + count * STREET_WIDTH * STREET_WIDTH;
-            let side = area.sqrt() + DISTRICT_GAP * 2.0;
-            Item {
-                key: i,
-                area: (side * side).max(400.0),
-            }
+        .zip(&city.districts)
+        .map(|(a, d)| {
+            let count = d.buildings.len().max(1) as f32;
+            let side = (a * 1.45 + count * STREET_WIDTH * STREET_WIDTH).sqrt() + DISTRICT_GAP * 2.0;
+            (side * side).max(400.0)
         })
         .collect();
 
-    let side = items.iter().map(|i| i.area).sum::<f64>().sqrt();
-    let mut cells = vec![Rect::new(0.0, 0.0, 0.0, 0.0); n];
-    for (i, cell) in squarify(&items, Rect::new(-side * 0.5, -side * 0.5, side, side)) {
-        cells[i] = cell;
-    }
+    let half = needed.iter().sum::<f32>().sqrt() * 0.5;
+    let cells = squarify(&needed, Rect::new(-half, -half, half, half));
 
-    let mut districts = Vec::with_capacity(n);
+    let mut districts = Vec::with_capacity(cells.len());
     let mut buildings = Vec::new();
     let mut streets = Vec::new();
-    for (i, cell) in cells.iter().enumerate() {
-        let ground = cell.inset((cell.w.min(cell.d) * 0.08).clamp(1.0, DISTRICT_GAP));
+    for (i, &cell) in cells.iter().enumerate() {
+        let ground = inset(
+            cell,
+            (cell.width().min(cell.height()) * 0.08).clamp(1.0, DISTRICT_GAP),
+        );
         // Scaled: a fixed inset ate a one-building district's whole plot.
-        let plot = ground.inset((ground.w.min(ground.d) * 0.07).clamp(0.5, DISTRICT_PADDING));
-        let mine: Vec<&Sized> = sized.iter().filter(|s| s.district_idx == i).collect();
-        pack_district(&mine, &plot, &mut buildings, &mut streets);
+        let plot = inset(
+            ground,
+            (ground.width().min(ground.height()) * 0.07).clamp(0.5, DISTRICT_PADDING),
+        );
+        let mine: Vec<&Sized> = sized.iter().filter(|s| s.district == i).collect();
+        pack_district(&mine, plot, &mut buildings, &mut streets);
         districts.push(ground);
     }
 
@@ -127,50 +140,38 @@ pub fn compute_layout(city: &CityMap) -> LayoutResult {
         buildings,
         streets,
         links,
-        radius: (side * 0.5).max(50.0),
+        radius: half.max(50.0),
     }
 }
 
-fn compute_dimensions(city: &CityMap) -> Vec<Sized> {
+fn compute_dimensions(city: &CityMap) -> Vec<Sized<'_>> {
     let mut out = Vec::new();
-    for (d_idx, district) in city.districts.iter().enumerate() {
-        for (b_idx, b) in district.buildings.iter().enumerate() {
+    for (d, district) in city.districts.iter().enumerate() {
+        for b in &district.buildings {
             // Footprint is state (fields), height is behaviour (methods).
-            let raw_side = MIN_FOOTPRINT + (b.num_fields as f64).powf(0.58) * 2.4;
-            let side = if raw_side > 26.0 {
-                26.0 + (raw_side - 26.0).powf(0.5)
-            } else {
-                raw_side
-            };
-
+            let side = soften(
+                MIN_FOOTPRINT + (b.num_fields as f32).powf(0.58) * 2.4,
+                26.0,
+                0.5,
+            );
             let raw_height = if b.num_methods > 0 {
-                MIN_HEIGHT + (b.num_methods as f64).powf(0.72) * 3.4
+                MIN_HEIGHT + (b.num_methods as f32).powf(0.72) * 3.4
             } else if b.lines_of_code > 1 {
-                MIN_HEIGHT + (b.lines_of_code as f64).powf(0.5) * 0.35
+                MIN_HEIGHT + (b.lines_of_code as f32).powf(0.5) * 0.35
             } else {
                 MIN_HEIGHT
             };
-            let height = if raw_height > 60.0 {
-                60.0 + (raw_height - 60.0).powf(0.55)
-            } else {
-                raw_height
-            };
+            let height = soften(raw_height, 60.0, 0.55);
 
             // Keep towers from becoming needles.
-            let final_side = side.max(height * 0.2 + 2.2);
+            let side = side.max(height * 0.2 + 2.2);
             let aspect = 0.78 + hash01(&b.id, 10) * 0.44;
 
             out.push(Sized {
-                district_idx: d_idx,
-                building_idx: b_idx,
-                width: final_side * aspect,
-                depth: final_side / aspect,
-                height,
-                dir: if b.dir.is_empty() {
-                    "root".to_string()
-                } else {
-                    b.dir.clone()
-                },
+                order: out.len(),
+                district: d,
+                dir: if b.dir.is_empty() { "root" } else { &b.dir },
+                size: Vec3::new(side * aspect, height, side / aspect),
             });
         }
     }
@@ -179,71 +180,60 @@ fn compute_dimensions(city: &CityMap) -> Vec<Sized> {
 
 fn pack_district(
     mine: &[&Sized],
-    plot: &Rect,
+    plot: Rect,
     buildings: &mut Vec<PlacedBuilding>,
     streets: &mut Vec<Rect>,
 ) {
-    if mine.is_empty() || plot.area() <= 1.0 {
+    if mine.is_empty() || area(plot) <= 1.0 {
         return;
     }
 
     // One block per source directory, sized by its total footprint.
     let mut by_dir: HashMap<&str, Vec<&Sized>> = HashMap::new();
     for s in mine {
-        by_dir.entry(s.dir.as_str()).or_default().push(s);
+        by_dir.entry(s.dir).or_default().push(s);
     }
-    let mut dir_keys: Vec<&str> = by_dir.keys().copied().collect();
-    dir_keys.sort_unstable();
+    let mut dirs: Vec<Vec<&Sized>> = by_dir.into_values().collect();
+    dirs.sort_by_key(|in_dir| in_dir[0].dir);
 
-    let dir_items: Vec<Item> = dir_keys
+    let dir_areas: Vec<f32> = dirs
         .iter()
-        .enumerate()
-        .map(|(i, d)| Item {
-            key: i,
-            area: by_dir[d].iter().map(|s| s.lot_area()).sum::<f64>().max(1.0),
-        })
+        .map(|in_dir| in_dir.iter().map(|s| s.lot_area()).sum::<f32>().max(1.0))
         .collect();
 
-    for (dir_key, block) in squarify(&dir_items, *plot) {
-        let in_dir = &by_dir[dir_keys[dir_key]];
+    for (in_dir, block) in dirs.iter().zip(squarify(&dir_areas, plot)) {
         // The street between blocks, proportional so a block never disappears
         // into its own gutter.
-        let street = (block.w.min(block.d) * 0.09).clamp(0.25, STREET_WIDTH * 0.5);
-        let inner = block.inset(street);
-        if inner.area() <= 1e-6 {
+        let inner = inset(
+            block,
+            (block.width().min(block.height()) * 0.09).clamp(0.25, STREET_WIDTH * 0.5),
+        );
+        if area(inner) <= 1e-6 {
             continue;
         }
         streets.push(block);
 
         // One lot per building inside its directory's block.
-        let items: Vec<Item> = in_dir
-            .iter()
-            .enumerate()
-            .map(|(i, s)| Item {
-                key: i,
-                area: s.lot_area(),
-            })
-            .collect();
-
-        for (k, lot) in squarify(&items, inner) {
-            let s = in_dir[k];
-            let margin = (lot.w.min(lot.d) * 0.12).clamp(0.05, LOT_MARGIN);
-            let cell = lot.inset(margin);
-            if cell.w <= 1e-4 || cell.d <= 1e-4 {
+        let lot_areas: Vec<f32> = in_dir.iter().map(|s| s.lot_area()).collect();
+        for (s, lot) in in_dir.iter().zip(squarify(&lot_areas, inner)) {
+            let cell = inset(
+                lot,
+                (lot.width().min(lot.height()) * 0.12).clamp(0.05, LOT_MARGIN),
+            );
+            if cell.width() <= 1e-4 || cell.height() <= 1e-4 {
                 continue;
             }
-
             // Shrink to fit when the lot is smaller. Either way the building
             // stays inside its lot, so no two can touch.
-            let (x, z) = cell.center();
             buildings.push(PlacedBuilding {
-                center_x: x,
-                center_z: z,
-                width: s.width.min(cell.w).max(0.4),
-                height: s.height,
-                depth: s.depth.min(cell.d).max(0.4),
-                district_idx: s.district_idx,
-                building_idx: s.building_idx,
+                order: s.order,
+                district: s.district,
+                center: cell.center(),
+                size: Vec3::new(
+                    s.size.x.min(cell.width()).max(0.4),
+                    s.size.y,
+                    s.size.z.min(cell.height()).max(0.4),
+                ),
             });
         }
     }
@@ -254,69 +244,64 @@ fn pack_district(
 /// target and crosses everything between; an arc cannot intersect the city and
 /// leaves the ground plane to the street grid.
 fn build_links(city: &CityMap, buildings: &[PlacedBuilding]) -> Vec<Link> {
-    let id_of = |b: &PlacedBuilding| {
-        city.districts[b.district_idx].buildings[b.building_idx]
-            .id
-            .as_str()
-    };
-    let mut index: HashMap<&str, usize> = HashMap::new();
-    for (i, b) in buildings.iter().enumerate() {
-        index.insert(id_of(b), i);
-    }
+    let ids: Vec<&str> = city
+        .districts
+        .iter()
+        .flat_map(|d| d.buildings.iter().map(|b| b.id.as_str()))
+        .collect();
+    let placed: HashMap<&str, &PlacedBuilding> =
+        buildings.iter().map(|b| (ids[b.order], b)).collect();
 
     // Collapse reciprocal edges; A->B and B->A would overlap exactly.
     let mut merged: HashMap<(usize, usize), (u32, bool)> = HashMap::new();
     for e in &city.dependencies {
-        let (Some(&a), Some(&b)) = (index.get(e.source.as_str()), index.get(e.target.as_str()))
+        let (Some(a), Some(b)) = (placed.get(e.source.as_str()), placed.get(e.target.as_str()))
         else {
             continue;
         };
-        if a == b {
+        if a.order == b.order {
             continue;
         }
-        let slot = merged.entry((a.min(b), a.max(b))).or_default();
+        let slot = merged
+            .entry((a.order.min(b.order), a.order.max(b.order)))
+            .or_default();
         slot.0 += e.weight.max(1);
         slot.1 |= e.in_cycle;
     }
 
-    let mut keys: Vec<((usize, usize), (u32, bool))> = merged.into_iter().collect();
-    keys.sort_by(|x, y| y.1 .0.cmp(&x.1 .0).then(x.0.cmp(&y.0)));
-
-    let mut links = Vec::with_capacity(keys.len());
-    for ((a, b), (weight, in_cycle)) in keys {
-        let src = &buildings[a];
-        let tgt = &buildings[b];
-        let inter = src.district_idx != tgt.district_idx;
-
-        let (sx, sz) = (src.center_x, src.center_z);
-        let (tx, tz) = (tgt.center_x, tgt.center_z);
-        let span = (tx - sx).hypot(tz - sz);
-        let lift = src.height.max(tgt.height) + 4.0 + span * if inter { 0.18 } else { 0.28 };
-
-        // Quadratic arc, sampled just densely enough to read as a curve.
-        let steps = if inter { 20 } else { 12 };
-        let points = (0..=steps)
-            .map(|i| {
-                let t = i as f64 / steps as f64;
-                let inv = 1.0 - t;
-                let x = inv * inv * sx + 2.0 * inv * t * ((sx + tx) * 0.5) + t * t * tx;
-                let z = inv * inv * sz + 2.0 * inv * t * ((sz + tz) * 0.5) + t * t * tz;
-                let y = inv * inv * (src.height + 1.0)
-                    + 2.0 * inv * t * lift
-                    + t * t * (tgt.height + 1.0);
-                (x, y, z)
-            })
-            .collect();
-
-        links.push(Link {
-            points,
-            width: (0.45 + (weight as f64).ln_1p() * 0.5).min(3.0),
+    let by_order: HashMap<usize, &PlacedBuilding> =
+        buildings.iter().map(|b| (b.order, b)).collect();
+    let mut links: Vec<Link> = merged
+        .into_iter()
+        .map(|((a, b), (weight, in_cycle))| Link {
+            points: arc(by_order[&a], by_order[&b]),
+            width: (0.45 + (weight as f32).ln_1p() * 0.5).min(3.0),
             in_cycle,
-            source: id_of(src).to_string(),
-            target: id_of(tgt).to_string(),
-        });
-    }
+            source: a,
+            target: b,
+        })
+        .collect();
+    links.sort_by_key(|l| (l.source, l.target));
     links
+}
+
+/// A quadratic arc from roof to roof, sampled just densely enough to read as a
+/// curve. Arcs between districts are flatter and smoother.
+fn arc(src: &PlacedBuilding, tgt: &PlacedBuilding) -> Vec<Vec3> {
+    let inter = src.district != tgt.district;
+    let start = Vec3::new(src.center.x, src.size.y + 1.0, src.center.y);
+    let end = Vec3::new(tgt.center.x, tgt.size.y + 1.0, tgt.center.y);
+    let span = src.center.distance(tgt.center);
+    let mut control = (start + end) * 0.5;
+    control.y = src.size.y.max(tgt.size.y) + 4.0 + span * if inter { 0.18 } else { 0.28 };
+
+    let steps = if inter { 20 } else { 12 };
+    (0..=steps)
+        .map(|i| {
+            let t = i as f32 / steps as f32;
+            start.lerp(control, t).lerp(control.lerp(end, t), t)
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -345,6 +330,10 @@ mod tests {
         c
     }
 
+    fn footprint(b: &PlacedBuilding) -> Rect {
+        Rect::from_center_size(b.center, Vec2::new(b.size.x, b.size.z))
+    }
+
     /// The core invariant: no two buildings overlap, whatever the relative
     /// district sizes.
     #[test]
@@ -360,9 +349,13 @@ mod tests {
         assert_eq!(r.buildings.len(), c.building_count());
         for (i, a) in r.buildings.iter().enumerate() {
             for b in &r.buildings[i + 1..] {
-                let overlap = (a.center_x - b.center_x).abs() < (a.width + b.width) * 0.5 - 1e-6
-                    && (a.center_z - b.center_z).abs() < (a.depth + b.depth) * 0.5 - 1e-6;
-                assert!(!overlap, "{} overlaps {}", a.building_idx, b.building_idx);
+                let overlap = footprint(a).intersect(footprint(b));
+                assert!(
+                    overlap.width() <= 1e-3 || overlap.height() <= 1e-3,
+                    "{} overlaps {}",
+                    a.order,
+                    b.order
+                );
             }
         }
     }
@@ -372,14 +365,12 @@ mod tests {
         let c = city(&[("a", 30), ("b", 12), ("c", 80)]);
         let r = compute_layout(&c);
         for b in &r.buildings {
-            let g = r.districts[b.district_idx];
+            let g = r.districts[b.district];
+            let f = footprint(b);
             assert!(
-                b.center_x - b.width * 0.5 >= g.x
-                    && b.center_x + b.width * 0.5 <= g.x + g.w
-                    && b.center_z - b.depth * 0.5 >= g.z
-                    && b.center_z + b.depth * 0.5 <= g.z + g.d,
+                f.min.cmpge(g.min - 1e-3).all() && f.max.cmple(g.max + 1e-3).all(),
                 "building escaped district {}",
-                b.district_idx
+                b.district
             );
         }
     }
@@ -389,16 +380,13 @@ mod tests {
     fn district_area_scales_with_content() {
         let c = city(&[("big", 150), ("small", 6)]);
         let r = compute_layout(&c);
-        let big = r.districts[0].area();
-        let small = r.districts[1].area();
+        let (big, small) = (area(r.districts[0]), area(r.districts[1]));
         assert!(big > small * 4.0, "big={big} small={small}");
     }
 
     #[test]
     fn handles_degenerate_input() {
-        let empty = CityMap::default();
-        assert!(compute_layout(&empty).buildings.is_empty());
-        let one = city(&[("solo", 1)]);
-        assert_eq!(compute_layout(&one).buildings.len(), 1);
+        assert!(compute_layout(&CityMap::default()).buildings.is_empty());
+        assert_eq!(compute_layout(&city(&[("solo", 1)])).buildings.len(), 1);
     }
 }

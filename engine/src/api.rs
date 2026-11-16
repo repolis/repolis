@@ -3,10 +3,10 @@
 use bevy::prelude::*;
 use wasm_bindgen::prelude::*;
 
-use crate::appearance::Appearance;
+use crate::appearance::{Appearance, ShowLinks};
 use crate::camera::CityCamera;
 use crate::events::*;
-use crate::picking::frame_building;
+use crate::picking::{frame, Pickable};
 use crate::{CityIndex, CityMap};
 
 // Test-only hook that feeds a city in without going through wasm bindings.
@@ -25,7 +25,7 @@ thread_local! {
 enum Command {
     Reset,
     Camera(String),
-    Focus(String),
+    Focus(usize),
     Links(bool),
     Appearance(Appearance),
 }
@@ -59,10 +59,11 @@ pub fn load_city_data(val: JsValue) {
     }
 }
 
-/// Focuses the camera on a building by id, and selects it.
+/// Focuses the camera on a building, by its index in city order, and selects
+/// it.
 #[wasm_bindgen]
-pub fn focus_symbol(building_id: String) {
-    queue(Command::Focus(building_id));
+pub fn focus_building(index: usize) {
+    queue(Command::Focus(index));
 }
 
 #[wasm_bindgen]
@@ -100,13 +101,12 @@ pub fn set_show_links(show: bool) {
 /// each array. The frontend decides colour mode, filter, timeline, selection
 /// and path, and sends only the result.
 #[wasm_bindgen]
-pub fn set_appearance(colors: Vec<f32>, states: Vec<u8>, grounds: Vec<f32>, links: Vec<String>) {
+pub fn set_appearance(colors: Vec<f32>, states: Vec<u8>, grounds: Vec<f32>, links: Vec<u32>) {
     queue(Command::Appearance(Appearance {
         colors,
         states,
         grounds,
         links,
-        ..default()
     }));
 }
 
@@ -167,9 +167,9 @@ pub(crate) fn publish_labels(
 
 pub(crate) fn consume_commands(
     mut look: ResMut<Appearance>,
+    mut show: ResMut<ShowLinks>,
     mut cam_q: Query<&mut CityCamera>,
-    buildings: Query<&Pickable>,
-    index: Res<CityIndex>,
+    pickables: Query<&Pickable>,
 ) {
     let cmds = PENDING_COMMANDS.with(|c| std::mem::take(&mut *c.borrow_mut()));
     for cmd in cmds {
@@ -179,17 +179,8 @@ pub(crate) fn consume_commands(
                     cam.go_home();
                 }
             }
-            Command::Links(show) => {
-                look.show_links = show;
-                look.dirty = true;
-            }
-            Command::Appearance(next) => {
-                *look = Appearance {
-                    show_links: look.show_links,
-                    dirty: true,
-                    ..next
-                };
-            }
+            Command::Links(on) => show.0 = on,
+            Command::Appearance(next) => *look = next,
             Command::Camera(arg) => {
                 if let Ok(mut cam) = cam_q.get_single_mut() {
                     let n: Vec<f32> = arg.split(',').filter_map(|v| v.parse().ok()).collect();
@@ -203,14 +194,15 @@ pub(crate) fn consume_commands(
                     }
                 }
             }
-            Command::Focus(id) => {
-                let Some(p) = index.by_id.get(&id).and_then(|e| buildings.get(*e).ok()) else {
+            Command::Focus(i) => {
+                let target = Target::Building(i);
+                let Some(p) = pickables.iter().find(|p| p.target == target) else {
                     continue;
                 };
                 if let Ok(mut cam) = cam_q.get_single_mut() {
-                    frame_building(&mut cam, p);
+                    frame(&mut cam, p);
                 }
-                dispatch_select(&SelectPayload::Building(id));
+                dispatch_select(Some(target));
             }
         }
     }

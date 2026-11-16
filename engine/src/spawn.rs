@@ -4,12 +4,25 @@ use bevy::prelude::*;
 use std::f32::consts::FRAC_PI_2;
 
 use crate::appearance::material_set;
-use crate::data::CityMap;
-use crate::events::*;
-use crate::layout::{self, LayoutResult};
+use crate::events::Target;
+use crate::layout::{LayoutResult, Link};
+use crate::picking::Pickable;
 use crate::render::*;
-use crate::{treemap, CityElement, CityIndex, HighlightLinkLayer, LinkLayer};
+use crate::{CityElement, CityIndex, HighlightLinkLayer, LinkLayer};
 use crate::{BUILDING_BASE, DISTRICT_TOP, GROUND_Y, STREET_Y};
+
+/// The box over a ground rectangle between two heights, as (min, max).
+fn slab(r: Rect, y0: f32, y1: f32) -> (Vec3, Vec3) {
+    (
+        Vec3::new(r.min.x, y0, r.min.y),
+        Vec3::new(r.max.x, y1, r.max.y),
+    )
+}
+
+/// Places and scales the shared unit cube to fill a box.
+fn box_transform((min, max): (Vec3, Vec3)) -> Transform {
+    Transform::from_translation((min + max) * 0.5).with_scale(max - min)
+}
 
 pub(crate) fn spawn_city(
     commands: &mut Commands,
@@ -17,9 +30,8 @@ pub(crate) fn spawn_city(
     materials: &mut Assets<StandardMaterial>,
     index: &mut CityIndex,
     result: LayoutResult,
-    city: &CityMap,
 ) {
-    let ground_radius = result.radius as f32 * 1.9 + 160.0;
+    let ground_radius = result.radius * 1.9 + 160.0;
     commands.spawn((
         PbrBundle {
             mesh: meshes.add(Circle::new(ground_radius).mesh().resolution(96)),
@@ -37,36 +49,26 @@ pub(crate) fn spawn_city(
     // One shared cube mesh and a few shared materials, so Bevy instances
     // them into a handful of draw calls.
     let cube = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
-    let slab = |rect: &treemap::Rect, y0: f32, y1: f32| {
-        let (x, z) = rect.center();
-        Transform::from_xyz(x as f32, (y0 + y1) * 0.5, z as f32).with_scale(Vec3::new(
-            rect.w as f32,
-            y1 - y0,
-            rect.d as f32,
-        ))
-    };
 
     let street_material = materials.add(StandardMaterial {
         base_color: Color::srgb(0.20, 0.21, 0.23),
         perceptual_roughness: 0.98,
         ..default()
     });
-    for street in &result.streets {
+    for &street in &result.streets {
         commands.spawn((
             PbrBundle {
                 mesh: cube.clone(),
                 material: street_material.clone(),
-                transform: slab(street, DISTRICT_TOP, STREET_Y),
+                transform: box_transform(slab(street, DISTRICT_TOP, STREET_Y)),
                 ..default()
             },
             CityElement,
         ));
     }
 
-    // Neutral until the frontend's first appearance arrives, a frame later.
-    let neutral = material_set(materials, &mut index.materials, [0.62, 0.62, 0.64]).normal;
-
-    for (i, &g) in result.districts.iter().enumerate() {
+    for (i, &ground) in result.districts.iter().enumerate() {
+        let (min, max) = slab(ground, GROUND_Y + 0.02, DISTRICT_TOP);
         commands.spawn((
             PbrBundle {
                 mesh: cube.clone(),
@@ -76,63 +78,46 @@ pub(crate) fn spawn_city(
                     perceptual_roughness: 0.95,
                     ..default()
                 }),
-                transform: slab(&g, GROUND_Y + 0.02, DISTRICT_TOP),
+                transform: box_transform((min, max)),
                 ..default()
             },
-            CityElement,
-            PickableDistrict {
-                min: Vec2::new(g.x as f32, g.z as f32),
-                max: Vec2::new((g.x + g.w) as f32, (g.z + g.d) as f32),
-                district_idx: i,
+            Pickable {
+                target: Target::District(i),
+                min,
+                max,
             },
+            CityElement,
         ));
-
-        let (x, z) = g.center();
-        index.labels.push(Vec3::new(x as f32, BUILDING_BASE + 6.0, z as f32));
+        let c = ground.center();
+        index.labels.push(Vec3::new(c.x, BUILDING_BASE + 6.0, c.y));
     }
 
-    // Each district's first building in city order.
-    let offsets: Vec<usize> = city
-        .districts
-        .iter()
-        .scan(0, |n, d| {
-            let start = *n;
-            *n += d.buildings.len();
-            Some(start)
-        })
-        .collect();
-
-    for pb in &result.buildings {
-        let b = &city.districts[pb.district_idx].buildings[pb.building_idx];
-
-        let half = Vec3::new(pb.width as f32, 0.0, pb.depth as f32) * 0.5;
-        let base = Vec3::new(pb.center_x as f32, BUILDING_BASE, pb.center_z as f32);
-        let (min, max) = (base - half, base + half + Vec3::Y * pb.height as f32);
-        let entity = commands
-            .spawn((
-                PbrBundle {
-                    mesh: cube.clone(),
-                    material: neutral.clone(),
-                    transform: Transform::from_translation((min + max) * 0.5).with_scale(max - min),
-                    ..default()
-                },
-                Pickable {
-                    district_idx: pb.district_idx,
-                    building_idx: pb.building_idx,
-                    order: offsets[pb.district_idx] + pb.building_idx,
-                    min,
-                    max,
-                },
-                CityElement,
-            ))
-            .id();
-        index.by_id.insert(b.id.clone(), entity);
+    // Neutral until the frontend's first appearance arrives, a frame later.
+    let neutral = material_set(materials, &mut index.materials, [0.62, 0.62, 0.64]).normal;
+    for b in &result.buildings {
+        let base = Vec3::new(b.center.x, BUILDING_BASE, b.center.y);
+        let half = Vec3::new(b.size.x, 0.0, b.size.z) * 0.5;
+        let (min, max) = (base - half, base + half + Vec3::Y * b.size.y);
+        commands.spawn((
+            PbrBundle {
+                mesh: cube.clone(),
+                material: neutral.clone(),
+                transform: box_transform((min, max)),
+                ..default()
+            },
+            Pickable {
+                target: Target::Building(b.order),
+                min,
+                max,
+            },
+            CityElement,
+        ));
     }
 
     // Every dependency at once is unreadable, so all arcs start hidden behind
     // one toggle; a selection reveals its own neighbourhood regardless.
     let links = result.links;
-    let all: Vec<&layout::Link> = links.iter().collect();
+    let all: Vec<&Link> = links.iter().collect();
     commands.spawn((
         PbrBundle {
             mesh: meshes.add(build_link_mesh(&all, 0.0)),
@@ -150,7 +135,7 @@ pub(crate) fn spawn_city(
 
     // Cycles in red on top: they are the one thing here a file tree cannot
     // show at all.
-    let cycle_links: Vec<&layout::Link> = links.iter().filter(|l| l.in_cycle).collect();
+    let cycle_links: Vec<&Link> = links.iter().filter(|l| l.in_cycle).collect();
     commands.spawn((
         PbrBundle {
             mesh: meshes.add(build_link_mesh(&cycle_links, 0.6)),

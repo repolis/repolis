@@ -43,12 +43,12 @@ type RawStats = Omit<
     | null;
 };
 
-/** What the engine reports: ids only, resolved here against the city. */
-export type EngineHover = { kind: "building" | "district"; id: string } | null;
-export type EngineSelect =
-  | { type: "Building"; id: string }
-  | { type: "District"; id: string }
-  | { type: "None" };
+/** What the engine reports: a building or district by its index in city
+ * order. Absent when the cursor is over nothing. */
+export type EngineTarget =
+  | { type: "Building" | "District"; index: number }
+  | null
+  | undefined;
 /** A path query's answer, as building ids; `hops` is empty when unreachable. */
 export interface PathQuery {
   from_id: string;
@@ -62,6 +62,8 @@ export interface City {
   districts: Map<string, DistrictInfo>;
   /** Every building in city order, the order the engine's arrays use. */
   list: BuildingInfo[];
+  /** A building's position in `list`, by id. */
+  indexOf: Map<string, number>;
   /** Dependency neighbours, ignoring direction. */
   adj: Map<string, Set<string>>;
   scales: Scales;
@@ -159,43 +161,35 @@ export function buildCity(raw: RawCity): City {
     buildings,
     districts,
     list: all,
+    indexOf: new Map(all.map((b, i) => [b.id, i])),
     adj,
     scales: scalesFor(all),
   };
 }
 
-export function hoverInfo(city: City, h: EngineHover): HoverInfo | null {
-  if (h?.kind === "building") {
-    const b = city.buildings.get(h.id);
-    if (b)
-      return {
-        kind: "building",
-        name: b.name,
-        detail: `${b.kind} · ${b.num_fields} fields · ${b.num_methods} functions`,
-      };
-  }
-  if (h?.kind === "district") {
-    const d = city.districts.get(h.id);
-    if (d)
-      return {
-        kind: "district",
-        name: d.name,
-        detail: `${d.building_count} entities · ${d.typology}`,
-      };
-  }
-  return null;
+export function selection(city: City, t: EngineTarget): SelectPayload {
+  if (t?.type === "Building" && city.list[t.index])
+    return { type: "Building", data: city.list[t.index] };
+  if (t?.type === "District" && city.summary.districts[t.index])
+    return { type: "District", data: city.summary.districts[t.index] };
+  return { type: "None" };
 }
 
-export function selection(city: City, s: EngineSelect): SelectPayload {
-  if (s.type === "Building") {
-    const data = city.buildings.get(s.id);
-    if (data) return { type: "Building", data };
-  }
-  if (s.type === "District") {
-    const data = city.districts.get(s.id);
-    if (data) return { type: "District", data };
-  }
-  return { type: "None" };
+export function hoverInfo(city: City, t: EngineTarget): HoverInfo | null {
+  const s = selection(city, t);
+  if (s.type === "Building")
+    return {
+      kind: "building",
+      name: s.data.name,
+      detail: `${s.data.kind} · ${s.data.num_fields} fields · ${s.data.num_methods} functions`,
+    };
+  if (s.type === "District")
+    return {
+      kind: "district",
+      name: s.data.name,
+      detail: `${s.data.building_count} entities · ${s.data.typology}`,
+    };
+  return null;
 }
 
 export function pathInfo(city: City, p: PathQuery): PathInfo {

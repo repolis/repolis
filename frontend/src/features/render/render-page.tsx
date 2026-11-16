@@ -3,7 +3,7 @@ import { useParams } from "@tanstack/react-router";
 
 import init, {
   camera_state,
-  focus_symbol,
+  focus_building,
   load_city_data,
   reset_camera,
   set_appearance,
@@ -19,8 +19,7 @@ import {
   resolveSymbol,
   selection as toSelection,
   type City,
-  type EngineHover,
-  type EngineSelect,
+  type EngineTarget,
   type RawCity,
 } from "./city";
 import { DistrictLabels } from "./district-labels";
@@ -89,14 +88,13 @@ export default function RenderPage() {
     const onHover = (e: Event) =>
       setHover(
         cityRef.current &&
-          hoverInfo(cityRef.current, (e as CustomEvent<EngineHover>).detail),
+          hoverInfo(cityRef.current, (e as CustomEvent<EngineTarget>).detail),
       );
     const onSelect = (e: Event) => {
-      const detail = (e as CustomEvent<EngineSelect | null>).detail;
-      const payload: SelectPayload =
-        cityRef.current && detail
-          ? toSelection(cityRef.current, detail)
-          : { type: "None" };
+      const detail = (e as CustomEvent<EngineTarget>).detail;
+      const payload: SelectPayload = cityRef.current
+        ? toSelection(cityRef.current, detail)
+        : { type: "None" };
       setSelection(payload);
       // A new selection ends the path view; the anchor stays pinned.
       setPath(null);
@@ -120,8 +118,11 @@ export default function RenderPage() {
           setMode(v.mode);
           setFilterState(v.filter);
           setTimelineDay(v.timeline);
-          if (v.selected) focus_symbol(v.selected);
-          // After focus_symbol, which moves the camera itself.
+          const at = v.selected
+            ? cityRef.current?.indexOf.get(v.selected)
+            : undefined;
+          if (at !== undefined) focus_building(at);
+          // After the focus, which moves the camera itself.
           if (v.camera)
             setTimeout(() => set_camera_state(v.camera as string), 60);
         }
@@ -307,7 +308,8 @@ export default function RenderPage() {
 
   const handlePick = useCallback((nameOrId: string) => {
     const id = cityRef.current && resolveSymbol(cityRef.current, nameOrId);
-    if (id) focus_symbol(id);
+    const at = id ? cityRef.current?.indexOf.get(id) : undefined;
+    if (at !== undefined) focus_building(at);
   }, []);
   const handleReset = useCallback(() => {
     reset_camera();

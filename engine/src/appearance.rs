@@ -4,8 +4,9 @@
 use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
 
-use crate::events::*;
+use crate::events::Target;
 use crate::layout::Link;
+use crate::picking::Pickable;
 use crate::render::*;
 use crate::{CityIndex, HighlightLinkLayer, LinkLayer};
 
@@ -14,19 +15,22 @@ const DIM: u8 = 1;
 const BRIGHT: u8 = 2;
 const FADED: u8 = 3;
 
+/// Everything per building or district is in city order.
 #[derive(Resource, Default)]
 pub(crate) struct Appearance {
-    /// rgb per building, in city order.
+    /// rgb per building.
     pub colors: Vec<f32>,
     /// 0 normal, 1 dim, 2 bright, 3 faded, per building.
     pub states: Vec<u8>,
     /// rgb per district ground.
     pub grounds: Vec<f32>,
-    /// Arcs to highlight, as consecutive source/target id pairs.
-    pub links: Vec<String>,
-    pub show_links: bool,
-    pub dirty: bool,
+    /// Arcs to highlight, as consecutive pairs of building indices.
+    pub links: Vec<u32>,
 }
+
+/// Whether every dependency arc is shown, not only the highlighted ones.
+#[derive(Resource, Default)]
+pub(crate) struct ShowLinks(pub bool);
 
 /// Quantised, so lookalike buildings share a material and batch into one call.
 fn rgb_key(rgb: [f32; 3]) -> u32 {
@@ -54,16 +58,24 @@ pub(crate) fn apply_appearance(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut index: ResMut<CityIndex>,
-    mut look: ResMut<Appearance>,
-    mut buildings: Query<(&Pickable, &mut Handle<StandardMaterial>), Without<PickableDistrict>>,
-    districts: Query<(&PickableDistrict, &Handle<StandardMaterial>), Without<Pickable>>,
+    look: Res<Appearance>,
+    show: Res<ShowLinks>,
+    mut pickables: Query<(&Pickable, &mut Handle<StandardMaterial>)>,
     highlight_q: Query<&Handle<Mesh>, With<HighlightLinkLayer>>,
     mut link_layers: Query<&mut Visibility, With<LinkLayer>>,
 ) {
-    if !look.dirty {
+    if show.is_changed() {
+        for mut vis in &mut link_layers {
+            *vis = if show.0 {
+                Visibility::Inherited
+            } else {
+                Visibility::Hidden
+            };
+        }
+    }
+    if !look.is_changed() {
         return;
     }
-    look.dirty = false;
     let index = &mut *index;
 
     // Translucent rather than hidden: the shape of the city is the context
@@ -80,46 +92,44 @@ pub(crate) fn apply_appearance(
         })
         .clone();
 
-    for (p, mut handle) in &mut buildings {
-        let Some(rgb) = rgb_at(&look.colors, p.order) else {
-            continue;
-        };
-        let set = material_set(&mut materials, &mut index.materials, rgb);
-        *handle = match look.states.get(p.order).copied() {
-            Some(DIM) => set.dim,
-            Some(BRIGHT) => set.bright,
-            Some(FADED) => faded.clone(),
-            _ => set.normal,
-        };
-    }
-
-    for (d, handle) in &districts {
-        if let (Some(rgb), Some(m)) = (rgb_at(&look.grounds, d.district_idx), materials.get_mut(handle)) {
-            m.base_color = Color::srgb(rgb[0], rgb[1], rgb[2]);
+    for (p, mut handle) in &mut pickables {
+        match p.target {
+            Target::Building(i) => {
+                let Some(rgb) = rgb_at(&look.colors, i) else {
+                    continue;
+                };
+                let set = material_set(&mut materials, &mut index.materials, rgb);
+                *handle = match look.states.get(i).copied() {
+                    Some(DIM) => set.dim,
+                    Some(BRIGHT) => set.bright,
+                    Some(FADED) => faded.clone(),
+                    _ => set.normal,
+                };
+            }
+            // Each ground owns its material, so the colour is set in place.
+            Target::District(i) => {
+                if let (Some(rgb), Some(m)) =
+                    (rgb_at(&look.grounds, i), materials.get_mut(&*handle))
+                {
+                    m.base_color = Color::srgb(rgb[0], rgb[1], rgb[2]);
+                }
+            }
         }
     }
 
-    let pairs: HashSet<(&str, &str)> = look
+    let pairs: HashSet<(usize, usize)> = look
         .links
         .chunks_exact(2)
-        .flat_map(|p| [(p[0].as_str(), p[1].as_str()), (p[1].as_str(), p[0].as_str())])
+        .map(|p| (p[0].min(p[1]) as usize, p[0].max(p[1]) as usize))
         .collect();
     let chosen: Vec<&Link> = index
         .links
         .iter()
-        .filter(|l| pairs.contains(&(l.source.as_str(), l.target.as_str())))
+        .filter(|l| pairs.contains(&(l.source, l.target)))
         .collect();
     if let Ok(mesh_handle) = highlight_q.get_single() {
         if let Some(mesh) = meshes.get_mut(mesh_handle) {
             *mesh = build_link_mesh(&chosen, 0.0);
         }
-    }
-
-    for mut vis in &mut link_layers {
-        *vis = if look.show_links {
-            Visibility::Inherited
-        } else {
-            Visibility::Hidden
-        };
     }
 }

@@ -1,134 +1,77 @@
-//! Hover and click: a ray from the cursor against building boxes, then the
-//! district ground.
+//! Hover and click: the nearest box under the cursor, a building or a
+//! district's ground slab.
 
 use bevy::math::bounding::{Aabb3d, RayCast3d};
 use bevy::prelude::*;
 
 use crate::camera::CityCamera;
 use crate::events::*;
-use crate::{CityIndex, DISTRICT_TOP};
 
-#[allow(clippy::too_many_arguments)]
+/// A box the cursor can hit, and what it stands for.
+#[derive(Component)]
+pub struct Pickable {
+    pub target: Target,
+    pub min: Vec3,
+    pub max: Vec3,
+}
+
+/// What the cursor was over last frame, so hover is only reported on change.
+#[derive(Resource, Default)]
+pub struct Hovered(pub Option<Target>);
+
 pub(crate) fn picking_system(
     windows: Query<&Window>,
     camera_q: Query<(&Camera, &GlobalTransform), With<CityCamera>>,
-    mut cam_focus_q: Query<&mut CityCamera>,
-    buildings: Query<(Entity, &Pickable)>,
-    districts: Query<(Entity, &PickableDistrict)>,
-    mut interaction: ResMut<SelectionState>,
-    index: Res<CityIndex>,
+    mut city_cam: Query<&mut CityCamera>,
+    pickables: Query<&Pickable>,
+    mut hovered: ResMut<Hovered>,
     mouse: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
 ) {
     if keys.just_pressed(KeyCode::Escape) {
-        dispatch_select(&SelectPayload::None);
+        dispatch_select(None);
+    }
+    let (Ok(window), Ok((camera, cam_tf))) = (windows.get_single(), camera_q.get_single()) else {
+        return;
+    };
+
+    let hit = window
+        .cursor_position()
+        .and_then(|cursor| camera.viewport_to_world(cam_tf, cursor))
+        .and_then(|ray| nearest(ray, &pickables));
+    let target = hit.map(|p| p.target);
+
+    if target != hovered.0 {
+        hovered.0 = target;
+        dispatch_hover(target);
     }
 
-    let Some(window) = windows.iter().next() else {
-        return;
-    };
-    let Ok((camera, cam_tf)) = camera_q.get_single() else {
-        return;
-    };
-
-    let Some(cursor) = window.cursor_position() else {
-        if interaction.hovered.take().is_some() {
-            dispatch_hover(&None);
+    if mouse.just_pressed(MouseButton::Left) {
+        if let (Some(p), Ok(mut cam)) = (hit, city_cam.get_single_mut()) {
+            frame(&mut cam, p);
         }
-        return;
-    };
-
-    let cam_pos = cam_tf.translation();
-    let cam_rot = cam_tf.to_scale_rotation_translation().1;
-    let clicked = mouse.just_pressed(MouseButton::Left);
-
-    // Only when something moved, unless this is a click.
-    let unchanged = interaction.last_cursor == Some(cursor)
-        && interaction.last_camera == Some((cam_pos, cam_rot));
-    if unchanged && !clicked {
-        return;
+        dispatch_select(target);
     }
-    interaction.last_cursor = Some(cursor);
-    interaction.last_camera = Some((cam_pos, cam_rot));
+}
 
-    let Some(ray) = camera.viewport_to_world(cam_tf, cursor) else {
-        return;
-    };
+/// The first box the ray enters. Buildings stand on their district's slab, so
+/// a building under the cursor is always nearer than the ground beneath it.
+fn nearest<'a>(ray: Ray3d, pickables: &'a Query<&Pickable>) -> Option<&'a Pickable> {
     let cast = RayCast3d::from_ray(ray, f32::MAX);
-    let best_building = buildings
+    pickables
         .iter()
-        .filter_map(|(e, p)| {
+        .filter_map(|p| {
             let aabb = Aabb3d {
                 min: p.min.into(),
                 max: p.max.into(),
             };
-            cast.aabb_intersection_at(&aabb).map(|t| (t, e))
+            cast.aabb_intersection_at(&aabb).map(|t| (t, p))
         })
         .min_by(|a, b| a.0.total_cmp(&b.0))
-        .map(|(_, e)| e);
-
-    let ground = InfinitePlane3d::new(Vec3::Y);
-    let best_district = best_building
-        .is_none()
-        .then(|| ray.intersect_plane(Vec3::Y * DISTRICT_TOP, ground))
-        .flatten()
-        .and_then(|t| {
-            let hit = ray.get_point(t).xz();
-            districts
-                .iter()
-                .find(|(_, d)| hit.cmpge(d.min).all() && hit.cmple(d.max).all())
-        })
-        .map(|(e, _)| e);
-
-    // Hover: lightweight tooltip only.
-    let hovered = best_building.or(best_district);
-    if hovered != interaction.hovered {
-        interaction.hovered = hovered;
-        let payload = if let Some(p) = hovered.and_then(|e| buildings.get(e).ok()) {
-            Some(Hover {
-                kind: "building",
-                id: index.building(p.1).id.clone(),
-            })
-        } else if let Some(d) = hovered.and_then(|e| districts.get(e).ok()) {
-            let id = index.city.districts[d.1.district_idx].id.clone();
-            Some(Hover {
-                kind: "district",
-                id,
-            })
-        } else {
-            None
-        };
-        dispatch_hover(&payload);
-    }
-
-    if !clicked {
-        return;
-    }
-
-    match hovered {
-        Some(e) if buildings.get(e).is_ok() => {
-            let (_, p) = buildings.get(e).unwrap();
-            if let Ok(mut cam) = cam_focus_q.get_single_mut() {
-                frame_building(&mut cam, p);
-            }
-
-            dispatch_select(&SelectPayload::Building(index.building(p).id.clone()));
-        }
-        Some(e) if districts.get(e).is_ok() => {
-            let (_, d) = districts.get(e).unwrap();
-            if let Ok(mut cam) = cam_focus_q.get_single_mut() {
-                let center = (d.min + d.max) * 0.5;
-                let span = (d.max - d.min).length().max(20.0);
-                cam.frame_object(Vec3::new(center.x, 0.0, center.y), span);
-            }
-            let id = index.city.districts[d.district_idx].id.clone();
-            dispatch_select(&SelectPayload::District(id));
-        }
-        _ => dispatch_select(&SelectPayload::None),
-    }
+        .map(|(_, p)| p)
 }
 
-pub(crate) fn frame_building(cam: &mut CityCamera, p: &Pickable) {
-    let size = (p.max - p.min).length().max(4.0);
-    cam.frame_object((p.min + p.max) * 0.5, size);
+/// Moves the camera so the box fills a comfortable part of the view.
+pub(crate) fn frame(cam: &mut CityCamera, p: &Pickable) {
+    cam.frame_object((p.min + p.max) * 0.5, (p.max - p.min).length().max(4.0));
 }

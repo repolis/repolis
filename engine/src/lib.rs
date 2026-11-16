@@ -23,11 +23,11 @@ pub use api::queue_city_for_test;
 pub use data::CityMap;
 
 use api::{consume_commands, publish_camera, publish_labels, take_pending_city};
-use appearance::{apply_appearance, Appearance};
+use appearance::{apply_appearance, Appearance, ShowLinks};
 use camera::{camera_controls, CityCamera};
 use events::*;
 use layout::Link;
-use picking::picking_system;
+use picking::{picking_system, Hovered};
 use render::BuildingMaterials;
 use spawn::spawn_city;
 
@@ -46,10 +46,9 @@ struct LinkLayer;
 #[derive(Component)]
 struct HighlightLinkLayer;
 
+/// What the systems need to know about the loaded city.
 #[derive(Resource, Default)]
 struct CityIndex {
-    city: CityMap,
-    by_id: HashMap<String, Entity>,
     links: Vec<Link>,
     /// Where each district's label sits, in district order.
     labels: Vec<Vec3>,
@@ -58,19 +57,14 @@ struct CityIndex {
     radius: f32,
 }
 
-impl CityIndex {
-    fn building(&self, p: &Pickable) -> &data::Building {
-        &self.city.districts[p.district_idx].buildings[p.building_idx]
-    }
-}
-
 // Registers every resource and system the city needs. Split out from
 // `run_bevy_app` so a headless test can build the same schedule: Bevy only
 // validates system parameters on the first run, not at compile time.
 pub fn add_city_systems(app: &mut App) {
-    app.init_resource::<SelectionState>()
+    app.init_resource::<Hovered>()
         .init_resource::<CityIndex>()
         .init_resource::<Appearance>()
+        .init_resource::<ShowLinks>()
         .insert_resource(ClearColor(SKY_COLOR))
         .insert_resource(AmbientLight {
             color: Color::srgb(0.80, 0.86, 0.96),
@@ -168,7 +162,7 @@ fn process_city_data(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut index: ResMut<CityIndex>,
-    mut interaction: ResMut<SelectionState>,
+    mut hovered: ResMut<Hovered>,
     mut look: ResMut<Appearance>,
     mut camera_q: Query<(&mut Transform, &mut CityCamera)>,
     existing: Query<Entity, With<CityElement>>,
@@ -184,28 +178,17 @@ fn process_city_data(
     for e in existing.iter() {
         commands.entity(e).despawn_recursive();
     }
-    *interaction = SelectionState::default();
+    *hovered = Hovered::default();
     *index = CityIndex::default();
-    dispatch_hover(&None);
-    dispatch_select(&SelectPayload::None);
+    dispatch_hover(None);
+    dispatch_select(None);
 
     let result = layout::compute_layout(&city);
-    index.radius = result.radius as f32;
-
-    spawn_city(
-        &mut commands,
-        &mut meshes,
-        &mut materials,
-        &mut index,
-        result,
-        &city,
-    );
+    index.radius = result.radius;
+    spawn_city(&mut commands, &mut meshes, &mut materials, &mut index, result);
 
     // The frontend sends the new appearance once it hears about the city.
-    *look = Appearance {
-        show_links: look.show_links,
-        ..default()
-    };
+    *look = Appearance::default();
 
     if !had_city {
         for (mut transform, mut cam) in camera_q.iter_mut() {
@@ -214,6 +197,5 @@ fn process_city_data(
         }
     }
 
-    index.city = city;
     dispatch_city();
 }

@@ -213,12 +213,15 @@ export function computeAppearance(city: City, v: View) {
   });
 
   // The path replaces the neighbour highlight; both at once hides the answer.
-  const links =
+  const pairs =
     onPath.size > 0
-      ? v.path.slice(1).flatMap((id, i) => [v.path[i], id])
+      ? v.path.slice(1).map((id, i) => [v.path[i], id])
       : v.selectedId
-        ? [...related].flatMap((id) => [v.selectedId!, id])
+        ? [...related].map((id) => [v.selectedId!, id])
         : [];
+  const links = new Uint32Array(
+    pairs.flat().map((id) => city.indexOf.get(id) ?? 0),
+  );
 
   const grounds = new Float32Array(
     city.summary.districts.flatMap((d) => groundRgb(d.typology)),
