@@ -1,29 +1,12 @@
 import { useState } from "react";
 
-import { LANGUAGE_COLORS, RAMP_CSS, TYPOLOGY_COLORS } from "./appearance";
+import {
+  colorMode,
+  LANGUAGE_COLORS,
+  RAMP_CSS,
+  TYPOLOGY_COLORS,
+} from "./appearance";
 import type { CitySummary } from "./types";
-
-/** Five visual channels are in use at once, and an encoding nobody can decode
- * is decoration. */
-const MODE_HELP: Record<string, string> = {
-  complexity:
-    "Colour = worst cyclomatic complexity in the building. Pale is simple, red is branchy.",
-  age: "Colour = recency. Red was edited recently, pale has not changed in a long time.",
-  churn: "Colour = commit churn percentile. Red is edited constantly.",
-  fanin:
-    "Colour = how many other buildings depend on this one. Red is depended on heavily.",
-  instability:
-    "Colour = Martin's instability. Pale is depended upon, red depends on others.",
-};
-
-/** What each end of the ramp means, so the gradient is readable on its own. */
-const RAMP_ENDS: Record<string, [string, string]> = {
-  complexity: ["simple", "branchy"],
-  age: ["long untouched", "edited recently"],
-  churn: ["rarely edited", "edited constantly"],
-  fanin: ["depended on by nothing", "depended on heavily"],
-  instability: ["depended upon", "depends on others"],
-};
 
 function Swatch({ color, label }: { color: string; label: string }) {
   return (
@@ -48,6 +31,7 @@ export function Legend({
   if (!summary) return null;
 
   const used = new Set(summary.districts.map((d) => d.typology));
+  const { help, ends } = colorMode(mode);
 
   return (
     <div className="absolute right-4 bottom-4 z-40 w-64 rounded border border-gray-700 bg-gray-900/95 text-xs text-gray-200">
@@ -108,15 +92,15 @@ export function Legend({
                 <div className="text-[10px] tracking-wide text-gray-500 uppercase">
                   Colour
                 </div>
-                <div className="text-gray-300">{MODE_HELP[mode]}</div>
+                <div className="text-gray-300">{help}</div>
                 <div
                   className="mt-0.5 h-2 w-full rounded-sm"
                   style={{ background: RAMP_CSS }}
                 />
-                {RAMP_ENDS[mode] && (
+                {ends && (
                   <div className="flex justify-between text-[10px] text-gray-500">
-                    <span>{RAMP_ENDS[mode][0]}</span>
-                    <span>{RAMP_ENDS[mode][1]}</span>
+                    <span>{ends[0]}</span>
+                    <span>{ends[1]}</span>
                   </div>
                 )}
               </>

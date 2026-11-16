@@ -46,9 +46,7 @@ type RawStats = Omit<
 /** What the engine reports: a building or district by its index in city
  * order. Absent when the cursor is over nothing. */
 export type EngineTarget =
-  | { type: "Building" | "District"; index: number }
-  | null
-  | undefined;
+  { type: "Building" | "District"; index: number } | null | undefined;
 /** A path query's answer, as building ids; `hops` is empty when unreachable. */
 export interface PathQuery {
   from_id: string;

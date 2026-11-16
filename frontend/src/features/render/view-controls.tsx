@@ -1,16 +1,7 @@
 import { useState } from "react";
 
+import { COLOR_MODES } from "./appearance";
 import type { CitySummary } from "./types";
-
-export const COLOR_MODES = [
-  { id: "typology", label: "Purpose" },
-  { id: "complexity", label: "Complexity" },
-  { id: "age", label: "Recency" },
-  { id: "churn", label: "Churn" },
-  { id: "fanin", label: "Depended on" },
-  { id: "instability", label: "Instability" },
-  { id: "language", label: "Language" },
-] as const;
 
 export interface FilterState {
   text: string;

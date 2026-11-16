@@ -104,27 +104,71 @@ export function scalesFor(buildings: BuildingInfo[]): Scales {
   };
 }
 
-export function colorFor(mode: string, b: BuildingInfo, s: Scales): Rgb {
-  switch (mode) {
-    case "complexity":
-      return ramp(b.max_complexity / Math.max(s.complexity, 1));
-    // Recent is hot, old is pale: the same direction as every other mode.
-    case "age":
-      return ramp(1 - Math.min(Math.max(b.age_days / 540, 0), 1));
-    case "churn":
-      return ramp(b.churn_rank);
-    case "fanin":
-      return ramp(b.fan_in / Math.max(s.fanIn, 1));
-    case "instability":
-      return ramp(b.instability);
-    case "language":
-      return LANGUAGE_RGB[b.language] ?? GREY;
+export interface ColorMode {
+  id: string;
+  label: string;
+  /** Legend text for the numeric ramp modes. */
+  help?: string;
+  /** What each end of the ramp means, so the gradient reads on its own. */
+  ends?: [string, string];
+  color: (b: BuildingInfo, s: Scales) => Rgb;
+}
+
+/** Every colour mode in one place: menu label, legend text and the colour. */
+export const COLOR_MODES: ColorMode[] = [
+  {
+    id: "typology",
+    label: "Purpose",
     // Only here does age fade the colour: in a numeric mode the ramp carries
     // the meaning, and fading it would corrupt it.
-    default:
-      return applyAge(TYPOLOGY_RGB[b.typology] ?? GREY, b.age_days);
-  }
-}
+    color: (b) => applyAge(TYPOLOGY_RGB[b.typology] ?? GREY, b.age_days),
+  },
+  {
+    id: "complexity",
+    label: "Complexity",
+    help: "Colour = worst cyclomatic complexity in the building. Pale is simple, red is branchy.",
+    ends: ["simple", "branchy"],
+    color: (b, s) => ramp(b.max_complexity / Math.max(s.complexity, 1)),
+  },
+  {
+    id: "age",
+    label: "Recency",
+    help: "Colour = recency. Red was edited recently, pale has not changed in a long time.",
+    ends: ["long untouched", "edited recently"],
+    // Recent is hot, old is pale: the same direction as every other mode.
+    color: (b) => ramp(1 - Math.min(Math.max(b.age_days / 540, 0), 1)),
+  },
+  {
+    id: "churn",
+    label: "Churn",
+    help: "Colour = commit churn percentile. Red is edited constantly.",
+    ends: ["rarely edited", "edited constantly"],
+    color: (b) => ramp(b.churn_rank),
+  },
+  {
+    id: "fanin",
+    label: "Depended on",
+    help: "Colour = how many other buildings depend on this one. Red is depended on heavily.",
+    ends: ["depended on by nothing", "depended on heavily"],
+    color: (b, s) => ramp(b.fan_in / Math.max(s.fanIn, 1)),
+  },
+  {
+    id: "instability",
+    label: "Instability",
+    help: "Colour = Martin's instability. Pale is depended upon, red depends on others.",
+    ends: ["depended upon", "depends on others"],
+    color: (b) => ramp(b.instability),
+  },
+  {
+    id: "language",
+    label: "Language",
+    color: (b) => LANGUAGE_RGB[b.language] ?? GREY,
+  },
+];
+
+/** The mode with this id; unknown ids fall back to Purpose. */
+export const colorMode = (id: string) =>
+  COLOR_MODES.find((m) => m.id === id) ?? COLOR_MODES[0];
 
 /** Every predicate must hold. An empty filter matches everything. */
 export function matches(f: FilterState, b: BuildingInfo): boolean {
@@ -188,13 +232,14 @@ export interface View {
 
 /** The arrays `set_appearance` takes, in the city order both sides share. */
 export function computeAppearance(city: City, v: View) {
+  const { color } = colorMode(v.mode);
   const colors = new Float32Array(city.list.length * 3);
   const states = new Uint8Array(city.list.length);
   const onPath = new Set(v.path);
   const related = (v.selectedId && city.adj.get(v.selectedId)) || new Set();
 
   city.list.forEach((b, i) => {
-    colors.set(colorFor(v.mode, b, city.scales), i * 3);
+    colors.set(color(b, city.scales), i * 3);
     states[i] =
       // Faded rather than gone: the timeline is for watching it get built.
       (v.timeline !== null && b.born_day > v.timeline) || !matches(v.filter, b)
