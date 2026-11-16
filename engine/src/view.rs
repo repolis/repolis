@@ -156,7 +156,12 @@ impl Scales {
     /// everything is under 15, which would flatten the whole ramp.
     pub fn from_city(city: &CityMap) -> Scales {
         let p95 = |f: fn(&Building) -> u32| {
-            let mut v: Vec<u32> = city.districts.iter().flat_map(|d| &d.buildings).map(f).collect();
+            let mut v: Vec<u32> = city
+                .districts
+                .iter()
+                .flat_map(|d| &d.buildings)
+                .map(f)
+                .collect();
             v.sort_unstable();
             v.get((v.len() * 95 / 100).min(v.len().saturating_sub(1)))
                 .map_or(20.0, |&x| (x as f32).max(1.0))
