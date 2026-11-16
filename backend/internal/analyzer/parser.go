@@ -130,13 +130,7 @@ func ExtractRepository(clonePath string) (*RawExtraction, error) {
 
 	sort.Slice(jobs, func(i, j int) bool { return jobs[i].relPath < jobs[j].relPath })
 
-	workers := runtime.NumCPU()
-	if workers > 8 {
-		workers = 8
-	}
-	if workers < 1 {
-		workers = 1
-	}
+	workers := min(runtime.NumCPU(), 8)
 
 	outputs := make([]parseOutput, len(jobs))
 	var wg sync.WaitGroup

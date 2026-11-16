@@ -1,5 +1,7 @@
 package models
 
+import "slices"
+
 // Refresh levels control how much work a re-analysis redoes. Each level
 // implies the ones above it, and each costs noticeably more than the last.
 const (
@@ -32,10 +34,8 @@ type AnalyzeRequest struct {
 // unrecognised value is treated as no refresh rather than rejected, so a
 // stale client cannot be made to fail by a value it does not know about.
 func (r AnalyzeRequest) RefreshLevel() string {
-	for _, l := range RefreshLevels {
-		if l != RefreshNone && r.Refresh == l {
-			return l
-		}
+	if r.Refresh != RefreshNone && slices.Contains(RefreshLevels, r.Refresh) {
+		return r.Refresh
 	}
 	if r.Force {
 		return RefreshCity
@@ -45,14 +45,8 @@ func (r AnalyzeRequest) RefreshLevel() string {
 
 // Redoes reports whether this level is at least as strong as `level`.
 func Redoes(current, level string) bool {
-	rank := func(l string) int {
-		for i, v := range RefreshLevels {
-			if v == l {
-				return i
-			}
-		}
-		return 0
-	}
+	// An unknown level ranks as no refresh.
+	rank := func(l string) int { return max(slices.Index(RefreshLevels, l), 0) }
 	return rank(current) >= rank(level)
 }
 

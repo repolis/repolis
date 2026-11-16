@@ -3,7 +3,6 @@ package git
 import (
 	"bufio"
 	"os/exec"
-	"sort"
 	"strings"
 	"time"
 )
@@ -66,10 +65,6 @@ func ExtractHistory(repoPath string) (map[string]*FileHistory, error) {
 			continue
 		}
 
-		if line == "" {
-			continue
-		}
-
 		path := strings.TrimSpace(line)
 		if path == "" {
 			continue
@@ -99,25 +94,15 @@ func ExtractHistory(repoPath string) (map[string]*FileHistory, error) {
 		return history, err
 	}
 
+	// Most commits wins; the name breaks ties, for determinism.
 	for path, counts := range authorCounts {
-		type ac struct {
-			name string
-			n    int
-		}
-		list := make([]ac, 0, len(counts))
+		best, bestN := "", 0
 		for name, n := range counts {
-			list = append(list, ac{name, n})
-		}
-		// By count then name, for determinism.
-		sort.Slice(list, func(i, j int) bool {
-			if list[i].n != list[j].n {
-				return list[i].n > list[j].n
+			if n > bestN || n == bestN && name < best {
+				best, bestN = name, n
 			}
-			return list[i].name < list[j].name
-		})
-		if len(list) > 0 {
-			history[path].PrimaryAuthor = list[0].name
 		}
+		history[path].PrimaryAuthor = best
 	}
 
 	return history, nil

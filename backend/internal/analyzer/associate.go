@@ -1,9 +1,9 @@
 package analyzer
 
 import (
+	"cmp"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strings"
 
 	"github.com/repolis/repolis/backend/internal/analyzer/lang"
@@ -88,10 +88,7 @@ func detectRepoPrefix(funcs []RawFunction) string {
 	if len(funcs) < 12 {
 		return ""
 	}
-	threshold := len(funcs) / 4
-	if threshold < 8 {
-		threshold = 8
-	}
+	threshold := max(len(funcs)/4, 8)
 
 	best := ""
 	for l := 3; l <= 12; l++ {
@@ -332,11 +329,7 @@ func (st *SymbolTable) candidateSet(fn *RawFunction) []string {
 		freq[st.resolveRef(t, fn.SourceFile)]++
 	}
 	for id, n := range freq {
-		sc := 10 + n
-		if sc > 35 {
-			sc = 35
-		}
-		add(id, sc)
+		add(id, min(10+n, 35))
 	}
 
 	// Types defined in the same file.
@@ -353,11 +346,8 @@ func (st *SymbolTable) candidateSet(fn *RawFunction) []string {
 	for id, sc := range seen {
 		list = append(list, cand{id, sc})
 	}
-	sort.Slice(list, func(i, j int) bool {
-		if list[i].score != list[j].score {
-			return list[i].score > list[j].score
-		}
-		return list[i].id < list[j].id
+	slices.SortFunc(list, func(a, b cand) int {
+		return cmp.Or(cmp.Compare(b.score, a.score), strings.Compare(a.id, b.id))
 	})
 	if len(list) > 6 {
 		list = list[:6]
@@ -457,23 +447,10 @@ func (st *SymbolTable) verify(fn *RawFunction, typeID string) bool {
 	}
 	name := st.Types[idx].Name
 
-	if st.prefixScore(fn.Name, name) > 0 {
-		return true
-	}
-	for _, pt := range fn.ParamTypes {
-		if pt == name {
-			return true
-		}
-	}
-	if fn.ReturnType == name {
-		return true
-	}
-	for _, t := range fn.TypesUsed {
-		if t.Name == name {
-			return true
-		}
-	}
-	return false
+	return st.prefixScore(fn.Name, name) > 0 ||
+		slices.Contains(fn.ParamTypes, name) ||
+		fn.ReturnType == name ||
+		slices.ContainsFunc(fn.TypesUsed, func(t lang.Ref) bool { return t.Name == name })
 }
 
 // Residual returns what the rules could not settle, most consequential first.
@@ -496,15 +473,10 @@ func (st *SymbolTable) Residual() []*Assoc {
 		}
 		return n
 	}
-	sort.Slice(out, func(i, j int) bool {
-		ii, ij := impact(out[i]), impact(out[j])
-		if ii != ij {
-			return ii > ij
-		}
-		if out[i].Fn.SourceFile != out[j].Fn.SourceFile {
-			return out[i].Fn.SourceFile < out[j].Fn.SourceFile
-		}
-		return out[i].Fn.Name < out[j].Fn.Name
+	slices.SortFunc(out, func(a, b *Assoc) int {
+		return cmp.Or(cmp.Compare(impact(b), impact(a)),
+			strings.Compare(a.Fn.SourceFile, b.Fn.SourceFile),
+			strings.Compare(a.Fn.Name, b.Fn.Name))
 	})
 	return out
 }

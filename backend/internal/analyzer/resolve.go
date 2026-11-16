@@ -62,20 +62,8 @@ func buildScopes(raw *RawExtraction) *scopes {
 
 	// A repo can hold several languages, but the separator only splits
 	// qualified references, so the dominant language's is a fine default.
-	counts := map[string]int{}
-	for _, f := range raw.Files {
-		counts[f.Language]++
-	}
-	best, bestN := "", 0
-	for name, n := range counts {
-		if n > bestN || (n == bestN && name < best) {
-			best, bestN = name, n
-		}
-	}
-	for _, l := range lang.All() {
-		if l.Name() == best {
-			sc.sep = l.Separator()
-		}
+	if l := lang.ByName(raw.DominantLanguage()); l != nil {
+		sc.sep = l.Separator()
 	}
 
 	for _, f := range raw.Files {

@@ -5,6 +5,7 @@ package jobs
 
 import (
 	"encoding/json"
+	"fmt"
 	"sync"
 	"time"
 
@@ -108,9 +109,7 @@ func (j *Job) Subscribe() (<-chan Event, func()) {
 
 	return ch, func() {
 		j.mu.Lock()
-		if _, ok := j.subs[ch]; ok {
-			delete(j.subs, ch)
-		}
+		delete(j.subs, ch)
 		j.mu.Unlock()
 	}
 }
@@ -195,9 +194,5 @@ func MarshalSSE(e Event) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := make([]byte, 0, len(b)+16)
-	out = append(out, "data: "...)
-	out = append(out, b...)
-	out = append(out, '\n', '\n')
-	return out, nil
+	return fmt.Appendf(nil, "data: %s\n\n", b), nil
 }

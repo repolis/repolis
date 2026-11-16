@@ -1,6 +1,9 @@
 package analyzer
 
 import (
+	"cmp"
+	"math"
+	"slices"
 	"sort"
 	"strings"
 
@@ -37,14 +40,7 @@ func (c Cluster) DistinctDirs(common []string) []string {
 		parts := strings.Split(d, "/")
 		kept := parts[:0]
 		for _, p := range parts {
-			shared := false
-			for _, cm := range common {
-				if p == cm {
-					shared = true
-					break
-				}
-			}
-			if !shared {
+			if !slices.Contains(common, p) {
 				kept = append(kept, p)
 			}
 		}
@@ -107,10 +103,7 @@ func CommonSymbolTokens(clusters []Cluster) []string {
 			}
 		}
 	}
-	threshold := (len(clusters) * 3) / 5
-	if threshold < 2 {
-		threshold = 2
-	}
+	threshold := max(len(clusters)*3/5, 2)
 	var out []string
 	for w, n := range counts {
 		if n >= threshold {
@@ -257,11 +250,7 @@ func ClusterBuildings(buildings []models.Building, edges []models.DependencyEdge
 			}
 			bestLabel, bestScore := labels[i], -1.0
 			for l, s := range score {
-				sz := sizes[l]
-				if sz < 1 {
-					sz = 1
-				}
-				weighted := s / sqrtInt(sz)
+				weighted := s / math.Sqrt(float64(max(sizes[l], 1)))
 				if weighted > bestScore || (weighted == bestScore && l < bestLabel) {
 					bestLabel, bestScore = l, weighted
 				}
@@ -284,18 +273,6 @@ func ClusterBuildings(buildings []models.Building, edges []models.DependencyEdge
 	groups = capCount(groups, nodes, adj)
 
 	return finalize(groups, nodes, buildings)
-}
-
-func sqrtInt(n int) float64 {
-	f := float64(n)
-	if f <= 1 {
-		return 1
-	}
-	x := f
-	for i := 0; i < 12; i++ {
-		x = 0.5 * (x + f/x)
-	}
-	return x
 }
 
 func regroup(nodes []clNode, labels []int) [][]int {
@@ -412,10 +389,7 @@ func splitLarge(groups [][]int, nodes []clNode) [][]int {
 					current = nil
 					room = maxDistrictSize
 				}
-				take := len(part)
-				if take > room {
-					take = room
-				}
+				take := min(len(part), room)
 				current = append(current, part[:take]...)
 				part = part[take:]
 			}
@@ -487,11 +461,8 @@ func finalize(groups [][]int, nodes []clNode, buildings []models.Building) []Clu
 			b := buildings[n]
 			names = append(names, nb{b.Name, b.NumMethods*3 + b.NumFields})
 		}
-		sort.Slice(names, func(i, j int) bool {
-			if names[i].w != names[j].w {
-				return names[i].w > names[j].w
-			}
-			return names[i].name < names[j].name
+		slices.SortFunc(names, func(a, b nb) int {
+			return cmp.Or(cmp.Compare(b.w, a.w), strings.Compare(a.name, b.name))
 		})
 		for i := 0; i < len(names) && i < 12; i++ {
 			c.TopNames = append(c.TopNames, names[i].name)
@@ -505,11 +476,8 @@ func finalize(groups [][]int, nodes []clNode, buildings []models.Building) []Clu
 		for d, n := range dirCount {
 			dirs = append(dirs, dc{d, n})
 		}
-		sort.Slice(dirs, func(i, j int) bool {
-			if dirs[i].n != dirs[j].n {
-				return dirs[i].n > dirs[j].n
-			}
-			return dirs[i].d < dirs[j].d
+		slices.SortFunc(dirs, func(a, b dc) int {
+			return cmp.Or(cmp.Compare(b.n, a.n), strings.Compare(a.d, b.d))
 		})
 		for i := 0; i < len(dirs) && i < 3; i++ {
 			c.TopDirs = append(c.TopDirs, dirs[i].d)
@@ -517,11 +485,8 @@ func finalize(groups [][]int, nodes []clNode, buildings []models.Building) []Clu
 		out = append(out, c)
 	}
 
-	sort.Slice(out, func(i, j int) bool {
-		if len(out[i].Buildings) != len(out[j].Buildings) {
-			return len(out[i].Buildings) > len(out[j].Buildings)
-		}
-		return out[i].Buildings[0] < out[j].Buildings[0]
+	slices.SortFunc(out, func(a, b Cluster) int {
+		return cmp.Or(cmp.Compare(len(b.Buildings), len(a.Buildings)), strings.Compare(a.Buildings[0], b.Buildings[0]))
 	})
 	return out
 }

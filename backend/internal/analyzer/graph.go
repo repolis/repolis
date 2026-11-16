@@ -1,7 +1,9 @@
 package analyzer
 
 import (
-	"sort"
+	"cmp"
+	"slices"
+	"strings"
 
 	"github.com/repolis/repolis/backend/internal/analyzer/lang"
 	"github.com/repolis/repolis/backend/internal/models"
@@ -199,14 +201,8 @@ func BuildDependencies(raw *RawExtraction, st *SymbolTable, ownerOf map[string]s
 	}
 
 	// Deterministic order, then per-source top-K.
-	sort.Slice(all, func(i, j int) bool {
-		if all[i].Source != all[j].Source {
-			return all[i].Source < all[j].Source
-		}
-		if all[i].Weight != all[j].Weight {
-			return all[i].Weight > all[j].Weight
-		}
-		return all[i].Target < all[j].Target
+	slices.SortFunc(all, func(a, b models.DependencyEdge) int {
+		return cmp.Or(strings.Compare(a.Source, b.Source), cmp.Compare(b.Weight, a.Weight), strings.Compare(a.Target, b.Target))
 	})
 
 	out := make([]models.DependencyEdge, 0, len(all))

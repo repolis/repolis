@@ -103,7 +103,15 @@ var registry []Language
 
 func Register(l Language) { registry = append(registry, l) }
 
-func All() []Language { return registry }
+// ByName finds a registered language by its display name, or nil.
+func ByName(name string) Language {
+	for _, l := range registry {
+		if l.Name() == name {
+			return l
+		}
+	}
+	return nil
+}
 
 // ForFile picks the language that claims a path, or nil.
 func ForFile(relPath string) Language {

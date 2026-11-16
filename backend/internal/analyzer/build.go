@@ -3,6 +3,7 @@ package analyzer
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -154,7 +155,7 @@ func (d *Draft) assemble(raw *RawExtraction, st *SymbolTable, ownerOf map[string
 		})
 	}
 
-	sort.Slice(d.Buildings, func(i, j int) bool { return d.Buildings[i].ID < d.Buildings[j].ID })
+	slices.SortFunc(d.Buildings, func(a, b models.Building) int { return strings.Compare(a.ID, b.ID) })
 }
 
 func nonNil(s []string) []string {
@@ -202,11 +203,7 @@ func (d *Draft) attachHistory(history map[string]*git.FileHistory) {
 		}
 		if !h.LastModified.IsZero() {
 			b.LastModified = h.LastModified.Format(time.RFC3339)
-			days := int(now.Sub(h.LastModified).Hours() / 24)
-			if days < 0 {
-				days = 0
-			}
-			b.AgeDays = days
+			b.AgeDays = max(0, int(now.Sub(h.LastModified).Hours()/24))
 		}
 		churns = append(churns, h.Churn)
 	}
@@ -293,12 +290,9 @@ func (d *Draft) computeCoupling() {
 	// Relative to this repo: "heavily depended upon" differs wildly between
 	// a library and an application.
 	sort.Ints(fanIns)
-	cutoff := 0
+	cutoff := 3
 	if n := len(fanIns); n > 0 {
-		cutoff = fanIns[(n*95)/100]
-	}
-	if cutoff < 3 {
-		cutoff = 3
+		cutoff = max(3, fanIns[n*95/100])
 	}
 	for i := range d.Buildings {
 		d.Buildings[i].Hub = d.Buildings[i].FanIn >= cutoff

@@ -4,12 +4,13 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
-	"sort"
+	"slices"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -17,6 +18,7 @@ import (
 	"github.com/repolis/repolis/backend/internal/git"
 	"github.com/repolis/repolis/backend/internal/llm"
 	"github.com/repolis/repolis/backend/internal/logger"
+	"github.com/repolis/repolis/backend/internal/models"
 )
 
 func runRefine(raw *analyzer.RawExtraction, history map[string]*git.FileHistory) {
@@ -163,23 +165,10 @@ func main() {
 	}
 
 	fmt.Println("\ntop buildings by methods:")
-	top := append([]struct {
-		n string
-		m int
-		f int
-		k string
-	}{}, nil...)
-	for _, b := range draft.Buildings {
-		top = append(top, struct {
-			n string
-			m int
-			f int
-			k string
-		}{b.Name, b.NumMethods, b.NumFields, b.Kind})
-	}
-	sort.Slice(top, func(i, j int) bool { return top[i].m > top[j].m })
-	for i := 0; i < len(top) && i < 10; i++ {
-		fmt.Printf("  %-32s %s  methods=%-4d fields=%d\n", trunc(top[i].n, 32), top[i].k, top[i].m, top[i].f)
+	top := slices.Clone(draft.Buildings)
+	slices.SortStableFunc(top, func(a, b models.Building) int { return cmp.Compare(b.NumMethods, a.NumMethods) })
+	for _, b := range top[:min(len(top), 10)] {
+		fmt.Printf("  %-32s %s  methods=%-4d fields=%d\n", trunc(b.Name, 32), b.Kind, b.NumMethods, b.NumFields)
 	}
 
 	if *useLLM {
