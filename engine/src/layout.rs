@@ -5,11 +5,11 @@ use voronoice::{BoundingBox, Point, VoronoiBuilder};
 
 const MIN_FOOTPRINT: f64 = 4.0;
 const MIN_HEIGHT: f64 = 3.0;
-/// Gap left around each building lot; becomes the alley between buildings.
+// Gap left around each building lot; becomes the alley between buildings.
 const LOT_MARGIN: f64 = 1.1;
-/// Gap left around each directory block; becomes a street.
+// Gap left around each directory block; becomes a street.
 const STREET_WIDTH: f64 = 4.5;
-/// Gap between a district's outer boundary and its built-up area.
+// Gap between a district's outer boundary and its built-up area.
 const DISTRICT_PADDING: f64 = 7.0;
 
 pub struct PlacedBuilding {

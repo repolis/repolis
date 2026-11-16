@@ -18,18 +18,17 @@ mod view;
 // against real city data without a browser.
 pub use data::CityMap;
 
-/// Test-only hook that feeds a city in without going through wasm bindings.
-#[doc(hidden)]
+// Test-only hook that feeds a city in without going through wasm bindings.
 pub fn queue_city_for_test(city: CityMap) {
     PENDING_DATA.with(|c| *c.borrow_mut() = Some(city));
 }
-pub use render::{
-    apply_age as apply_age_public, churn_bucket as churn_bucket_public,
-    color_key as color_key_public, typology_rgb as typology_rgb_public,
-};
 pub use layout::{
     compute_layout as compute_layout_public, point_in_convex as point_in_convex_public,
     polygon_area as polygon_area_public, LayoutResult,
+};
+pub use render::{
+    apply_age as apply_age_public, churn_bucket as churn_bucket_public,
+    color_key as color_key_public, typology_rgb as typology_rgb_public,
 };
 
 use camera::{camera_controls, CityCamera};
@@ -46,7 +45,6 @@ const BUILDING_BASE: f32 = 0.45;
 #[derive(Component)]
 struct CityElement;
 
-/// A roof cap or plinth, its own entity so it can use a different material.
 #[derive(Component)]
 struct BuildingTrim {
     owner: Entity,
@@ -58,7 +56,6 @@ struct LinkLayer;
 #[derive(Component)]
 struct HighlightLinkLayer;
 
-/// Everything picking and selection need, in one resource.
 #[derive(Resource, Default)]
 struct CityIndex {
     districts: Vec<DistrictGeom>,
@@ -70,7 +67,7 @@ struct CityIndex {
     center: Vec3,
 }
 
-/// (normal, dimmed, highlighted) for one quantised building colour.
+// (normal, dimmed, highlighted) for one quantised building color
 type MaterialSet = (
     Handle<StandardMaterial>,
     Handle<StandardMaterial>,
@@ -109,13 +106,7 @@ mod path_tests {
     #[test]
     fn finds_the_shortest_route_not_merely_a_route() {
         // A long way round exists; BFS must take the short one.
-        let l = links(&[
-            ("a", "b"),
-            ("b", "c"),
-            ("c", "d"),
-            ("a", "x"),
-            ("x", "d"),
-        ]);
+        let l = links(&[("a", "b"), ("b", "c"), ("c", "d"), ("a", "x"), ("x", "d")]);
         assert_eq!(shortest_path(&l, "a", "d"), vec!["a", "x", "d"]);
     }
 
@@ -146,23 +137,23 @@ mod path_tests {
     }
 }
 
-/// Everything the view is showing. One resource, so mode, filter, selection
-/// and path settle in a single pass instead of fighting over material handles.
+// Everything the view is showing. One resource, so mode, filter, selection
+// and path settle in a single pass instead of fighting over material handles.
 #[derive(Resource, Default)]
 struct ViewState {
     mode: ColorMode,
     filter: Filter,
     scales: Scales,
-    /// Buildings on the highlighted dependency path, in order.
+    // Buildings on the highlighted dependency path, in order.
     path: Vec<Entity>,
-    /// Where a path query starts. Separate from the selection: clicking the
-    /// second building replaces it, so "from the selection" would only ever
-    /// ask for a path from a building to itself.
+    // Where a path query starts. Separate from the selection: clicking the
+    // second building replaces it, so "from the selection" would only ever
+    // ask for a path from a building to itself.
     path_anchor: Option<String>,
-    /// Day of history to show the city as of, None for the present. Birth
-    /// dates come from the `git log` pass that already runs, so no commit is
-    /// checked out. It shows when each part came into existence, not how it
-    /// grew - that would need per-commit metrics.
+    // Day of history to show the city as of, None for the present. Birth
+    // dates come from the `git log` pass that already runs, so no commit is
+    // checked out. It shows when each part came into existence, not how it
+    // grew - that would need per-commit metrics.
     timeline: Option<u32>,
     dirty: bool,
 }
@@ -175,13 +166,29 @@ struct LinkStore {
 thread_local! {
     static CAMERA_OUT: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
     static PENDING_DATA: std::cell::RefCell<Option<CityMap>> = const { std::cell::RefCell::new(None) };
-    static PENDING_FOCUS: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
-    static PENDING_COMMAND: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+    // A queue, not a slot: restoring a URL issues several commands in one tick.
+    static PENDING_COMMANDS: std::cell::RefCell<Vec<Command>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
-/// Registers every resource and system the city needs. Split out from
-/// `run_bevy_app` so a headless test can build the same schedule: Bevy only
-/// validates system parameters on the first run, not at compile time.
+enum Command {
+    Reset,
+    Clear,
+    Mode(ColorMode),
+    Filter(Filter),
+    Timeline(Option<u32>),
+    Camera(String),
+    Anchor(Option<String>),
+    Path(String),
+    Focus(String),
+}
+
+fn queue(cmd: Command) {
+    PENDING_COMMANDS.with(|c| c.borrow_mut().push(cmd));
+}
+
+// Registers every resource and system the city needs. Split out from
+// `run_bevy_app` so a headless test can build the same schedule: Bevy only
+// validates system parameters on the first run, not at compile time.
 pub fn add_city_systems(app: &mut App) {
     app.init_resource::<SelectionState>()
         .init_resource::<CityIndex>()
@@ -216,26 +223,26 @@ pub fn run_bevy_app() {
 
     let mut app = App::new();
     app.add_plugins(
-            DefaultPlugins
-                .set(WindowPlugin {
-                    primary_window: Some(Window {
-                        title: "Repolis".into(),
-                        canvas: Some("#bevy-canvas".into()),
-                        fit_canvas_to_parent: true,
-                        prevent_default_event_handling: false,
-                        ..default()
-                    }),
-                    ..default()
-                })
-                .set(RenderPlugin {
-                    render_creation: RenderCreation::Automatic(WgpuSettings {
-                        // WebGL2 too: WebGPU alone is a blank canvas in
-                        // Firefox and older Safari.
-                        backends: Some(Backends::BROWSER_WEBGPU | Backends::GL),
-                        ..default()
-                    }),
+        DefaultPlugins
+            .set(WindowPlugin {
+                primary_window: Some(Window {
+                    title: "Repolis".into(),
+                    canvas: Some("#bevy-canvas".into()),
+                    fit_canvas_to_parent: true,
+                    prevent_default_event_handling: false,
                     ..default()
                 }),
+                ..default()
+            })
+            .set(RenderPlugin {
+                render_creation: RenderCreation::Automatic(WgpuSettings {
+                    // WebGL2 too: WebGPU alone is a blank canvas in
+                    // Firefox and older Safari.
+                    backends: Some(Backends::BROWSER_WEBGPU | Backends::GL),
+                    ..default()
+                }),
+                ..default()
+            }),
     );
     add_city_systems(&mut app);
     app.run();
@@ -266,31 +273,31 @@ pub fn load_city_data(val: JsValue) {
 /// Focuses the camera on a building by id or exact name, and selects it.
 #[wasm_bindgen]
 pub fn focus_symbol(query: String) {
-    PENDING_FOCUS.with(|c| *c.borrow_mut() = Some(query));
+    queue(Command::Focus(query));
 }
 
 #[wasm_bindgen]
 pub fn reset_camera() {
-    PENDING_COMMAND.with(|c| *c.borrow_mut() = Some("reset".into()));
+    queue(Command::Reset);
 }
 
 /// Switches which metric drives building colour.
 #[wasm_bindgen]
 pub fn set_color_mode(mode: String) {
-    PENDING_COMMAND.with(|c| *c.borrow_mut() = Some(format!("mode:{mode}")));
+    queue(Command::Mode(ColorMode::parse(&mode)));
 }
 
 /// Restricts the view. Everything not matching becomes translucent.
 #[wasm_bindgen]
 pub fn set_filter(json: String) {
-    PENDING_COMMAND.with(|c| *c.borrow_mut() = Some(format!("filter:{json}")));
+    queue(Command::Filter(serde_json::from_str(&json).unwrap_or_default()));
 }
 
 /// Shows the city as it stood on the given day of its history, counted from
 /// the first commit. An empty string returns to the present.
 #[wasm_bindgen]
 pub fn set_timeline(day: String) {
-    PENDING_COMMAND.with(|c| *c.borrow_mut() = Some(format!("timeline:{day}")));
+    queue(Command::Timeline(day.parse().ok()));
 }
 
 /// The current camera, as `focusX,focusZ,radius,alpha,beta`. Polled rather
@@ -303,25 +310,25 @@ pub fn camera_state() -> String {
 /// Restores a camera previously returned by `camera_state`.
 #[wasm_bindgen]
 pub fn set_camera_state(state: String) {
-    PENDING_COMMAND.with(|c| *c.borrow_mut() = Some(format!("camera:{state}")));
+    queue(Command::Camera(state));
 }
 
 /// Pins the building a path query starts from. An empty id clears it.
 #[wasm_bindgen]
 pub fn set_path_anchor(building_id: String) {
-    PENDING_COMMAND.with(|c| *c.borrow_mut() = Some(format!("anchor:{building_id}")));
+    queue(Command::Anchor(Some(building_id).filter(|id| !id.is_empty())));
 }
 
 /// Traces the shortest dependency path from the pinned anchor to this
 /// building, by hop count.
 #[wasm_bindgen]
 pub fn show_path_to(building_id: String) {
-    PENDING_COMMAND.with(|c| *c.borrow_mut() = Some(format!("path:{building_id}")));
+    queue(Command::Path(building_id));
 }
 
 #[wasm_bindgen]
 pub fn clear_selection() {
-    PENDING_COMMAND.with(|c| *c.borrow_mut() = Some("clear".into()));
+    queue(Command::Clear);
 }
 
 fn setup_scene(mut commands: Commands) {
@@ -395,7 +402,6 @@ struct HelpText;
 /// Replaces characters Bevy's bundled subset font cannot draw. District names
 /// come from a language model, so they carry dashes, quotes and accents.
 fn ascii_only(s: &str) -> String {
-    // Multi-character first; the char map below cannot expand.
     s.replace('\u{2026}', "...")
         .chars()
         .map(|c| match c {
@@ -467,7 +473,7 @@ fn process_city_data(
             if v.is_empty() {
                 return fallback;
             }
-            (v[(v.len() * 95) / 100.min(v.len() - 1)] as f32).max(1.0)
+            (v[(v.len() * 95 / 100).min(v.len() - 1)] as f32).max(1.0)
         };
         view_state.scales = Scales {
             complexity: p95(&cx, 20.0),
@@ -595,10 +601,16 @@ fn spawn_city(
     }
     for e in &city.dependencies {
         if let Some(t) = name_of.get(e.target.as_str()) {
-            calls.entry(e.source.as_str()).or_default().push((*t).to_string());
+            calls
+                .entry(e.source.as_str())
+                .or_default()
+                .push((*t).to_string());
         }
         if let Some(s) = name_of.get(e.source.as_str()) {
-            called_by.entry(e.target.as_str()).or_default().push((*s).to_string());
+            called_by
+                .entry(e.target.as_str())
+                .or_default()
+                .push((*s).to_string());
         }
     }
 
@@ -611,7 +623,11 @@ fn spawn_city(
                 perceptual_roughness: 1.0,
                 ..default()
             }),
-            transform: Transform::from_xyz(result.center_x as f32, GROUND_Y, result.center_z as f32),
+            transform: Transform::from_xyz(
+                result.center_x as f32,
+                GROUND_Y,
+                result.center_z as f32,
+            ),
             ..default()
         },
         CityElement,
@@ -625,22 +641,22 @@ fn spawn_city(
     for (i, d) in result.districts.iter().enumerate() {
         let rgb = district_ground_rgb(&d.typology);
         commands.spawn((
-                PbrBundle {
-                    mesh: meshes.add(polygon_prism(&d.polygon, DISTRICT_TOP, GROUND_Y + 0.02)),
-                    material: materials.add(StandardMaterial {
-                        base_color: Color::srgb(rgb[0], rgb[1], rgb[2]),
-                        perceptual_roughness: 0.95,
-                        ..default()
-                    }),
+            PbrBundle {
+                mesh: meshes.add(polygon_prism(&d.polygon, DISTRICT_TOP, GROUND_Y + 0.02)),
+                material: materials.add(StandardMaterial {
+                    base_color: Color::srgb(rgb[0], rgb[1], rgb[2]),
+                    perceptual_roughness: 0.95,
                     ..default()
-                },
-                CityElement,
-                PickableDistrict {
-                    info: Box::new(district_info(city, i)),
-                    polygon: d.polygon.clone(),
-                    district_idx: i,
-                },
-            ));
+                }),
+                ..default()
+            },
+            CityElement,
+            PickableDistrict {
+                info: Box::new(district_info(city, i)),
+                polygon: d.polygon.clone(),
+                district_idx: i,
+            },
+        ));
 
         let mut quads = QuadBuilder::new();
         for s in result.streets.iter().filter(|s| s.district_idx == i) {
@@ -650,7 +666,14 @@ fn spawn_city(
             let dz = s.local_z as f32 - d.origin_z as f32;
             let wx = d.origin_x as f32 + dx * cos_r - dz * sin_r;
             let wz = d.origin_z as f32 + dx * sin_r + dz * cos_r;
-            quads.add_rect(wx, wz, s.width as f32, s.depth as f32, STREET_Y, d.rot as f32);
+            quads.add_rect(
+                wx,
+                wz,
+                s.width as f32,
+                s.depth as f32,
+                STREET_Y,
+                d.rot as f32,
+            );
         }
         if !quads.is_empty() {
             commands.spawn((
@@ -766,7 +789,11 @@ fn spawn_city(
                     .with_rotation(Quat::from_rotation_y(
                         result.districts[pb.district_idx].rot as f32,
                     ))
-                    .with_scale(Vec3::new(pb.width as f32, height, pb.depth as f32)),
+                    .with_scale(Vec3::new(
+                        pb.width as f32,
+                        height,
+                        pb.depth as f32,
+                    )),
                     ..default()
                 },
                 Pickable {
@@ -1024,7 +1051,9 @@ fn picking_system(
     mouse: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
 ) {
-    if keys.just_pressed(KeyCode::Escape) && (interaction.selected.is_some() || !state.path.is_empty()) {
+    if keys.just_pressed(KeyCode::Escape)
+        && (interaction.selected.is_some() || !state.path.is_empty())
+    {
         interaction.selected = None;
         state.path.clear();
         state.dirty = true;
@@ -1087,7 +1116,11 @@ fn picking_system(
     let mut best_building: Option<Entity> = None;
 
     for (entity, p) in buildings.iter() {
-        if !candidate_districts.get(p.district_idx).copied().unwrap_or(false) {
+        if !candidate_districts
+            .get(p.district_idx)
+            .copied()
+            .unwrap_or(false)
+        {
             continue;
         }
         let Some(g) = index.districts.get(p.district_idx) else {
@@ -1112,7 +1145,10 @@ fn picking_system(
         if t > 0.0 {
             let hit = origin + dir * t;
             for (entity, d) in districts.iter() {
-                if candidate_districts.get(d.district_idx).copied().unwrap_or(false)
+                if candidate_districts
+                    .get(d.district_idx)
+                    .copied()
+                    .unwrap_or(false)
                     && point_in_polygon(hit.x as f64, hit.z as f64, &d.polygon)
                 {
                     best_district = Some(entity);
@@ -1141,7 +1177,10 @@ fn picking_system(
                     Some(HoverInfo {
                         kind: "district".into(),
                         name: d.info.name.clone(),
-                        detail: format!("{} entities \u{00b7} {}", d.info.building_count, d.info.typology),
+                        detail: format!(
+                            "{} entities \u{00b7} {}",
+                            d.info.building_count, d.info.typology
+                        ),
                     })
                 } else {
                     None
@@ -1289,9 +1328,11 @@ fn refresh_view(
                 if lr.source == selected_id || lr.target == selected_id {
                     if let Some(link) = store.links.get(lr.index) {
                         chosen.push(link);
-                        related.insert(
-                            if lr.source == selected_id { lr.target.clone() } else { lr.source.clone() },
-                        );
+                        related.insert(if lr.source == selected_id {
+                            lr.target.clone()
+                        } else {
+                            lr.source.clone()
+                        });
                     }
                 }
             }
@@ -1309,7 +1350,9 @@ fn refresh_view(
             .collect();
         for w in path_ids.windows(2) {
             for lr in &index.links {
-                if (lr.source == w[0] && lr.target == w[1]) || (lr.source == w[1] && lr.target == w[0]) {
+                if (lr.source == w[0] && lr.target == w[1])
+                    || (lr.source == w[1] && lr.target == w[0])
+                {
                     if let Some(link) = store.links.get(lr.index) {
                         chosen.push(link);
                     }
@@ -1431,8 +1474,12 @@ fn shortest_path(links: &[LinkRef], from: &str, to: &str) -> Vec<String> {
     }
     let mut adj: HashMap<&str, Vec<&str>> = HashMap::new();
     for lr in links {
-        adj.entry(lr.source.as_str()).or_default().push(lr.target.as_str());
-        adj.entry(lr.target.as_str()).or_default().push(lr.source.as_str());
+        adj.entry(lr.source.as_str())
+            .or_default()
+            .push(lr.target.as_str());
+        adj.entry(lr.target.as_str())
+            .or_default()
+            .push(lr.source.as_str());
     }
 
     let mut prev: HashMap<&str, &str> = HashMap::new();
@@ -1487,7 +1534,11 @@ fn update_labels(
         // Fade out where labels would overlap into noise, and when zoomed
         // right into one building.
         let hide = dist > index.radius.max(1.0) * 6.0 || dist < 12.0;
-        *vis = if hide { Visibility::Hidden } else { Visibility::Inherited };
+        *vis = if hide {
+            Visibility::Hidden
+        } else {
+            Visibility::Inherited
+        };
 
         let alpha = (1.0 - (dist / (index.radius.max(1.0) * 6.0))).clamp(0.25, 1.0);
         text.sections[0].style.color = Color::srgba(1.0, 0.99, 0.94, alpha);
@@ -1499,7 +1550,6 @@ fn update_labels(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn consume_commands(
     mut interaction: ResMut<SelectionState>,
     mut state: ResMut<ViewState>,
@@ -1507,13 +1557,10 @@ fn consume_commands(
     buildings: Query<(Entity, &Pickable)>,
     index: Res<CityIndex>,
 ) {
-    if let Some(cmd) = PENDING_COMMAND.with(|c| c.borrow_mut().take()) {
-        let (verb, arg) = match cmd.split_once(':') {
-            Some((v, a)) => (v, a),
-            None => (cmd.as_str(), ""),
-        };
-        match verb {
-            "reset" => {
+    let cmds = PENDING_COMMANDS.with(|c| std::mem::take(&mut *c.borrow_mut()));
+    for cmd in cmds {
+        match cmd {
+            Command::Reset => {
                 if let Ok(mut cam) = cam_q.get_single_mut() {
                     cam.go_home();
                 }
@@ -1524,21 +1571,21 @@ fn consume_commands(
                 dispatch_select(&SelectPayload::None);
                 dispatch_path(&None);
             }
-            "clear" => {
+            Command::Clear => {
                 interaction.selected = None;
                 state.path.clear();
                 state.dirty = true;
                 dispatch_select(&SelectPayload::None);
             }
-            "mode" => {
-                state.mode = ColorMode::parse(arg);
+            Command::Mode(mode) => {
+                state.mode = mode;
                 state.dirty = true;
             }
-            "filter" => {
-                state.filter = serde_json::from_str(arg).unwrap_or_default();
+            Command::Filter(filter) => {
+                state.filter = filter;
                 state.dirty = true;
             }
-            "camera" => {
+            Command::Camera(arg) => {
                 if let Ok(mut cam) = cam_q.get_single_mut() {
                     let n: Vec<f32> = arg.split(',').filter_map(|v| v.parse().ok()).collect();
                     if n.len() == 5 {
@@ -1551,25 +1598,21 @@ fn consume_commands(
                     }
                 }
             }
-            "timeline" => {
-                state.timeline = if arg.is_empty() {
-                    None
-                } else {
-                    arg.parse::<u32>().ok()
-                };
+            Command::Timeline(day) => {
+                state.timeline = day;
                 state.dirty = true;
             }
-            "anchor" => {
-                state.path_anchor = if arg.is_empty() { None } else { Some(arg.to_string()) };
+            Command::Anchor(id) => {
+                state.path_anchor = id;
                 state.path.clear();
                 state.dirty = true;
                 dispatch_path(&None);
             }
-            "path" => {
+            Command::Path(to_id) => {
                 state.path.clear();
                 let mut result = None;
                 if let Some(from_id) = state.path_anchor.clone() {
-                    let ids = shortest_path(&index.links, &from_id, arg);
+                    let ids = shortest_path(&index.links, &from_id, &to_id);
                     let mut hops = Vec::new();
                     for id in &ids {
                         if let Some(e) = index.by_id.get(id) {
@@ -1590,34 +1633,60 @@ fn consume_commands(
                     result = Some(PathInfo {
                         from_name: name_of(&from_id),
                         from_id,
-                        to_name: name_of(arg),
-                        to_id: arg.to_string(),
+                        to_name: name_of(&to_id),
+                        to_id,
                         hops,
                     });
                 }
                 state.dirty = true;
                 dispatch_path(&result);
             }
-            _ => {}
+            Command::Focus(query) => {
+                let Some((entity, p)) = find_building(&buildings, &query) else {
+                    continue;
+                };
+                interaction.selected = Some(entity);
+                state.path.clear();
+                state.dirty = true;
+
+                if let (Ok(mut cam), Some(g)) =
+                    (cam_q.get_single_mut(), index.districts.get(p.district_idx))
+                {
+                    let center = to_world(
+                        Vec2::new(
+                            (p.local_min.x + p.local_max.x) * 0.5,
+                            (p.local_min.y + p.local_max.y) * 0.5,
+                        ),
+                        g.origin,
+                        g.rot,
+                    );
+                    let footprint = (p.local_max - p.local_min).length();
+                    let height = p.y_max - p.y_min;
+                    let size = footprint.max(height).max(4.0);
+                    cam.frame_object(
+                        Vec3::new(center.x, (p.y_min + p.y_max) * 0.5, center.y),
+                        size,
+                    );
+                }
+
+                dispatch_select(&SelectPayload::Building(p.info.clone()));
+            }
         }
     }
+}
 
-    let Some(query) = PENDING_FOCUS.with(|c| c.borrow_mut().take()) else {
-        return;
-    };
-
-    // Exact id, then exact name, then a case-insensitive substring.
-    let mut found: Option<(Entity, &Pickable)> = None;
-    for (e, p) in buildings.iter() {
-        if p.info.id == query {
-            found = Some((e, p));
-            break;
-        }
+/// Exact id, then exact name, then prefix, then a case-insensitive substring.
+fn find_building<'a>(
+    buildings: &'a Query<(Entity, &Pickable)>,
+    query: &str,
+) -> Option<(Entity, &'a Pickable)> {
+    if let Some(hit) = buildings.iter().find(|(_, p)| p.info.id == query) {
+        return Some(hit);
     }
-    if found.is_none() {
-        let lower = query.to_lowercase();
-        let mut best: Option<(Entity, &Pickable, usize)> = None;
-        for (e, p) in buildings.iter() {
+    let lower = query.to_lowercase();
+    buildings
+        .iter()
+        .filter_map(|(e, p)| {
             let name = p.info.name.to_lowercase();
             let score = if name == lower {
                 0
@@ -1626,40 +1695,10 @@ fn consume_commands(
             } else if name.contains(&lower) {
                 2
             } else {
-                continue;
+                return None;
             };
-            if best.as_ref().map(|(_, _, s)| score < *s).unwrap_or(true) {
-                best = Some((e, p, score));
-            }
-        }
-        found = best.map(|(e, p, _)| (e, p));
-    }
-
-    let Some((entity, p)) = found else {
-        return;
-    };
-
-    interaction.selected = Some(entity);
-    state.path.clear();
-    state.dirty = true;
-
-    if let (Ok(mut cam), Some(g)) = (cam_q.get_single_mut(), index.districts.get(p.district_idx)) {
-        let center = to_world(
-            Vec2::new(
-                (p.local_min.x + p.local_max.x) * 0.5,
-                (p.local_min.y + p.local_max.y) * 0.5,
-            ),
-            g.origin,
-            g.rot,
-        );
-        let footprint = (p.local_max - p.local_min).length();
-        let height = p.y_max - p.y_min;
-        let size = footprint.max(height).max(4.0);
-        cam.frame_object(
-            Vec3::new(center.x, (p.y_min + p.y_max) * 0.5, center.y),
-            size,
-        );
-    }
-
-    dispatch_select(&SelectPayload::Building(p.info.clone()));
+            Some((score, e, p))
+        })
+        .min_by_key(|(score, _, _)| *score)
+        .map(|(_, e, p)| (e, p))
 }
