@@ -14,23 +14,14 @@ mod render;
 mod treemap;
 mod view;
 
-// Re-exported so `examples/layout_check.rs` can verify the layout invariants
-// against real city data without a browser.
 pub use data::CityMap;
 
 // Test-only hook that feeds a city in without going through wasm bindings.
 pub fn queue_city_for_test(city: CityMap) {
     PENDING_DATA.with(|c| *c.borrow_mut() = Some(city));
 }
-pub use layout::{
-    compute_layout as compute_layout_public, point_in_convex as point_in_convex_public,
-    polygon_area as polygon_area_public, LayoutResult,
-};
-pub use render::{
-    apply_age as apply_age_public, churn_bucket as churn_bucket_public,
-    color_key as color_key_public, typology_rgb as typology_rgb_public,
-};
 
+use layout::LayoutResult;
 use camera::{camera_controls, CityCamera};
 use hover::*;
 use render::*;

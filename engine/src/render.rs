@@ -57,15 +57,6 @@ pub fn apply_age(rgb: [f32; 3], age_days: u32) -> [f32; 3] {
     ]
 }
 
-/// Quantised, so identical appearances share one material handle and batch
-/// into a single draw call. `module` is deliberately absent: nothing
-/// downstream read it, so it doubled the materials for byte-identical
-/// appearances. Modules are distinguished by geometry instead.
-pub fn color_key(rgb: [f32; 3], churn_bucket: u32) -> u32 {
-    let q = |v: f32| ((v.clamp(0.0, 1.0) * 31.0).round() as u32) & 0x1f;
-    (q(rgb[0]) << 16) | (q(rgb[1]) << 11) | (q(rgb[2]) << 6) | churn_bucket
-}
-
 pub fn churn_bucket(churn_rank: f64) -> u32 {
     (churn_rank.clamp(0.0, 1.0) * 3.999) as u32
 }

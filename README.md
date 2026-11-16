@@ -46,15 +46,7 @@ go run ./cmd/analyze -llm /path/to/a/checkout
 # Tests
 cd backend && go test ./...
 cd engine  && cargo test --release
-
-# Verify the layout invariants against a real generated city
-cd engine && cargo run --release --example layout_check -- \
-  ../backend/data/cities/<hash>.json
 ```
-
-`layout_check` asserts that no two buildings overlap, that every building is
-inside its own district, that nothing was dropped, and that height carries
-signal. It is the headless substitute for looking at the city.
 
 ## Adding a language
 
