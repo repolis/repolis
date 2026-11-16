@@ -31,16 +31,16 @@ pub struct PathResult {
 pub struct Pickable {
     pub district_idx: usize,
     pub building_idx: usize,
-    /// District-local footprint: picking rotates the ray once per district.
-    pub local_min: Vec2,
-    pub local_max: Vec2,
-    pub y_min: f32,
-    pub y_max: f32,
+    /// World-space bounding box.
+    pub min: Vec3,
+    pub max: Vec3,
 }
 
 #[derive(Component)]
 pub struct PickableDistrict {
-    pub polygon: Vec<(f64, f64)>,
+    /// Ground rectangle, as (x, z).
+    pub min: Vec2,
+    pub max: Vec2,
     pub district_idx: usize,
 }
 

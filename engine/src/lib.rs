@@ -3,6 +3,7 @@ use bevy::prelude::*;
 use bevy::render::settings::{Backends, RenderCreation, WgpuSettings};
 use bevy::render::RenderPlugin;
 use std::collections::HashMap;
+use std::f32::consts::FRAC_PI_2;
 use wasm_bindgen::prelude::*;
 
 mod camera;
@@ -44,13 +45,11 @@ struct HighlightLinkLayer;
 #[derive(Resource, Default)]
 struct CityIndex {
     city: CityMap,
-    districts: Vec<DistrictGeom>,
     by_id: HashMap<String, Entity>,
     links: Vec<Link>,
     materials: HashMap<u32, MaterialSet>,
     faded: Option<Handle<StandardMaterial>>,
     radius: f32,
-    center: Vec3,
 }
 
 impl CityIndex {
@@ -65,13 +64,6 @@ type MaterialSet = (
     Handle<StandardMaterial>,
     Handle<StandardMaterial>,
 );
-
-struct DistrictGeom {
-    rot: f32,
-    origin: Vec2,
-    min: Vec2,
-    max: Vec2,
-}
 
 #[cfg(test)]
 mod path_tests {
@@ -416,7 +408,6 @@ fn process_city_data(
 
     let result = layout::compute_layout(&city);
     index.radius = result.radius as f32;
-    index.center = Vec3::new(result.center_x as f32, 0.0, result.center_z as f32);
 
     spawn_city(
         &mut commands,
@@ -460,7 +451,7 @@ fn process_city_data(
 
     if !had_city {
         for (mut transform, mut cam) in camera_q.iter_mut() {
-            cam.frame(index.center, index.radius * 2.35 + 60.0);
+            cam.frame(Vec3::ZERO, index.radius * 2.35 + 60.0);
             cam.apply(&mut transform);
         }
     }
@@ -486,88 +477,76 @@ fn spawn_city(
     let ground_radius = result.radius as f32 * 1.9 + 160.0;
     commands.spawn((
         PbrBundle {
-            mesh: meshes.add(circular_ground(ground_radius, 96)),
+            mesh: meshes.add(Circle::new(ground_radius).mesh().resolution(96)),
             material: materials.add(StandardMaterial {
                 base_color: Color::srgb(0.13, 0.14, 0.15),
                 perceptual_roughness: 1.0,
                 ..default()
             }),
-            transform: Transform::from_xyz(
-                result.center_x as f32,
-                GROUND_Y,
-                result.center_z as f32,
-            ),
+            transform: Transform::from_rotation(Quat::from_rotation_x(-FRAC_PI_2)),
             ..default()
         },
         CityElement,
     ));
 
+    // One shared cube mesh and a few shared materials, so Bevy instances
+    // them into a handful of draw calls.
     let cube = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
+    let slab = |rect: &treemap::Rect, y0: f32, y1: f32| {
+        let (x, z) = rect.center();
+        Transform::from_xyz(x as f32, (y0 + y1) * 0.5, z as f32).with_scale(Vec3::new(
+            rect.w as f32,
+            y1 - y0,
+            rect.d as f32,
+        ))
+    };
 
-    // One mesh per district, not one platform entity per building.
-    for (i, d) in result.districts.iter().enumerate() {
-        let rgb = district_ground_rgb(&d.typology);
+    let street_material = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.20, 0.21, 0.23),
+        perceptual_roughness: 0.98,
+        ..default()
+    });
+    for street in &result.streets {
         commands.spawn((
             PbrBundle {
-                mesh: meshes.add(polygon_prism(&d.polygon, DISTRICT_TOP, GROUND_Y + 0.02)),
+                mesh: cube.clone(),
+                material: street_material.clone(),
+                transform: slab(street, DISTRICT_TOP, STREET_Y),
+                ..default()
+            },
+            CityElement,
+        ));
+    }
+
+    for (i, d) in result.districts.iter().enumerate() {
+        let district = &city.districts[i];
+        let rgb = district_ground_rgb(&district.typology);
+        let g = d.ground;
+        commands.spawn((
+            PbrBundle {
+                mesh: cube.clone(),
                 material: materials.add(StandardMaterial {
                     base_color: Color::srgb(rgb[0], rgb[1], rgb[2]),
                     perceptual_roughness: 0.95,
                     ..default()
                 }),
+                transform: slab(&g, GROUND_Y + 0.02, DISTRICT_TOP),
                 ..default()
             },
             CityElement,
             PickableDistrict {
-                polygon: d.polygon.clone(),
+                min: Vec2::new(g.x as f32, g.z as f32),
+                max: Vec2::new((g.x + g.w) as f32, (g.z + g.d) as f32),
                 district_idx: i,
             },
         ));
 
-        let mut quads = QuadBuilder::new();
-        for s in result.streets.iter().filter(|s| s.district_idx == i) {
-            // Rotate each slab into world space about the district origin.
-            let (sin_r, cos_r) = (d.rot as f32).sin_cos();
-            let dx = s.local_x as f32 - d.origin_x as f32;
-            let dz = s.local_z as f32 - d.origin_z as f32;
-            let wx = d.origin_x as f32 + dx * cos_r - dz * sin_r;
-            let wz = d.origin_z as f32 + dx * sin_r + dz * cos_r;
-            quads.add_rect(
-                wx,
-                wz,
-                s.width as f32,
-                s.depth as f32,
-                STREET_Y,
-                d.rot as f32,
-            );
-        }
-        if !quads.is_empty() {
-            commands.spawn((
-                PbrBundle {
-                    mesh: meshes.add(quads.build()),
-                    material: materials.add(StandardMaterial {
-                        base_color: Color::srgb(0.20, 0.21, 0.23),
-                        perceptual_roughness: 0.98,
-                        ..default()
-                    }),
-                    ..default()
-                },
-                CityElement,
-            ));
-        }
-
-        index.districts.push(DistrictGeom {
-            rot: d.rot as f32,
-            origin: Vec2::new(d.origin_x as f32, d.origin_z as f32),
-            min: Vec2::new(d.min_x as f32, d.min_z as f32),
-            max: Vec2::new(d.max_x as f32, d.max_z as f32),
-        });
-
         // One world-space label per district: without text, a district can
         // only be identified by hovering it.
+        let (x, z) = g.center();
         commands.spawn((
             TextBundle::from_section(
-                ascii_only(&format!("{} ({})", d.name, d.building_count)),
+                ascii_only(&format!("{} ({})", district.name, d.building_count)),
                 TextStyle {
                     font_size: 15.0,
                     color: Color::srgb(1.0, 0.99, 0.94),
@@ -579,57 +558,39 @@ fn spawn_city(
                 ..default()
             }),
             DistrictLabel {
-                world: Vec3::new(d.label_x as f32, BUILDING_BASE + 6.0, d.label_z as f32),
+                world: Vec3::new(x as f32, BUILDING_BASE + 6.0, z as f32),
             },
             CityElement,
         ));
     }
 
-    // One shared cube mesh and a few shared materials, so Bevy instances
-    // them into a handful of draw calls.
     for pb in &result.buildings {
         let district = &city.districts[pb.district_idx];
         let b = &district.buildings[pb.building_idx];
         let rgb = apply_age(typology_rgb(&district.typology), b.age_days);
         let handles = material_set(materials, &mut index.materials, rgb);
 
-        let half_w = (pb.width * 0.5) as f32;
-        let half_d = (pb.depth * 0.5) as f32;
-        let height = pb.height as f32;
-
+        let half = Vec3::new(pb.width as f32, 0.0, pb.depth as f32) * 0.5;
+        let base = Vec3::new(pb.center_x as f32, BUILDING_BASE, pb.center_z as f32);
+        let (min, max) = (base - half, base + half + Vec3::Y * pb.height as f32);
         let entity = commands
             .spawn((
                 PbrBundle {
                     mesh: cube.clone(),
                     material: handles.0.clone(),
-                    transform: Transform::from_xyz(
-                        pb.center_x as f32,
-                        BUILDING_BASE + height * 0.5,
-                        pb.center_z as f32,
-                    )
-                    .with_rotation(Quat::from_rotation_y(
-                        result.districts[pb.district_idx].rot as f32,
-                    ))
-                    .with_scale(Vec3::new(
-                        pb.width as f32,
-                        height,
-                        pb.depth as f32,
-                    )),
+                    transform: Transform::from_translation((min + max) * 0.5).with_scale(max - min),
                     ..default()
                 },
                 Pickable {
                     district_idx: pb.district_idx,
                     building_idx: pb.building_idx,
-                    local_min: Vec2::new(pb.local_x as f32 - half_w, pb.local_z as f32 - half_d),
-                    local_max: Vec2::new(pb.local_x as f32 + half_w, pb.local_z as f32 + half_d),
-                    y_min: BUILDING_BASE,
-                    y_max: BUILDING_BASE + height,
+                    min,
+                    max,
                 },
                 CityElement,
             ))
             .id();
-
-        index.by_id.insert(pb.id.clone(), entity);
+        index.by_id.insert(b.id.clone(), entity);
     }
 
     // One merged mesh for the overview, one reserved for the selection.
@@ -736,24 +697,6 @@ fn ray_aabb(origin: Vec3, dir: Vec3, min: Vec3, max: Vec3) -> Option<f32> {
     Some(if tmin > 0.0 { tmin } else { tmax })
 }
 
-fn point_in_polygon(px: f64, pz: f64, poly: &[(f64, f64)]) -> bool {
-    let n = poly.len();
-    if n < 3 {
-        return false;
-    }
-    let mut inside = false;
-    let mut j = n - 1;
-    for i in 0..n {
-        let (xi, zi) = poly[i];
-        let (xj, zj) = poly[j];
-        if ((zi > pz) != (zj > pz)) && (px < (xj - xi) * (pz - zi) / (zj - zi) + xi) {
-            inside = !inside;
-        }
-        j = i;
-    }
-    inside
-}
-
 #[allow(clippy::too_many_arguments)]
 fn picking_system(
     windows: Query<&Window>,
@@ -809,45 +752,10 @@ fn picking_system(
     let origin = ray.origin;
     let dir = *ray.direction;
 
-    // Two-level cull: district bounding boxes first, then only the buildings
-    // inside the districts the ray crosses.
-    let mut candidate_districts = vec![false; index.districts.len()];
-    let mut any_candidate = false;
-    for (i, g) in index.districts.iter().enumerate() {
-        let min = Vec3::new(g.min.x, 0.0, g.min.y);
-        let max = Vec3::new(g.max.x, BUILDING_BASE + 90.0, g.max.y);
-        if ray_aabb(origin, dir, min, max).is_some() {
-            candidate_districts[i] = true;
-            any_candidate = true;
-        }
-    }
-    if !any_candidate {
-        if interaction.hovered.take().is_some() {
-            dispatch_hover(&None);
-        }
-        return;
-    }
-
     let mut best_t = f32::MAX;
     let mut best_building: Option<Entity> = None;
-
     for (entity, p) in buildings.iter() {
-        if !candidate_districts
-            .get(p.district_idx)
-            .copied()
-            .unwrap_or(false)
-        {
-            continue;
-        }
-        let Some(g) = index.districts.get(p.district_idx) else {
-            continue;
-        };
-        // Into the district's local frame, so rotated footprints stay
-        // axis-aligned boxes.
-        let (o, d) = to_local(origin, dir, g.origin, g.rot);
-        let min = Vec3::new(p.local_min.x, p.y_min, p.local_min.y);
-        let max = Vec3::new(p.local_max.x, p.y_max, p.local_max.y);
-        if let Some(t) = ray_aabb(o, d, min, max) {
+        if let Some(t) = ray_aabb(origin, dir, p.min, p.max) {
             if t < best_t {
                 best_t = t;
                 best_building = Some(entity);
@@ -859,18 +767,11 @@ fn picking_system(
     if best_building.is_none() && dir.y.abs() > 1e-5 {
         let t = (DISTRICT_TOP - origin.y) / dir.y;
         if t > 0.0 {
-            let hit = origin + dir * t;
-            for (entity, d) in districts.iter() {
-                if candidate_districts
-                    .get(d.district_idx)
-                    .copied()
-                    .unwrap_or(false)
-                    && point_in_polygon(hit.x as f64, hit.z as f64, &d.polygon)
-                {
-                    best_district = Some(entity);
-                    break;
-                }
-            }
+            let hit = (origin + dir * t).xz();
+            best_district = districts
+                .iter()
+                .find(|(_, d)| hit.cmpge(d.min).all() && hit.cmple(d.max).all())
+                .map(|(e, _)| e);
         }
     }
 
@@ -908,22 +809,7 @@ fn picking_system(
             interaction.selected = Some(e);
 
             if let Ok(mut cam) = cam_focus_q.get_single_mut() {
-                let g = &index.districts[p.district_idx];
-                let center = to_world(
-                    Vec2::new(
-                        (p.local_min.x + p.local_max.x) * 0.5,
-                        (p.local_min.y + p.local_max.y) * 0.5,
-                    ),
-                    g.origin,
-                    g.rot,
-                );
-                let footprint = (p.local_max - p.local_min).length();
-                let height = p.y_max - p.y_min;
-                let size = footprint.max(height).max(4.0);
-                cam.frame_object(
-                    Vec3::new(center.x, (p.y_min + p.y_max) * 0.5, center.y),
-                    size,
-                );
+                frame_building(&mut cam, p);
             }
 
             dispatch_select(&SelectPayload::Building(index.building(p).id.clone()));
@@ -932,9 +818,8 @@ fn picking_system(
             let (_, d) = districts.get(e).unwrap();
             interaction.selected = None;
             if let Ok(mut cam) = cam_focus_q.get_single_mut() {
-                let g = &index.districts[d.district_idx];
-                let center = (g.min + g.max) * 0.5;
-                let span = (g.max - g.min).length().max(20.0);
+                let center = (d.min + d.max) * 0.5;
+                let span = (d.max - d.min).length().max(20.0);
                 cam.frame_object(Vec3::new(center.x, 0.0, center.y), span);
             }
             let id = index.city.districts[d.district_idx].id.clone();
@@ -947,25 +832,9 @@ fn picking_system(
     }
 }
 
-fn to_local(origin: Vec3, dir: Vec3, pivot: Vec2, rot: f32) -> (Vec3, Vec3) {
-    let (s, c) = rot.sin_cos();
-    let ox = origin.x - pivot.x;
-    let oz = origin.z - pivot.y;
-    (
-        Vec3::new(
-            pivot.x + ox * c + oz * s,
-            origin.y,
-            pivot.y + -ox * s + oz * c,
-        ),
-        Vec3::new(dir.x * c + dir.z * s, dir.y, -dir.x * s + dir.z * c),
-    )
-}
-
-fn to_world(local: Vec2, pivot: Vec2, rot: f32) -> Vec2 {
-    let (s, c) = rot.sin_cos();
-    let dx = local.x - pivot.x;
-    let dz = local.y - pivot.y;
-    Vec2::new(pivot.x + dx * c - dz * s, pivot.y + dx * s + dz * c)
+fn frame_building(cam: &mut CityCamera, p: &Pickable) {
+    let size = (p.max - p.min).length().max(4.0);
+    cam.frame_object((p.min + p.max) * 0.5, size);
 }
 
 /// Quantised, so lookalike buildings share a material and batch into one call.
@@ -1323,24 +1192,8 @@ fn consume_commands(
                 state.path.clear();
                 state.dirty = true;
 
-                if let (Ok(mut cam), Some(g)) =
-                    (cam_q.get_single_mut(), index.districts.get(p.district_idx))
-                {
-                    let center = to_world(
-                        Vec2::new(
-                            (p.local_min.x + p.local_max.x) * 0.5,
-                            (p.local_min.y + p.local_max.y) * 0.5,
-                        ),
-                        g.origin,
-                        g.rot,
-                    );
-                    let footprint = (p.local_max - p.local_min).length();
-                    let height = p.y_max - p.y_min;
-                    let size = footprint.max(height).max(4.0);
-                    cam.frame_object(
-                        Vec3::new(center.x, (p.y_min + p.y_max) * 0.5, center.y),
-                        size,
-                    );
+                if let Ok(mut cam) = cam_q.get_single_mut() {
+                    frame_building(&mut cam, p);
                 }
 
                 dispatch_select(&SelectPayload::Building(id));

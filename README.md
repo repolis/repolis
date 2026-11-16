@@ -90,7 +90,6 @@ claims its extension, and they share one call graph.
 | Hue | district purpose (core, data, network, security, …) |
 | Saturation | recency — old code fades toward grey |
 | District ground area | amount of code in that district |
-| Distance between districts | how tightly they are coupled |
 
 Drag to orbit, scroll to zoom, WASD to pan, click to select, Esc to clear,
 `R` to reset. The legend in the bottom right repeats all of
