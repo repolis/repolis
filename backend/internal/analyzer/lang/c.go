@@ -52,11 +52,11 @@ func (l cLang) Parse(root *sitter.Node, src []byte) FileFacts {
 		case "type_definition":
 			if t := cTypedef(n, src); t != nil {
 				out.Types = append(out.Types, *t)
-				Children(n, func(_ int, ch *sitter.Node) {
+				for ch := range Children(n) {
 					if cIsTypeSpecifier(ch.Type()) {
 						seen[ch.StartByte()] = true
 					}
-				})
+				}
 			}
 
 		case "function_definition":
@@ -92,13 +92,12 @@ func cBodyList(n *sitter.Node) *sitter.Node {
 	if b := n.ChildByFieldName("body"); b != nil {
 		return b
 	}
-	var found *sitter.Node
-	Children(n, func(_ int, ch *sitter.Node) {
-		if found == nil && (ch.Type() == "field_declaration_list" || ch.Type() == "enumerator_list") {
-			found = ch
+	for ch := range Children(n) {
+		if ch.Type() == "field_declaration_list" || ch.Type() == "enumerator_list" {
+			return ch
 		}
-	})
-	return found
+	}
+	return nil
 }
 
 func cTypeDef(n *sitter.Node, src []byte, nameOverride string) *TypeDef {
@@ -114,30 +113,23 @@ func cTypeDef(n *sitter.Node, src []byte, nameOverride string) *TypeDef {
 		return nil
 	}
 	fields, types := cMembers(body, src)
-	return &TypeDef{
-		Name: name, Fields: fields, FieldTypes: types, LOC: Lines(n),
-		Start: n.StartByte(), End: n.EndByte(),
-	}
+	return newType(n, name, fields, types)
 }
 
 func cTypedef(n *sitter.Node, src []byte) *TypeDef {
-	var inner *sitter.Node
-	Children(n, func(_ int, ch *sitter.Node) {
-		if inner == nil && cIsTypeSpecifier(ch.Type()) {
-			inner = ch
+	for ch := range Children(n) {
+		if cIsTypeSpecifier(ch.Type()) {
+			name := strings.TrimLeft(Text(n.ChildByFieldName("declarator"), src), "* \t")
+			return cTypeDef(ch, src, name)
 		}
-	})
-	if inner == nil {
-		return nil
 	}
-	name := strings.TrimLeft(Text(n.ChildByFieldName("declarator"), src), "* \t")
-	return cTypeDef(inner, src, name)
+	return nil
 }
 
 func cMembers(body *sitter.Node, src []byte) ([]string, []string) {
 	fields := make([]string, 0, body.ChildCount())
 	types := make([]string, 0, body.ChildCount())
-	Children(body, func(_ int, ch *sitter.Node) {
+	for ch := range Children(body) {
 		switch ch.Type() {
 		case "field_declaration":
 			// `int x, y;` is one declaration with two declarators.
@@ -150,20 +142,15 @@ func cMembers(body *sitter.Node, src []byte) ([]string, []string) {
 				fields = append(fields, Text(id, src))
 			}
 		}
-	})
+	}
 	return fields, types
 }
 
 func cDeclaratorNames(n *sitter.Node, src []byte) []string {
 	var out []string
-	for i := 0; i < int(n.ChildCount()); i++ {
-		if n.FieldNameForChild(i) != "declarator" {
-			continue
-		}
-		if ch := n.Child(i); ch != nil {
-			if name := cUnwrap(ch, src); name != "" {
-				out = append(out, name)
-			}
+	for ch := range FieldChildren(n, "declarator") {
+		if name := cUnwrap(ch, src); name != "" {
+			out = append(out, name)
 		}
 	}
 	return out
@@ -178,13 +165,11 @@ func cUnwrap(n *sitter.Node, src []byte) string {
 		if d := n.ChildByFieldName("declarator"); d != nil {
 			return cUnwrap(d, src)
 		}
-		var r string
-		Children(n, func(_ int, ch *sitter.Node) {
-			if r == "" {
-				r = cUnwrap(ch, src)
+		for ch := range Children(n) {
+			if name := cUnwrap(ch, src); name != "" {
+				return name
 			}
-		})
-		return r
+		}
 	}
 	return ""
 }
@@ -217,33 +202,11 @@ func cFunc(node *sitter.Node, src []byte) *FuncDef {
 		return nil
 	}
 
-	var paramTypes []string
-	signature := ""
-	if params := fnDecl.ChildByFieldName("parameters"); params != nil {
-		signature = Collapse(Text(params, src))
-		Children(params, func(_ int, p *sitter.Node) {
-			if p.Type() == "parameter_declaration" {
-				paramTypes = append(paramTypes, cBaseType(p.ChildByFieldName("type"), src))
-			}
-		})
-	}
-
-	fn := &FuncDef{
-		Name:       name,
-		Signature:  signature,
-		ReturnType: cBaseType(node.ChildByFieldName("type"), src),
-		ParamTypes: paramTypes,
-		LOC:        Lines(node),
-		Start:      node.StartByte(),
-		End:        node.EndByte(),
-		// C has no syntactic receiver; that absence is the whole reason the
-		// association ladder exists.
-		Receiver: "",
-	}
-	if body := node.ChildByFieldName("body"); body != nil {
-		cBodyRefs(body, src, fn)
-		fn.Complexity = 1 + CountBranches(body, src, cBranchNodes, "binary_expression")
-	}
+	fn := newFunc(node, fnDecl.ChildByFieldName("parameters"), src, name, "", func(p *sitter.Node) (string, bool) {
+		return cBaseType(p.ChildByFieldName("type"), src), p.Type() == "parameter_declaration"
+	})
+	fn.ReturnType = cBaseType(node.ChildByFieldName("type"), src)
+	fn.scanBody(node.ChildByFieldName("body"), src, cBranchNodes, cBodyRefs)
 	return fn
 }
 
@@ -262,13 +225,12 @@ func cFuncDeclarator(n *sitter.Node) *sitter.Node {
 			return cFuncDeclarator(d)
 		}
 	}
-	var found *sitter.Node
-	Children(n, func(_ int, ch *sitter.Node) {
-		if found == nil && ch.Type() == "function_declarator" {
-			found = ch
+	for ch := range Children(n) {
+		if ch.Type() == "function_declarator" {
+			return ch
 		}
-	})
-	return found
+	}
+	return nil
 }
 
 func cBodyRefs(n *sitter.Node, src []byte, fn *FuncDef) {
@@ -298,15 +260,13 @@ func cBodyRefs(n *sitter.Node, src []byte, fn *FuncDef) {
 	})
 }
 
+// cIncludePath reads the file out of `#include "x.h"` or `#include <x.h>`.
 func cIncludePath(include string) string {
-	if i := strings.Index(include, `"`); i != -1 {
-		if e := strings.Index(include[i+1:], `"`); e != -1 {
-			return include[i+1 : i+1+e]
-		}
-	}
-	if i := strings.Index(include, "<"); i != -1 {
-		if e := strings.Index(include[i+1:], ">"); e != -1 {
-			return include[i+1 : i+1+e]
+	for _, q := range [][2]string{{`"`, `"`}, {"<", ">"}} {
+		if _, rest, ok := strings.Cut(include, q[0]); ok {
+			if path, _, ok := strings.Cut(rest, q[1]); ok {
+				return path
+			}
 		}
 	}
 	return ""

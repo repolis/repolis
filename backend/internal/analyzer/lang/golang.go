@@ -55,21 +55,21 @@ func (goLang) ImportTargets(imp Import, _ string) []string {
 func (goLang) Parse(root *sitter.Node, src []byte) FileFacts {
 	var out FileFacts
 
-	Children(root, func(_ int, n *sitter.Node) {
+	for n := range Children(root) {
 		switch n.Type() {
 		case "import_declaration":
 			goImports(n, src, &out.Imports)
 
 		case "type_declaration":
-			Children(n, func(_ int, spec *sitter.Node) {
+			for spec := range Children(n) {
 				// An alias declares no members; recording it duplicates the type.
 				if spec.Type() != "type_spec" {
-					return
+					continue
 				}
 				if t := goTypeDef(spec, src); t != nil {
 					out.Types = append(out.Types, *t)
 				}
-			})
+			}
 
 		case "function_declaration":
 			if f := goFunc(n, src, ""); f != nil {
@@ -84,7 +84,7 @@ func (goLang) Parse(root *sitter.Node, src []byte) FileFacts {
 		case "var_declaration", "const_declaration":
 			out.ScopeVar++
 		}
-	})
+	}
 
 	return out
 }
@@ -141,13 +141,9 @@ func goTypeDef(spec *sitter.Node, src []byte) *TypeDef {
 			}
 			// `a, b int` is one declaration with two name fields.
 			named := false
-			for i := 0; i < int(x.ChildCount()); i++ {
-				if x.FieldNameForChild(i) == "name" {
-					if ch := x.Child(i); ch != nil {
-						fields = append(fields, Text(ch, src))
-						named = true
-					}
-				}
+			for ch := range FieldChildren(x, "name") {
+				fields = append(fields, Text(ch, src))
+				named = true
 			}
 			if t := goTypeName(x.ChildByFieldName("type"), src); t != "" {
 				types = append(types, t)
@@ -174,10 +170,7 @@ func goTypeDef(spec *sitter.Node, src []byte) *TypeDef {
 		// A named type with no members can still own methods.
 	}
 
-	return &TypeDef{
-		Name: name, Fields: fields, FieldTypes: types, LOC: Lines(spec),
-		Start: spec.StartByte(), End: spec.EndByte(),
-	}
+	return newType(spec, name, fields, types)
 }
 
 // goReceiverType reads the owning type out of `func (c *Camera) Frame()`.
@@ -186,18 +179,12 @@ func goReceiverType(n *sitter.Node, src []byte) string {
 	if recv == nil {
 		return ""
 	}
-	var name string
-	Walk(recv, func(x *sitter.Node) bool {
-		if name != "" {
-			return false
+	for p := range Children(recv) {
+		if p.Type() == "parameter_declaration" {
+			return goTypeName(p.ChildByFieldName("type"), src)
 		}
-		if x.Type() == "parameter_declaration" {
-			name = goTypeName(x.ChildByFieldName("type"), src)
-			return false
-		}
-		return true
-	})
-	return name
+	}
+	return ""
 }
 
 func goFunc(n *sitter.Node, src []byte, receiver string) *FuncDef {
@@ -206,31 +193,11 @@ func goFunc(n *sitter.Node, src []byte, receiver string) *FuncDef {
 		return nil
 	}
 
-	var paramTypes []string
-	signature := ""
-	if params := n.ChildByFieldName("parameters"); params != nil {
-		signature = Collapse(Text(params, src))
-		Children(params, func(_ int, p *sitter.Node) {
-			if p.Type() == "parameter_declaration" {
-				paramTypes = append(paramTypes, goTypeName(p.ChildByFieldName("type"), src))
-			}
-		})
-	}
-
-	fn := &FuncDef{
-		Name:       name,
-		Receiver:   receiver,
-		Signature:  signature,
-		ReturnType: goTypeName(n.ChildByFieldName("result"), src),
-		ParamTypes: paramTypes,
-		LOC:        Lines(n),
-		Start:      n.StartByte(),
-		End:        n.EndByte(),
-	}
-	if body := n.ChildByFieldName("body"); body != nil {
-		goBodyRefs(body, src, fn)
-		fn.Complexity = 1 + CountBranches(body, src, goBranchNodes, "binary_expression")
-	}
+	fn := newFunc(n, n.ChildByFieldName("parameters"), src, name, receiver, func(p *sitter.Node) (string, bool) {
+		return goTypeName(p.ChildByFieldName("type"), src), p.Type() == "parameter_declaration"
+	})
+	fn.ReturnType = goTypeName(n.ChildByFieldName("result"), src)
+	fn.scanBody(n.ChildByFieldName("body"), src, goBranchNodes, goBodyRefs)
 	return fn
 }
 
@@ -298,13 +265,15 @@ func goTypeName(t *sitter.Node, src []byte) string {
 		if inner := t.ChildByFieldName("type"); inner != nil {
 			return goTypeName(inner, src)
 		}
-		var r string
-		Children(t, func(_ int, ch *sitter.Node) {
-			if r == "" && ch.IsNamed() {
-				r = goTypeName(ch, src)
+		for ch := range Children(t) {
+			if !ch.IsNamed() {
+				continue
 			}
-		})
-		return r
+			if name := goTypeName(ch, src); name != "" {
+				return name
+			}
+		}
+		return ""
 	case "map_type":
 		return goTypeName(t.ChildByFieldName("value"), src)
 	case "qualified_type":

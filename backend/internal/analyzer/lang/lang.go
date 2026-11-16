@@ -4,6 +4,7 @@
 package lang
 
 import (
+	"iter"
 	"strings"
 
 	sitter "github.com/smacker/go-tree-sitter"
@@ -58,28 +59,6 @@ type FuncDef struct {
 	LOC        int
 	Complexity int // McCabe: one plus the number of decision points
 	Start, End uint32
-}
-
-// CountBranches counts decision points. `&&` and `||` are matched on operator
-// text because grammars share one node type for all binary expressions.
-func CountBranches(n *sitter.Node, src []byte, branch map[string]bool, binaryNode string) int {
-	count := 0
-	Walk(n, func(x *sitter.Node) bool {
-		t := x.Type()
-		if branch[t] {
-			count++
-		}
-		if t == binaryNode {
-			if op := x.ChildByFieldName("operator"); op != nil {
-				switch Text(op, src) {
-				case "&&", "||":
-					count++
-				}
-			}
-		}
-		return true
-	})
-	return count
 }
 
 // FileFacts is everything one file contributes.
@@ -139,17 +118,6 @@ func ForFile(relPath string) Language {
 	return nil
 }
 
-// Extensions lists every claimed suffix, for the directory walk.
-func Extensions() map[string]bool {
-	out := make(map[string]bool)
-	for _, l := range registry {
-		for _, e := range l.Extensions() {
-			out[e] = true
-		}
-	}
-	return out
-}
-
 // ---- helpers shared by implementations ----
 
 // Text returns a node's source text.
@@ -173,10 +141,28 @@ func Collapse(s string) string {
 	return strings.Join(strings.Fields(strings.ReplaceAll(s, "\n", " ")), " ")
 }
 
-func Children(n *sitter.Node, fn func(i int, ch *sitter.Node)) {
-	for i := 0; i < int(n.ChildCount()); i++ {
-		if ch := n.Child(i); ch != nil {
-			fn(i, ch)
+// Children yields a node's direct children.
+func Children(n *sitter.Node) iter.Seq[*sitter.Node] {
+	return func(yield func(*sitter.Node) bool) {
+		for i := range int(n.ChildCount()) {
+			if ch := n.Child(i); ch != nil && !yield(ch) {
+				return
+			}
+		}
+	}
+}
+
+// FieldChildren yields the children stored under one field name. A field can
+// repeat: `int x, y;` is one declaration with two declarators.
+func FieldChildren(n *sitter.Node, field string) iter.Seq[*sitter.Node] {
+	return func(yield func(*sitter.Node) bool) {
+		for i := range int(n.ChildCount()) {
+			if n.FieldNameForChild(i) != field {
+				continue
+			}
+			if ch := n.Child(i); ch != nil && !yield(ch) {
+				return
+			}
 		}
 	}
 }
@@ -186,5 +172,66 @@ func Walk(n *sitter.Node, fn func(*sitter.Node) bool) {
 	if !fn(n) {
 		return
 	}
-	Children(n, func(_ int, ch *sitter.Node) { Walk(ch, fn) })
+	for ch := range Children(n) {
+		Walk(ch, fn)
+	}
+}
+
+// splitLast splits a "::" path at its last separator; ok is false when there
+// is none.
+func splitLast(p string) (parent, last string, ok bool) {
+	i := strings.LastIndex(p, "::")
+	if i < 0 {
+		return "", p, false
+	}
+	return p[:i], p[i+2:], true
+}
+
+// newType builds a TypeDef for the node that declares it.
+func newType(n *sitter.Node, name string, fields, types []string) *TypeDef {
+	return &TypeDef{
+		Name: name, Fields: fields, FieldTypes: types, LOC: Lines(n),
+		Start: n.StartByte(), End: n.EndByte(),
+	}
+}
+
+// newFunc builds what every language derives the same way: position, size,
+// signature and parameter types. paramType names one child of the parameter
+// list, reporting false for children that are not parameters.
+func newFunc(n, params *sitter.Node, src []byte, name, receiver string, paramType func(p *sitter.Node) (string, bool)) *FuncDef {
+	fn := &FuncDef{
+		Name: name, Receiver: receiver, LOC: Lines(n),
+		Start: n.StartByte(), End: n.EndByte(),
+	}
+	if params != nil {
+		fn.Signature = Collapse(Text(params, src))
+		for p := range Children(params) {
+			if t, ok := paramType(p); ok {
+				fn.ParamTypes = append(fn.ParamTypes, t)
+			}
+		}
+	}
+	return fn
+}
+
+// scanBody records a function body's references and its McCabe complexity:
+// one plus the decision points. `&&` and `||` are matched on operator text
+// because the grammars share one node type for every binary expression.
+func (fn *FuncDef) scanBody(body *sitter.Node, src []byte, branches map[string]bool, refs func(*sitter.Node, []byte, *FuncDef)) {
+	if body == nil {
+		return
+	}
+	refs(body, src, fn)
+	fn.Complexity = 1
+	Walk(body, func(x *sitter.Node) bool {
+		if branches[x.Type()] {
+			fn.Complexity++
+		}
+		if x.Type() == "binary_expression" {
+			if op := Text(x.ChildByFieldName("operator"), src); op == "&&" || op == "||" {
+				fn.Complexity++
+			}
+		}
+		return true
+	})
 }
