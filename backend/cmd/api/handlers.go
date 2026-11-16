@@ -1,0 +1,316 @@
+// HTTP handlers: start an analysis, stream its progress, explain a building.
+
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+
+	"github.com/repolis/repolis/backend/internal/analyzer"
+	"github.com/repolis/repolis/backend/internal/db"
+	"github.com/repolis/repolis/backend/internal/git"
+	"github.com/repolis/repolis/backend/internal/jobs"
+	"github.com/repolis/repolis/backend/internal/llm"
+	"github.com/repolis/repolis/backend/internal/logger"
+	"github.com/repolis/repolis/backend/internal/models"
+	"github.com/repolis/repolis/backend/internal/pipeline"
+)
+
+func (s *server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+
+	var req models.AnalyzeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		sendError(w, "Invalid JSON payload", http.StatusBadRequest)
+		return
+	}
+
+	repoURL, err := git.NormalizeRepoURL(req.RepoURL)
+	if err != nil {
+		sendError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	userID, _ := r.Context().Value(userIDKey).(string)
+	logger.Log(logger.InfoLevel, "Analyze request from %s: %s", userID, repoURL)
+
+	commit, err := git.GetRemoteCommitHash(repoURL)
+	if err != nil {
+		logger.Log(logger.ErrorLevel, "ls-remote failed for %s: %v", repoURL, err)
+		sendError(w, "Could not reach that repository. Is it public?", http.StatusBadRequest)
+		return
+	}
+
+	level := req.RefreshLevel()
+	key := cacheKey(repoURL, commit)
+
+	if level == models.RefreshNone {
+		if city := readCachedCity(key); city != nil {
+			logger.Log(logger.InfoLevel, "Serving cached city for %s@%s", repoURL, commit[:8])
+			writeJSON(w, http.StatusOK, models.AnalyzeResponse{Status: "success", CityData: city})
+			return
+		}
+	} else {
+		logger.Log(logger.InfoLevel, "Regenerating %s@%s at level %q", repoURL, commit[:8], level)
+	}
+
+	// Keyed by refresh level too, so a forced regeneration never attaches to
+	// a weaker run already in flight.
+	jobKey := key
+	if level != models.RefreshNone {
+		jobKey = key + "|" + level
+	}
+
+	jobID := uuid.New().String()
+	job, started := s.jobs.GetOrStart(jobKey, jobID, repoURL, commit, func(j *jobs.Job) {
+		s.runAnalysis(j, key, level)
+	})
+	if !started {
+		logger.Log(logger.InfoLevel, "Attaching to in-flight analysis of %s", repoURL)
+	}
+
+	writeJSON(w, http.StatusAccepted, models.AnalyzeResponse{Status: "pending", JobID: job.ID})
+}
+
+// runAnalysis runs the two passes on a detached context, so the work survives
+// the originating request.
+func (s *server) runAnalysis(j *jobs.Job, key, level string) {
+	ctx, cancel := context.WithTimeout(context.Background(), analysisLimit)
+	defer cancel()
+
+	fail := func(msg string, err error) {
+		logger.Log(logger.ErrorLevel, "%s: %v", msg, err)
+		j.Emit(jobs.Event{Type: jobs.EventError, Error: msg})
+	}
+
+	j.Stage(pipeline.Stage{Name: "cloning"})
+
+	// A checkout is content-addressed by commit, so any existing clone of it
+	// is reusable whoever requested it.
+	clonePath := ""
+	if id, path, found := db.FindClone(j.RepoURL, j.Commit); found {
+		if models.Redoes(level, models.RefreshClone) {
+			logger.Log(logger.InfoLevel, "Discarding checkout %s before re-cloning", path)
+			if strings.Contains(path, "repolis-session-") {
+				_ = os.RemoveAll(path)
+			}
+			db.DeleteSession(id)
+		} else if _, statErr := os.Stat(path); statErr == nil {
+			clonePath = path
+		}
+	}
+	if clonePath == "" {
+		sessionID := uuid.New().String()
+		path, err := git.CloneRepo(j.RepoURL, sessionID)
+		if err != nil {
+			fail("Failed to clone repository", err)
+			return
+		}
+		clonePath = path
+		if err := db.CreateSession(sessionID, "shared", j.RepoURL, clonePath, j.Commit); err != nil {
+			logger.Log(logger.WarnLevel, "Could not record session: %v", err)
+		}
+	}
+
+	state, draft, err := pipeline.Extract(clonePath, j.Stage)
+	if err != nil {
+		fail("Failed to analyse repository", err)
+		return
+	}
+
+	// The deterministic city is complete and navigable, and ready in a
+	// fraction of the LLM pass's time.
+	j.Emit(jobs.Event{Type: jobs.EventCity, City: draft, Refined: false})
+	writeCachedCity(key, draft)
+	logger.Log(logger.InfoLevel, "Draft city published: %d districts, %d buildings, %d edges",
+		len(draft.Districts), draft.Stats.TotalBuildings, len(draft.Dependencies))
+
+	client, err := llm.NewClient(s.cache)
+	if err != nil {
+		logger.Log(logger.WarnLevel, "LLM unavailable (%v); serving the deterministic city", err)
+		j.Emit(jobs.Event{Type: jobs.EventDone})
+		return
+	}
+	if models.Redoes(level, models.RefreshModel) {
+		// Answers are still written back, so the cache ends up refreshed
+		// rather than permanently bypassed.
+		client.SetCacheBypass(true)
+		logger.Log(logger.InfoLevel, "Ignoring cached model answers for this run")
+	}
+
+	final := pipeline.Refine(ctx, state, client, j.Stage)
+	writeCachedCity(key, final)
+	j.Emit(jobs.Event{Type: jobs.EventCity, City: final, Refined: true})
+	j.Emit(jobs.Event{Type: jobs.EventDone})
+
+	logger.Log(logger.InfoLevel, "Refined city: %d LLM calls (%d cached), extract %dms, semantic %dms",
+		final.Stats.LLMCalls, final.Stats.LLMCacheHits, final.Stats.ExtractMillis, final.Stats.SemanticMillis)
+}
+
+func (s *server) handleJobEvents(w http.ResponseWriter, r *http.Request) {
+	job, ok := s.jobs.ByID(r.PathValue("id"))
+	if !ok {
+		sendError(w, "Unknown job", http.StatusNotFound)
+		return
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		sendError(w, "Streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+	flusher.Flush()
+
+	events, unsubscribe := job.Subscribe()
+	defer unsubscribe()
+
+	keepalive := time.NewTicker(15 * time.Second)
+	defer keepalive.Stop()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-keepalive.C:
+			fmt.Fprint(w, ": keepalive\n\n")
+			flusher.Flush()
+		case e, open := <-events:
+			if !open {
+				return
+			}
+			frame, err := jobs.MarshalSSE(e)
+			if err != nil {
+				continue
+			}
+			if _, err := w.Write(frame); err != nil {
+				return
+			}
+			flusher.Flush()
+			if e.Type == jobs.EventDone || e.Type == jobs.EventError {
+				return
+			}
+		}
+	}
+}
+
+// handleExplain describes one building on demand: the only place the large
+// model runs, and nothing waits on it.
+func (s *server) handleExplain(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+
+	var req models.ExplainRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		sendError(w, "Invalid JSON payload", http.StatusBadRequest)
+		return
+	}
+	repoURL, err := git.NormalizeRepoURL(req.RepoURL)
+	if err != nil {
+		sendError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if req.BuildingID == "" {
+		sendError(w, "building_id is required", http.StatusBadRequest)
+		return
+	}
+
+	commit, err := git.GetRemoteCommitHash(repoURL)
+	if err != nil {
+		sendError(w, "Could not reach that repository", http.StatusBadRequest)
+		return
+	}
+
+	if text, ok := db.GetExplanation(commit, req.BuildingID); ok {
+		writeJSON(w, http.StatusOK, models.ExplainResponse{
+			Status: "success", BuildingID: req.BuildingID, Explanation: text,
+		})
+		return
+	}
+
+	city := readCachedCity(cacheKey(repoURL, commit))
+	if city == nil {
+		sendError(w, "City not analysed yet", http.StatusConflict)
+		return
+	}
+
+	var building *models.Building
+	for di := range city.Districts {
+		for bi := range city.Districts[di].Buildings {
+			if city.Districts[di].Buildings[bi].ID == req.BuildingID {
+				building = &city.Districts[di].Buildings[bi]
+			}
+		}
+	}
+	if building == nil {
+		sendError(w, "Unknown building", http.StatusNotFound)
+		return
+	}
+
+	var callers, callees []string
+	nameOf := func(id string) string {
+		if i := strings.LastIndex(id, "::"); i != -1 {
+			return id[i+2:]
+		}
+		return id
+	}
+	for _, e := range city.Dependencies {
+		if e.Source == req.BuildingID && len(callees) < 12 {
+			callees = append(callees, nameOf(e.Target))
+		}
+		if e.Target == req.BuildingID && len(callers) < 12 {
+			callers = append(callers, nameOf(e.Source))
+		}
+	}
+
+	source := ""
+	if _, clonePath, ok := db.FindClone(repoURL, commit); ok {
+		source = analyzer.ExtractSymbolSource(
+			filepath.Join(clonePath, building.SourceFile),
+			append([]string{building.Name}, building.Methods...),
+		)
+	}
+
+	client, err := llm.NewClient(s.cache)
+	if err != nil {
+		sendError(w, "Explanations are unavailable: no LLM configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+	defer cancel()
+
+	text, err := client.ExplainBuilding(ctx, *building, source, callers, callees)
+	if err != nil {
+		logger.Log(logger.WarnLevel, "Explain failed for %s: %v", req.BuildingID, err)
+		sendError(w, "Could not generate an explanation", http.StatusBadGateway)
+		return
+	}
+
+	db.PutExplanation(commit, req.BuildingID, text)
+	writeJSON(w, http.StatusOK, models.ExplainResponse{
+		Status: "success", BuildingID: req.BuildingID, Explanation: text,
+	})
+}
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+func sendError(w http.ResponseWriter, message string, status int) {
+	writeJSON(w, status, models.AnalyzeResponse{Status: "error", Error: message})
+}
