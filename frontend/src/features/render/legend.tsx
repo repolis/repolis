@@ -68,14 +68,6 @@ export function Legend({
             <div className="text-gray-300">Footprint = fields</div>
             <div className="text-gray-300">Pale = not edited recently</div>
             <div className="flex items-center gap-1.5 text-gray-300">
-              <span className="inline-block h-2 w-3 rounded-sm bg-orange-400" />
-              Glowing roof cap = often edited
-            </div>
-            <div className="flex items-center gap-1.5 text-gray-300">
-              <span className="inline-block h-1.5 w-3.5 rounded-sm bg-gray-600" />
-              Dark plinth = file module, not a type
-            </div>
-            <div className="flex items-center gap-1.5 text-gray-300">
               <span className="inline-block h-0.5 w-3.5 rounded-sm bg-red-500" />
               Red arc = dependency cycle
             </div>

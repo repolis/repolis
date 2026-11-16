@@ -1,9 +1,8 @@
 //! What the city shows: which metric drives colour, what is filtered out, and
 //! what is highlighted.
 //!
-//! Colour is the strongest channel, and height, footprint, saturation, roof cap
-//! and plinth are all already taken - a seventh simultaneous channel would be
-//! unreadable. Switching colour gives each metric a full-strength palette in
+//! Colour is the strongest channel, and height, footprint and saturation are
+//! already taken - another simultaneous channel would be unreadable. Switching colour gives each metric a full-strength palette in
 //! turn instead.
 
 use crate::hover::BuildingInfo;

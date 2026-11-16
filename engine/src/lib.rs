@@ -1,4 +1,3 @@
-use bevy::core_pipeline::bloom::BloomSettings;
 use bevy::pbr::CascadeShadowConfigBuilder;
 use bevy::prelude::*;
 use bevy::render::settings::{Backends, RenderCreation, WgpuSettings};
@@ -35,11 +34,6 @@ const BUILDING_BASE: f32 = 0.45;
 
 #[derive(Component)]
 struct CityElement;
-
-#[derive(Component)]
-struct BuildingTrim {
-    owner: Entity,
-}
 
 #[derive(Component)]
 struct LinkLayer;
@@ -325,12 +319,6 @@ pub fn clear_selection() {
 fn setup_scene(mut commands: Commands) {
     commands.spawn((
         Camera3dBundle {
-            camera: Camera {
-                // Bloom needs it: without HDR emissive clamps at 1.0 and
-                // nothing glows brighter than white.
-                hdr: true,
-                ..default()
-            },
             projection: Projection::Perspective(PerspectiveProjection {
                 fov: camera::CAMERA_FOV,
                 near: 0.5,
@@ -339,11 +327,6 @@ fn setup_scene(mut commands: Commands) {
             }),
             transform: Transform::from_xyz(60.0, 70.0, 100.0).looking_at(Vec3::ZERO, Vec3::Y),
             ..default()
-        },
-        // Weak on purpose: only high-churn roof caps pass the threshold.
-        BloomSettings {
-            intensity: 0.12,
-            ..BloomSettings::NATURAL
         },
         CityCamera::default(),
     ));
@@ -625,8 +608,6 @@ fn spawn_city(
     ));
 
     let cube = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
-    let mut cap_materials: HashMap<u32, Handle<StandardMaterial>> = HashMap::new();
-    let plinth_material = make_plinth_material(materials);
 
     // One mesh per district, not one platform entity per building.
     for (i, d) in result.districts.iter().enumerate() {
@@ -726,7 +707,6 @@ fn spawn_city(
         let typology = district.map(|d| d.typology.as_str()).unwrap_or("unknown");
         let base = typology_rgb(typology);
         let rgb = apply_age(base, pb.age_days);
-        let bucket = churn_bucket(pb.churn_rank);
         let handles = material_set(materials, &mut index.materials, rgb);
 
         let b = raw.get(pb.id.as_str()).copied();
@@ -801,62 +781,6 @@ fn spawn_city(
             .id();
 
         index.by_id.insert(pb.id.clone(), entity);
-
-        let rot = Quat::from_rotation_y(result.districts[pb.district_idx].rot as f32);
-
-        // The churn signal. Skipping the dullest quarter keeps the marker
-        // meaningful and saves ~25% of the extra entities.
-        if bucket >= 1 {
-            let cap_mat = cap_materials
-                .entry(bucket)
-                .or_insert_with(|| make_cap_material(materials, bucket))
-                .clone();
-            let thickness = (height * 0.055).clamp(0.4, 1.4);
-            commands.spawn((
-                PbrBundle {
-                    mesh: cube.clone(),
-                    material: cap_mat,
-                    transform: Transform::from_xyz(
-                        pb.center_x as f32,
-                        BUILDING_BASE + height + thickness * 0.5,
-                        pb.center_z as f32,
-                    )
-                    .with_rotation(rot)
-                    .with_scale(Vec3::new(
-                        pb.width as f32 * 1.07,
-                        thickness,
-                        pb.depth as f32 * 1.07,
-                    )),
-                    ..default()
-                },
-                BuildingTrim { owner: entity },
-                CityElement,
-            ));
-        }
-
-        // Plinth: marks a file module rather than a type.
-        if pb.kind == "module" {
-            commands.spawn((
-                PbrBundle {
-                    mesh: cube.clone(),
-                    material: plinth_material.clone(),
-                    transform: Transform::from_xyz(
-                        pb.center_x as f32,
-                        BUILDING_BASE + 0.16,
-                        pb.center_z as f32,
-                    )
-                    .with_rotation(rot)
-                    .with_scale(Vec3::new(
-                        pb.width as f32 * 1.22,
-                        0.32,
-                        pb.depth as f32 * 1.22,
-                    )),
-                    ..default()
-                },
-                BuildingTrim { owner: entity },
-                CityElement,
-            ));
-        }
     }
 
     // One merged mesh for the overview, one reserved for the selection.
@@ -1289,7 +1213,6 @@ fn refresh_view(
     store: Res<LinkStore>,
     buildings: Query<(Entity, &Pickable)>,
     mut mats: Query<&mut Handle<StandardMaterial>>,
-    mut trim: Query<(&BuildingTrim, &mut Visibility)>,
     highlight_q: Query<&Handle<Mesh>, With<HighlightLinkLayer>>,
 ) {
     if !state.dirty {
@@ -1354,7 +1277,6 @@ fn refresh_view(
 
     let filtering = !state.filter.is_empty();
     let focusing = interaction.selected.is_some() || !on_path.is_empty();
-    let mut visible_trim: std::collections::HashSet<Entity> = std::collections::HashSet::new();
 
     let mut pending: Vec<(Entity, Handle<StandardMaterial>)> = Vec::new();
     for (entity, p) in buildings.iter() {
@@ -1374,23 +1296,19 @@ fn refresh_view(
             faded.clone()
         } else if !on_path.is_empty() {
             if on_path.contains(&entity) {
-                visible_trim.insert(entity);
                 set.2.clone()
             } else {
                 set.1.clone()
             }
         } else if focusing {
             if p.info.id == selected_id {
-                visible_trim.insert(entity);
                 set.2.clone()
             } else if related.contains(&p.info.id) {
-                visible_trim.insert(entity);
                 set.0.clone()
             } else {
                 set.1.clone()
             }
         } else {
-            visible_trim.insert(entity);
             set.0.clone()
         };
         pending.push((entity, handle));
@@ -1399,15 +1317,6 @@ fn refresh_view(
         if let Ok(mut h) = mats.get_mut(entity) {
             *h = handle;
         }
-    }
-
-    // Caps carry their own emissive material and would otherwise keep glowing.
-    for (t, mut vis) in trim.iter_mut() {
-        *vis = if visible_trim.contains(&t.owner) {
-            Visibility::Inherited
-        } else {
-            Visibility::Hidden
-        };
     }
 
     if let Ok(mesh_handle) = highlight_q.get_single() {

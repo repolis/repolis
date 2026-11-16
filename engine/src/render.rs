@@ -6,9 +6,9 @@ use bevy::render::render_asset::RenderAssetUsages;
 
 use crate::layout::Link;
 
-/// Hue carries the district's typology. The five channels the city uses are
+/// Hue carries the district's typology. The channels the city uses are
 /// documented in the on-screen legend: height = methods, footprint = fields,
-/// hue = typology, saturation = age, roof glow = churn.
+/// hue = typology, saturation = age.
 pub fn typology_rgb(typology: &str) -> [f32; 3] {
     match typology {
         "core" => [0.46, 0.55, 0.72],
@@ -57,37 +57,6 @@ pub fn apply_age(rgb: [f32; 3], age_days: u32) -> [f32; 3] {
     ]
 }
 
-pub fn churn_bucket(churn_rank: f64) -> u32 {
-    (churn_rank.clamp(0.0, 1.0) * 3.999) as u32
-}
-
-/// Roof cap for a churn bucket: slab colour and glow. Emissive goes above 1.0
-/// on purpose - the camera is HDR and bloom only picks up what exceeds the
-/// threshold, which is what makes a busy building glow rather than look warm.
-pub fn make_cap_material(materials: &mut Assets<StandardMaterial>, bucket: u32) -> Handle<StandardMaterial> {
-    let (base, emissive) = match bucket {
-        3 => ([1.00, 0.55, 0.16], LinearRgba::new(5.2, 1.9, 0.35, 1.0)),
-        2 => ([0.94, 0.52, 0.18], LinearRgba::new(2.2, 0.85, 0.16, 1.0)),
-        _ => ([0.72, 0.46, 0.24], LinearRgba::new(0.55, 0.22, 0.05, 1.0)),
-    };
-    materials.add(StandardMaterial {
-        base_color: Color::srgb(base[0], base[1], base[2]),
-        emissive,
-        perceptual_roughness: 0.45,
-        ..default()
-    })
-}
-
-/// Plinth under a "module" building, so file modules read differently from
-/// types at a glance.
-pub fn make_plinth_material(materials: &mut Assets<StandardMaterial>) -> Handle<StandardMaterial> {
-    materials.add(StandardMaterial {
-        base_color: Color::srgb(0.16, 0.17, 0.20),
-        perceptual_roughness: 0.95,
-        ..default()
-    })
-}
-
 pub struct BuildingMaterials {
     pub normal: Handle<StandardMaterial>,
     pub dim: Handle<StandardMaterial>,
@@ -98,8 +67,6 @@ pub fn make_building_materials(
     materials: &mut Assets<StandardMaterial>,
     rgb: [f32; 3],
 ) -> BuildingMaterials {
-    // Churn is a roof cap now (see `make_cap_material`): at full strength a
-    // facade tint was 0.55 of red on an already warm colour, and invisible.
     let normal = materials.add(StandardMaterial {
         base_color: Color::srgb(rgb[0], rgb[1], rgb[2]),
         perceptual_roughness: 0.78,

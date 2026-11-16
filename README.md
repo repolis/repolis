@@ -89,8 +89,6 @@ claims its extension, and they share one call graph.
 | Footprint | number of fields |
 | Hue | district purpose (core, data, network, security, …) |
 | Saturation | recency — old code fades toward grey |
-| Glowing orange roof cap | commit churn; brighter cap = more commits |
-| Dark plinth underneath | a file module rather than a type |
 | District ground area | amount of code in that district |
 | Distance between districts | how tightly they are coupled |
 
