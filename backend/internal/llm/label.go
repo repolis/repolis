@@ -15,7 +15,6 @@ type Label struct {
 	Typology string
 	Summary  string
 	Tags     []string
-	FromLLM  bool
 }
 
 // The prompt says nothing about cities: told it was naming neighbourhoods,
@@ -49,15 +48,7 @@ const (
 // own, and a failure costs one name rather than the city's. Membership was
 // already decided deterministically, so the model cannot damage the structure.
 func (c *Client) LabelClusters(ctx context.Context, clusters []analyzer.Cluster, progress func(done, total int)) []Label {
-	labels := make([]Label, len(clusters))
-	for i, cl := range clusters {
-		labels[i] = Label{
-			Name:     cl.FallbackName(),
-			Typology: cl.FallbackTypology(),
-			Summary:  cl.FallbackSummary(),
-			Tags:     fallbackTags(cl),
-		}
-	}
+	labels := fallbacks(clusters)
 	if len(clusters) == 0 {
 		return labels
 	}
@@ -119,11 +110,41 @@ func (c *Client) LabelClusters(ctx context.Context, clusters []analyzer.Cluster,
 				}
 			}
 		}
-		labels[i].FromLLM = true
 	}
+	uniqueNames(labels, clusters)
 
-	// Names are how a user identifies a place; duplicates make them useless.
-	seen := make(map[string]int)
+	logger.Log(logger.InfoLevel, "Districts named: %d by model, %d by fallback", named, len(clusters)-named)
+	return labels
+}
+
+// FallbackLabels names districts without a model: from the dominant directory
+// and symbols. LabelClusters starts from the same names and keeps them
+// wherever the model's answer is unusable.
+func FallbackLabels(clusters []analyzer.Cluster) []Label {
+	labels := fallbacks(clusters)
+	uniqueNames(labels, clusters)
+	return labels
+}
+
+func fallbacks(clusters []analyzer.Cluster) []Label {
+	labels := make([]Label, len(clusters))
+	for i, cl := range clusters {
+		labels[i] = Label{
+			Name:     cl.FallbackName(),
+			Typology: cl.FallbackTypology(),
+			Summary:  cl.FallbackSummary(),
+			Tags:     fallbackTags(cl),
+		}
+	}
+	return labels
+}
+
+// uniqueNames makes every district name distinct: names are how a user
+// identifies a place, and duplicates make them useless. A clash is resolved by
+// the district's own directory, then its main symbol, then a number.
+func uniqueNames(labels []Label, clusters []analyzer.Cluster) {
+	common := analyzer.CommonDirSegments(clusters)
+	seen := make(map[string]bool)
 	for i := range labels {
 		base := labels[i].Name
 		candidates := []string{base}
@@ -138,17 +159,13 @@ func (c *Client) LabelClusters(ctx context.Context, clusters []analyzer.Cluster,
 			candidates = append(candidates, fmt.Sprintf("%s %d", base, n))
 		}
 		for _, cand := range candidates {
-			key := strings.ToLower(cand)
-			if seen[key] == 0 {
+			if key := strings.ToLower(cand); !seen[key] {
 				labels[i].Name = cand
-				seen[key] = 1
+				seen[key] = true
 				break
 			}
 		}
 	}
-
-	logger.Log(logger.InfoLevel, "Districts named: %d by model, %d by fallback", named, len(clusters)-named)
-	return labels
 }
 
 func (c *Client) labelRequest(language string, symbols, dirs []string, size int, noise []string) request {

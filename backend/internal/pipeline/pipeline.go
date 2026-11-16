@@ -15,6 +15,7 @@ package pipeline
 import (
 	"context"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/repolis/repolis/backend/internal/analyzer"
@@ -64,7 +65,7 @@ func Extract(clonePath string, report Reporter) (*State, *models.CityMap, error)
 	draft := analyzer.BuildDraft(raw, history, st)
 	draft.Stats.ExtractMillis = time.Since(t0).Milliseconds()
 
-	city := compose(draft, fallbackLabels(draft.Clusters), false)
+	city := compose(draft, llm.FallbackLabels(draft.Clusters), false)
 	return &State{Raw: raw, History: history, Symbols: st, ClonePath: clonePath}, city, nil
 }
 
@@ -93,41 +94,6 @@ func Refine(ctx context.Context, s *State, client *llm.Client, report Reporter) 
 	return city
 }
 
-func fallbackLabels(clusters []analyzer.Cluster) []llm.Label {
-	out := make([]llm.Label, len(clusters))
-	for i, c := range clusters {
-		out[i] = llm.Label{
-			Name:     c.FallbackName(),
-			Typology: c.FallbackTypology(),
-			Summary:  c.FallbackSummary(),
-			Tags:     []string{},
-		}
-	}
-	// Fallback names come from directory basenames and can collide.
-	seen := map[string]int{}
-	for i := range out {
-		if n := seen[out[i].Name]; n > 0 {
-			seen[out[i].Name] = n + 1
-			out[i].Name += " " + itoa(n+1)
-		} else {
-			seen[out[i].Name] = 1
-		}
-	}
-	return out
-}
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var b []byte
-	for n > 0 {
-		b = append([]byte{byte('0' + n%10)}, b...)
-		n /= 10
-	}
-	return string(b)
-}
-
 func compose(d *analyzer.Draft, labels []llm.Label, refined bool) *models.CityMap {
 	byID := make(map[string]models.Building, len(d.Buildings))
 	for _, b := range d.Buildings {
@@ -138,13 +104,7 @@ func compose(d *analyzer.Draft, labels []llm.Label, refined bool) *models.CityMa
 	assigned := make(map[string]bool, len(d.Buildings))
 
 	for i, cl := range d.Clusters {
-		l := llm.Label{Name: cl.FallbackName(), Typology: cl.FallbackTypology(), Summary: cl.FallbackSummary()}
-		if i < len(labels) {
-			l = labels[i]
-		}
-		if l.Tags == nil {
-			l.Tags = []string{}
-		}
+		l := labels[i]
 
 		bs := make([]models.Building, 0, len(cl.Buildings))
 		for _, id := range cl.Buildings {
@@ -159,7 +119,7 @@ func compose(d *analyzer.Draft, labels []llm.Label, refined bool) *models.CityMa
 		sort.Slice(bs, func(a, b int) bool { return bs[a].ID < bs[b].ID })
 
 		districts = append(districts, models.District{
-			ID:        "d" + itoa(i),
+			ID:        "d" + strconv.Itoa(i),
 			Name:      l.Name,
 			Typology:  l.Typology,
 			Summary:   l.Summary,
