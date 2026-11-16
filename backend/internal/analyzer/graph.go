@@ -18,9 +18,8 @@ type edgeKey struct {
 	kind     string
 }
 
-// BuildDependencies attributes each call to the function containing it and
-// that function to its building, so three calls to `foo()` from one method of
-// Vdbe give one edge Vdbe -> owner of foo, weight 3.
+// Three calls to `foo()` from one method of Vdbe give one edge Vdbe -> owner of
+// foo, weight 3.
 func BuildDependencies(raw *RawExtraction, st *SymbolTable, ownerOf map[string]string) []models.DependencyEdge {
 	// By (receiver, name) too, so `Camera::new` picks the right one of several
 	// same-named associated functions.
@@ -134,7 +133,6 @@ func BuildDependencies(raw *RawExtraction, st *SymbolTable, ownerOf map[string]s
 			}
 		}
 
-		// A qualified call names its scope; honour it before anything else.
 		if ref.Qualifier != "" {
 			// `Type::method` - the qualifier is the receiver.
 			if recvType := st.scopes.qualifierType(ref.Qualifier, fromFile); recvType != "" {
@@ -182,7 +180,6 @@ func BuildDependencies(raw *RawExtraction, st *SymbolTable, ownerOf map[string]s
 		}
 	}
 
-	// Type composition edges: struct A holds a struct B.
 	for _, t := range st.Types {
 		for _, ft := range t.FieldTypes {
 			tgt := st.resolve(ft, t.SourceFile)
@@ -200,7 +197,6 @@ func BuildDependencies(raw *RawExtraction, st *SymbolTable, ownerOf map[string]s
 		})
 	}
 
-	// Deterministic order, then per-source top-K.
 	slices.SortFunc(all, func(a, b models.DependencyEdge) int {
 		return cmp.Or(strings.Compare(a.Source, b.Source), cmp.Compare(b.Weight, a.Weight), strings.Compare(a.Target, b.Target))
 	})
@@ -221,10 +217,8 @@ func BuildDependencies(raw *RawExtraction, st *SymbolTable, ownerOf map[string]s
 	return out
 }
 
-// funcKey identifies one function definition. The receiver belongs in the key
-// because a method name is unique per type, not per file: without it the two
-// `Name()` methods in one gin file collide and one type absorbs both. C, having
-// no methods, cannot produce the collision.
+// The receiver is part of the key because a method name is unique per type,
+// not per file: without it the two `Name()` methods in one gin file collide.
 func funcKey(f *RawFunction) string {
 	return f.SourceFile + "::" + f.Receiver + "#" + f.Name
 }

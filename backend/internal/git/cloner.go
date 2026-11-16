@@ -9,7 +9,6 @@ import (
 	"strings"
 )
 
-// allowedHosts is the allow-list of forges we will talk to.
 var allowedHosts = map[string]bool{
 	"github.com":     true,
 	"www.github.com": true,
@@ -21,7 +20,6 @@ var allowedHosts = map[string]bool{
 
 var repoPathRe = regexp.MustCompile(`^/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?(\.git)?$`)
 
-// NormalizeRepoURL validates a user-supplied URL into canonical https form.
 // A security boundary, not a convenience check: git reads some strings as
 // shell-executing transports (`ext::sh -c ...`) and a leading "-" as a flag,
 // so unvalidated input to `git clone` is remote code execution.
@@ -70,9 +68,8 @@ func gitEnv() []string {
 	)
 }
 
-// CloneRepo makes a blobless partial clone: the full commit and tree history
-// ExtractHistory needs, blobs fetched lazily. Unlike --depth it keeps churn
-// accurate.
+// Blobless partial clone: full commit and tree history, blobs fetched lazily.
+// Unlike --depth it keeps churn accurate.
 func CloneRepo(repoURL string, sessionID string) (string, error) {
 	clonePath, err := os.MkdirTemp("", "repolis-session-"+sessionID+"-*")
 	if err != nil {

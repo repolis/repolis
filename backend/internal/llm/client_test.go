@@ -9,8 +9,7 @@ import (
 	"testing"
 )
 
-// fakeServer answers every chat completion with content and records the
-// reasoning_effort each request carried ("<absent>" when omitted).
+// Records each request's reasoning_effort, "<absent>" when omitted.
 func fakeServer(t *testing.T, content string, efforts *[]string) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -97,7 +96,6 @@ func TestEmptyContentIsErrorAndNotCached(t *testing.T) {
 	}
 }
 
-// Answers obtained with thinking on and off must not share a cache entry.
 func TestCacheKeyIncludesReasoningEffort(t *testing.T) {
 	r := request{kind: "k", model: "m", user: "u", maxTokens: 8}
 	off := r
@@ -107,7 +105,6 @@ func TestCacheKeyIncludesReasoningEffort(t *testing.T) {
 	}
 }
 
-// With LLM_ADJUDICATE=false the rules decide alone and no request is made.
 func TestAdjudicationCanBeDisabled(t *testing.T) {
 	var efforts []string
 	srv := fakeServer(t, "Vdbe", &efforts)

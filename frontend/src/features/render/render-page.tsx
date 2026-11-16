@@ -40,8 +40,7 @@ export default function RenderPage() {
   const { owner, repo } = useParams({ from: "/city/$owner/$repo" });
   const repoUrl = `https://github.com/${owner}/${repo}`;
 
-  // The view starts as the link left it; the selection and camera wait for
-  // the city.
+  // Selection and camera from the link wait for the city.
   const [initial] = useState(() => decodeView(window.location.hash));
   const [mode, setMode] = useState(initial.mode);
   const [filter, setFilter] = useState(initial.filter);
@@ -54,12 +53,10 @@ export default function RenderPage() {
   const [anchor, setAnchor] = useState<{ id: string; name: string } | null>(
     null,
   );
-  // The traced path: building ids for the highlight, names for the banner.
   const [path, setPath] = useState<{ ids: string[]; info: PathInfo } | null>(
     null,
   );
 
-  // The engine reports indices; names and metrics come from here.
   const city = useRef<City | null>(null);
   const restored = useRef(false);
   const focus = (id: string) => {
@@ -76,7 +73,6 @@ export default function RenderPage() {
     hover: (t) => setHover(city.current && hoverInfo(city.current, t)),
     select: (t) => {
       setSelection(city.current ? toSelection(city.current, t) : NOTHING);
-      // A new selection ends the path view; the anchor stays pinned.
       setPath(null);
     },
     city: () => {
@@ -85,8 +81,7 @@ export default function RenderPage() {
       // Ids may not survive a reload; colour, filter and timeline do.
       setAnchor(null);
       setPath(null);
-      // Once only: the refinement pass sends a second city, and restoring
-      // again would yank the camera back from wherever the user moved it.
+      // Once only: the refinement pass sends a second city, which must not yank the camera back.
       if (!restored.current) {
         restored.current = true;
         if (initial.selected) focus(initial.selected);
@@ -99,7 +94,6 @@ export default function RenderPage() {
   const selectedId = selection.type === "Building" ? selection.data.id : null;
   useUrlSync(summary !== null, mode, filter, selectedId, timelineDay);
 
-  // Everything visible is decided here; the engine only applies it.
   useEffect(() => {
     if (!summary || !city.current) return;
     const a = computeAppearance(city.current, {

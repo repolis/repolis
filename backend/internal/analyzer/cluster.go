@@ -18,7 +18,6 @@ const (
 	lpIterations    = 12
 )
 
-// Cluster is a district before it has been named.
 type Cluster struct {
 	Buildings []string // building IDs
 	TopDirs   []string
@@ -26,14 +25,10 @@ type Cluster struct {
 	// Codebase-wide symbol prefix ("git_"), stripped before the model sees
 	// the symbols: with it, every libgit2 district was named "Git Something".
 	SymbolPrefix string
-	// Noise holds the words every district here shares.
-	Noise []string
-	// Language names the code being described, for the prompt.
-	Language string
+	Noise        []string
+	Language     string
 }
 
-// DistinctDirs returns the directory segments that separate this cluster from
-// the rest, dropping path components every cluster shares.
 func (c Cluster) DistinctDirs(common []string) []string {
 	out := make([]string, 0, len(c.TopDirs))
 	for _, d := range c.TopDirs {
@@ -53,7 +48,6 @@ func (c Cluster) DistinctDirs(common []string) []string {
 	return out
 }
 
-// SplitIdentifier breaks an identifier into lower-case words.
 func SplitIdentifier(name string) []string {
 	var words []string
 	var cur []rune
@@ -82,10 +76,9 @@ func SplitIdentifier(name string) []string {
 	return words
 }
 
-// CommonSymbolTokens finds words appearing in most clusters' symbols, which
-// therefore identify none of them. Measured per cluster, not as a global
-// prefix: libgit2's test suite dilutes "git_" below any global threshold, yet
-// "git" is still in every district and swamped every name the model produced.
+// Measured per cluster, not as a global prefix: libgit2's test suite dilutes
+// "git_" below any global threshold, yet "git" is in every district and swamped
+// every name the model produced.
 func CommonSymbolTokens(clusters []Cluster) []string {
 	if len(clusters) < 3 {
 		return nil
@@ -114,8 +107,6 @@ func CommonSymbolTokens(clusters []Cluster) []string {
 	return out
 }
 
-// CommonDirSegments finds path components present in most clusters, which
-// therefore say nothing about any individual one.
 func CommonDirSegments(clusters []Cluster) []string {
 	counts := map[string]int{}
 	for _, c := range clusters {
@@ -153,11 +144,8 @@ type clEdge struct {
 	w  float64
 }
 
-// ClusterBuildings partitions buildings into districts by weighted label
-// propagation over the call graph plus directory affinity. Deterministic on
-// purpose: community detection is a graph problem with a correct answer, and
-// asking a 4B model to emit the partition collapsed sqlite into one
-// 221-building district.
+// Deterministic on purpose: asking a 4B model to emit the partition collapsed
+// sqlite into one 221-building district.
 func ClusterBuildings(buildings []models.Building, edges []models.DependencyEdge) []Cluster {
 	if len(buildings) == 0 {
 		return nil
@@ -215,7 +203,6 @@ func ClusterBuildings(buildings []models.Building, edges []models.DependencyEdge
 		}
 	}
 
-	// Initial labels: one per directory.
 	dirLabel := make(map[string]int, len(dirKeys))
 	for i, d := range dirKeys {
 		dirLabel[d] = i
@@ -294,7 +281,6 @@ func regroup(nodes []clNode, labels []int) [][]int {
 	return out
 }
 
-// strongestNeighbour returns the index of the group most connected to g.
 func strongestNeighbour(g []int, groupOf []int, adj [][]clEdge, self int) int {
 	score := make(map[int]float64)
 	for _, n := range g {

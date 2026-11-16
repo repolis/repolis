@@ -1,9 +1,5 @@
-//! Engine -> UI events. Buildings and districts are named by their position in
-//! city order, the order the frontend's arrays use, so only numbers cross.
-
 use serde::Serialize;
 
-/// What the cursor is over, or what was clicked.
 #[derive(Serialize, Clone, Copy, PartialEq, Debug)]
 #[serde(tag = "type", content = "index")]
 pub enum Target {
@@ -39,7 +35,6 @@ pub fn dispatch_select(target: Option<Target>) {
     dispatch("repolis:select", &target);
 }
 
-/// The city finished loading.
 pub fn dispatch_city() {
     dispatch("repolis:city", &());
 }

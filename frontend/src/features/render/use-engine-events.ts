@@ -2,7 +2,6 @@ import { useEffect, useEffectEvent } from "react";
 
 import type { EngineTarget } from "./city";
 
-/** Subscribes to the engine's window events while the component is mounted. */
 export function useEngineEvents(handlers: {
   hover: (target: EngineTarget) => void;
   select: (target: EngineTarget) => void;

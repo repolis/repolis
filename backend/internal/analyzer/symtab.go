@@ -1,5 +1,3 @@
-// Symbol table: every type, where it is visible from, and name resolution.
-
 package analyzer
 
 import (
@@ -9,7 +7,6 @@ import (
 	"github.com/repolis/repolis/backend/internal/analyzer/lang"
 )
 
-// TypeEntry is one composite-type definition, keyed by a globally unique ID.
 type TypeEntry struct {
 	ID         string
 	Name       string
@@ -21,7 +18,6 @@ type TypeEntry struct {
 	LOC        int
 }
 
-// SymbolTable is the resolved view of a repository's types and functions.
 type SymbolTable struct {
 	Types      []TypeEntry
 	byID       map[string]int
@@ -35,7 +31,6 @@ type SymbolTable struct {
 	language   string
 }
 
-// Language is the repository's dominant language, used to word prompts.
 func (st *SymbolTable) Language() string { return st.language }
 
 func typeID(file, name string) string { return file + "::" + name }
@@ -54,8 +49,8 @@ func norm(s string) string {
 	return strings.ToLower(strings.ReplaceAll(s, "_", ""))
 }
 
-// detectRepoPrefix finds the dominant function-name prefix ("git_", "sqlite3").
-// Stripping it is what connects `sqlite3VdbeAddOp3` to the type `Vdbe`.
+// Dominant function-name prefix ("git_", "sqlite3"); stripping it is what
+// connects `sqlite3VdbeAddOp3` to the type `Vdbe`.
 func detectRepoPrefix(funcs []RawFunction) string {
 	if len(funcs) < 12 {
 		return ""
@@ -83,8 +78,6 @@ func detectRepoPrefix(funcs []RawFunction) string {
 	return best
 }
 
-// BuildSymbolTable resolves every type definition and runs the deterministic
-// association ladder over every function.
 func BuildSymbolTable(raw *RawExtraction) *SymbolTable {
 	st := &SymbolTable{
 		byID:      make(map[string]int),
@@ -128,7 +121,6 @@ func BuildSymbolTable(raw *RawExtraction) *SymbolTable {
 	st.language = raw.DominantLanguage()
 	st.repoPrefix = detectRepoPrefix(raw.Functions)
 
-	// 2. Association ladder.
 	for i := range raw.Functions {
 		st.Assocs = append(st.Assocs, st.associate(&raw.Functions[i]))
 	}
@@ -136,13 +128,10 @@ func BuildSymbolTable(raw *RawExtraction) *SymbolTable {
 	return st
 }
 
-// resolve maps a bare type name to a definition, preferring one the caller can
-// actually see according to the import graph.
 func (st *SymbolTable) resolve(name, fromFile string) string {
 	return st.resolveIn(name, fromFile, nil)
 }
 
-// resolveIn is resolve, restricted to the namespaces a qualifier named.
 func (st *SymbolTable) resolveIn(name, fromFile string, namespaces []string) string {
 	if name == "" {
 		return ""
@@ -192,7 +181,6 @@ func (st *SymbolTable) resolveIn(name, fromFile string, namespaces []string) str
 	return best
 }
 
-// resolveRef resolves a reference that may carry a written qualifier.
 func (st *SymbolTable) resolveRef(ref lang.Ref, fromFile string) string {
 	if ref.Qualifier == "" {
 		// The name may itself be a local alias for an imported symbol.
@@ -206,7 +194,6 @@ func (st *SymbolTable) resolveRef(ref lang.Ref, fromFile string) string {
 	return st.resolveIn(ref.Name, fromFile, st.scopes.expand(ref.Qualifier, fromFile))
 }
 
-// SymbolPrefix is the dominant function-name prefix of the codebase.
 func (st *SymbolTable) SymbolPrefix() string { return st.repoPrefix }
 
 func (st *SymbolTable) TypeName(id string) string {

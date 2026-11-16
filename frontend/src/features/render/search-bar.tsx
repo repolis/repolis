@@ -3,8 +3,6 @@ import { useMemo, useState } from "react";
 import { Regenerate } from "./regenerate";
 import type { CitySummary, IndexEntry } from "./types";
 
-/** Makes the city addressable: without it a named symbol can only be found by
- * flying around by hand. */
 export function SearchBar({
   summary,
   busy,

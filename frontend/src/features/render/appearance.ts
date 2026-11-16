@@ -1,11 +1,3 @@
-/**
- * What every building looks like: colour mode, filter, timeline, selection and
- * path. The engine only applies the result (`set_appearance`).
- *
- * Colour is the strongest channel, and height, footprint and saturation are
- * already taken - another simultaneous channel would be unreadable. Switching
- * colour gives each metric a full-strength palette in turn instead.
- */
 import type { City } from "./city";
 import type { BuildingInfo } from "./types";
 import type { FilterState } from "./view-controls";
@@ -14,7 +6,6 @@ type Rgb = [number, number, number];
 
 const GREY: Rgb = [0.62, 0.62, 0.64];
 
-/** Hue carries the district's purpose. */
 export const TYPOLOGY_RGB: Record<string, Rgb> = {
   core: [0.46, 0.55, 0.72],
   data: [0.3, 0.62, 0.42],
@@ -28,7 +19,7 @@ export const TYPOLOGY_RGB: Record<string, Rgb> = {
   unknown: GREY,
 };
 
-/** Categorical colour for a language, distinct from every typology hue. */
+/** Distinct from every typology hue. */
 export const LANGUAGE_RGB: Record<string, Rgb> = {
   C: [0.38, 0.55, 0.78],
   Rust: [0.8, 0.47, 0.28],
@@ -36,8 +27,6 @@ export const LANGUAGE_RGB: Record<string, Rgb> = {
   unknown: GREY,
 };
 
-/** Pale sand -> amber -> red, shared by every numeric mode so "more" always
- * looks the same. */
 export const RAMP_STOPS: Rgb[] = [
   [0.86, 0.85, 0.78],
   [0.88, 0.72, 0.36],
@@ -51,7 +40,6 @@ export const css = ([r, g, b]: Rgb) =>
 const cssTable = (t: Record<string, Rgb>) =>
   Object.fromEntries(Object.entries(t).map(([k, v]) => [k, css(v)]));
 
-/** CSS versions for the legend and inspector, so they cannot drift. */
 export const TYPOLOGY_COLORS = cssTable(TYPOLOGY_RGB);
 export const LANGUAGE_COLORS = cssTable(LANGUAGE_RGB);
 export const RAMP_CSS = `linear-gradient(to right, ${RAMP_STOPS.map(css).join(", ")})`;
@@ -64,11 +52,9 @@ export function ramp(t: number): Rgb {
   return RAMP_STOPS[i].map((c, k) => c + (RAMP_STOPS[j][k] - c) * f) as Rgb;
 }
 
-/** Age buckets, in days. Five distinguishable shades compare better across a
- * city than a smooth ramp, and keep the engine's materials bounded. */
+/** Buckets, not a smooth ramp: they compare better and keep the engine's materials bounded. */
 const AGE_BUCKETS = [45, 180, 400, 900];
 
-/** Untouched code fades toward concrete grey; recent code keeps its hue. */
 export function applyAge(rgb: Rgb, ageDays: number): Rgb {
   const t =
     AGE_BUCKETS.filter((edge) => ageDays >= edge).length / AGE_BUCKETS.length;
@@ -82,8 +68,7 @@ const groundRgb = (typology: string): Rgb => {
   return [r * 0.16 + 0.05, g * 0.16 + 0.05, b * 0.16 + 0.06];
 };
 
-/** Scale for the numeric modes, set once per city. Percentile, not maximum:
- * libgit2's worst function is 129 and nearly everything is under 15. */
+/** p95, not max: libgit2's worst function is 129 and nearly everything is under 15. */
 export interface Scales {
   complexity: number;
   fanIn: number;
@@ -107,20 +92,16 @@ export function scalesFor(buildings: BuildingInfo[]): Scales {
 export interface ColorMode {
   id: string;
   label: string;
-  /** Legend text for the numeric ramp modes. */
   help?: string;
-  /** What each end of the ramp means, so the gradient reads on its own. */
   ends?: [string, string];
   color: (b: BuildingInfo, s: Scales) => Rgb;
 }
 
-/** Every colour mode in one place: menu label, legend text and the colour. */
 export const COLOR_MODES: ColorMode[] = [
   {
     id: "typology",
     label: "Purpose",
-    // Only here does age fade the colour: in a numeric mode the ramp carries
-    // the meaning, and fading it would corrupt it.
+    // Only here does age fade: in a numeric mode it would corrupt the ramp.
     color: (b) => applyAge(TYPOLOGY_RGB[b.typology] ?? GREY, b.age_days),
   },
   {
@@ -166,11 +147,9 @@ export const COLOR_MODES: ColorMode[] = [
   },
 ];
 
-/** The mode with this id; unknown ids fall back to Purpose. */
 export const colorMode = (id: string) =>
   COLOR_MODES.find((m) => m.id === id) ?? COLOR_MODES[0];
 
-/** Every predicate must hold. An empty filter matches everything. */
 export function matches(f: FilterState, b: BuildingInfo): boolean {
   return (
     (!f.text || b.name.toLowerCase().includes(f.text.toLowerCase())) &&
@@ -180,16 +159,14 @@ export function matches(f: FilterState, b: BuildingInfo): boolean {
     b.num_methods >= f.min_methods &&
     b.max_complexity >= f.min_complexity &&
     b.churn_rank * 100 >= f.min_churn_pct &&
-    // A question, not a verdict: a library's whole public surface has no
-    // internal callers.
+    // A hint, not a verdict: a library's public surface has no internal callers.
     (!f.only_no_callers || b.fan_in === 0) &&
     (!f.only_hubs || b.hub) &&
     (!f.only_cycles || b.cycle_id !== 0)
   );
 }
 
-/** Shortest dependency path by hop count, ignoring direction: "three steps
- * away" is actionable where a weighted cost is not. Empty when unreachable. */
+/** Hop count, ignoring direction: "three steps away" is actionable, a weighted cost is not. */
 export function shortestPath(
   adj: Map<string, Set<string>>,
   from: string,
@@ -214,7 +191,6 @@ export function shortestPath(
   return [];
 }
 
-// Building states, as the engine reads them.
 const NORMAL = 0;
 const DIM = 1;
 const BRIGHT = 2;
@@ -223,14 +199,11 @@ const FADED = 3;
 export interface View {
   mode: string;
   filter: FilterState;
-  /** Day of history to show the city as of, null for the present. */
   timeline: number | null;
   selectedId: string | null;
-  /** Building ids on the highlighted path, in order. */
   path: string[];
 }
 
-/** The arrays `set_appearance` takes, in the city order both sides share. */
 export function computeAppearance(city: City, v: View) {
   const { color } = colorMode(v.mode);
   const colors = new Float32Array(city.list.length * 3);

@@ -1,15 +1,3 @@
-// Package pipeline turns a checkout into a CityMap.
-//
-// It runs in two publishable passes:
-//
-//	Pass 1 (deterministic, seconds): AST extraction, rule-based association,
-//	        call graph, git history, graph clustering, fallback district names.
-//	        This city is complete and navigable on its own.
-//	Pass 2 (LLM, tens of seconds): adjudicate the ambiguous associations and
-//	        name the districts, then re-assemble.
-//
-// Publishing pass 1 immediately decouples "the city is usable" from "the model
-// has finished", and degrades an LLM outage to directory-named districts.
 package pipeline
 
 import (
@@ -25,7 +13,6 @@ import (
 	"github.com/repolis/repolis/backend/internal/models"
 )
 
-// Stage reports progress to the SSE channel.
 type Stage struct {
 	Name  string `json:"name"`
 	Done  int    `json:"done"`
@@ -34,15 +21,14 @@ type Stage struct {
 
 type Reporter func(Stage)
 
-// State carries everything the two passes share.
 type State struct {
 	Raw     *analyzer.RawExtraction
 	History map[string]*git.FileHistory
 	Symbols *analyzer.SymbolTable
 }
 
-// Extract runs the deterministic half and returns both the reusable state and
-// a fully renderable city.
+// Publishing this pass at once decouples "usable" from "the model has
+// finished", and degrades an LLM outage to directory-named districts.
 func Extract(clonePath string, report Reporter) (*State, *models.CityMap, error) {
 	t0 := time.Now()
 	report(Stage{Name: "parsing"})
@@ -68,7 +54,6 @@ func Extract(clonePath string, report Reporter) (*State, *models.CityMap, error)
 	return &State{Raw: raw, History: history, Symbols: st}, city, nil
 }
 
-// Refine runs the LLM half and returns the improved city.
 func Refine(ctx context.Context, s *State, client *llm.Client, report Reporter) *models.CityMap {
 	t0 := time.Now()
 

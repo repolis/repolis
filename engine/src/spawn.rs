@@ -1,5 +1,3 @@
-//! Turns a layout into entities: ground, streets, districts, buildings, arcs.
-
 use bevy::prelude::*;
 use std::f32::consts::FRAC_PI_2;
 
@@ -11,7 +9,6 @@ use crate::render::*;
 use crate::{CityElement, CityIndex, HighlightLinkLayer, LinkLayer};
 use crate::{BUILDING_BASE, DISTRICT_TOP, GROUND_Y, PAVEMENT_Y};
 
-/// The box over a ground rectangle between two heights, as (min, max).
 fn slab(r: Rect, y0: f32, y1: f32) -> (Vec3, Vec3) {
     (
         Vec3::new(r.min.x, y0, r.min.y),
@@ -19,7 +16,6 @@ fn slab(r: Rect, y0: f32, y1: f32) -> (Vec3, Vec3) {
     )
 }
 
-/// Places and scales the shared unit cube to fill a box.
 fn box_transform((min, max): (Vec3, Vec3)) -> Transform {
     Transform::from_translation((min + max) * 0.5).with_scale(max - min)
 }
@@ -37,7 +33,6 @@ pub(crate) fn spawn_city(
         PbrBundle {
             mesh: meshes.add(Circle::new(ground_radius).mesh().resolution(96)),
             material: materials.add(StandardMaterial {
-                // Asphalt: the avenues between districts.
                 base_color: Color::srgb(0.06, 0.065, 0.075),
                 perceptual_roughness: 1.0,
                 ..default()
@@ -48,8 +43,7 @@ pub(crate) fn spawn_city(
         CityElement,
     ));
 
-    // One shared cube mesh and a few shared materials, so Bevy instances
-    // them into a handful of draw calls.
+    // Shared cube and materials so Bevy batches them into a few draw calls.
     let cube = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
 
     let pavement = materials.add(StandardMaterial {
@@ -90,7 +84,7 @@ pub(crate) fn spawn_city(
         commands.spawn((
             PbrBundle {
                 mesh: cube.clone(),
-                // Its own material: the ground colour is set in place.
+                // Own material: the ground colour is set in place.
                 material: materials.add(StandardMaterial {
                     base_color: Color::srgb(0.2, 0.2, 0.21),
                     perceptual_roughness: 0.95,
@@ -132,8 +126,7 @@ pub(crate) fn spawn_city(
         ));
     }
 
-    // Every dependency at once is unreadable, so all arcs start hidden behind
-    // one toggle; a selection reveals its own neighbourhood regardless.
+    // All arcs start hidden: every dependency at once is unreadable.
     let links = result.links;
     let all: Vec<&Link> = links.iter().collect();
     commands.spawn((
@@ -151,8 +144,7 @@ pub(crate) fn spawn_city(
         CityElement,
     ));
 
-    // Cycles in red on top: they are the one thing here a file tree cannot
-    // show at all.
+    // Cycles in red on top: the one thing a file tree cannot show.
     let cycle_links: Vec<&Link> = links.iter().filter(|l| l.in_cycle).collect();
     commands.spawn((
         PbrBundle {

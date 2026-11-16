@@ -1,13 +1,9 @@
-//! Hover and click: the nearest box under the cursor, a building or a
-//! district's ground slab.
-
 use bevy::math::bounding::{Aabb3d, RayCast3d};
 use bevy::prelude::*;
 
 use crate::camera::CityCamera;
 use crate::events::*;
 
-/// A box the cursor can hit, and what it stands for.
 #[derive(Component)]
 pub struct Pickable {
     pub target: Target,
@@ -71,7 +67,6 @@ fn nearest<'a>(ray: Ray3d, pickables: &'a Query<&Pickable>) -> Option<&'a Pickab
         .map(|(_, p)| p)
 }
 
-/// Moves the camera so the box fills a comfortable part of the view.
 pub(crate) fn frame(cam: &mut CityCamera, p: &Pickable) {
     cam.frame_object((p.min + p.max) * 0.5, (p.max - p.min).length().max(4.0));
 }

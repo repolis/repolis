@@ -18,7 +18,6 @@ import (
 	sitter "github.com/smacker/go-tree-sitter"
 )
 
-// Directories that are never first-party source.
 var ignoredDirs = map[string]bool{
 	".git": true, "node_modules": true, "vendor": true, ".github": true,
 	"build": true, "dist": true, "target": true, "cmake-build-debug": true,
@@ -33,7 +32,7 @@ var licenseNames = map[string]bool{
 	"COPYING": true, "COPYING.txt": true, "COPYRIGHT": true,
 }
 
-// firstPartyDirs are never vendored, whatever they contain.
+// Never vendored, whatever they contain.
 var firstPartyDirs = map[string]bool{
 	"src": true, "lib": true, "include": true, "examples": true, "example": true,
 	"test": true, "tests": true, "demo": true, "demos": true, "tools": true,
@@ -45,11 +44,9 @@ var binaryExts = map[string]bool{
 	".a": true, ".so": true, ".lib": true, ".dll": true, ".dylib": true, ".o": true,
 }
 
-// isVendoredDir detects a third-party tree checked into the repository. The
-// only signal left is a licence file next to a pre-compiled binary; every
-// cheaper one had false positives (a README cost libgit2 its examples, a
-// nested manifest cost ripgrep three of its own workspace crates). Directory
-// names that really do mean vendoring are handled by ignoredDirs above.
+// The only reliable vendoring signal is a licence file next to a pre-compiled
+// binary; every cheaper one had false positives (a README cost libgit2 its
+// examples, a nested manifest cost ripgrep three of its own crates).
 func isVendoredDir(dirPath string) bool {
 	if firstPartyDirs[strings.ToLower(filepath.Base(dirPath))] {
 		return false
@@ -87,8 +84,6 @@ type parseOutput struct {
 	funcs   []RawFunction
 }
 
-// ExtractRepository walks the repo and extracts everything in parallel:
-// parsing is pure CPU work with no shared state, so it scales with cores.
 func ExtractRepository(clonePath string) (*RawExtraction, error) {
 	var jobs []parseJob
 	var skipped []string
@@ -183,7 +178,6 @@ func ExtractRepository(clonePath string) (*RawExtraction, error) {
 	return result, nil
 }
 
-// parseFile runs one file through whichever language claims it.
 func parseFile(parser *sitter.Parser, l lang.Language, fullPath, relPath string) (parseOutput, error) {
 	content, err := os.ReadFile(fullPath)
 	if err != nil {

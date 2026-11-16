@@ -2,7 +2,7 @@ package analyzer
 
 import "strings"
 
-// Typologies is the closed set the renderer can colour.
+// The closed set the renderer can colour.
 var Typologies = []string{
 	"core", "data", "network", "security", "interface",
 	"utility", "config", "test", "example", "unknown",
@@ -33,8 +33,6 @@ var typologyHints = []struct {
 	{[]string{"core", "engine", "kernel", "runtime", "vm", "system", "main", "vdbe", "exec"}, "core"},
 }
 
-// GuessTypology maps free text (directory names, symbol names, or an LLM's
-// answer) onto the closed set.
 func GuessTypology(text string) string {
 	t := strings.ToLower(strings.TrimSpace(text))
 	if typologySet[t] {

@@ -82,7 +82,6 @@ func TestFunctionSignatureExtraction(t *testing.T) {
 		t.Errorf("widget_free first param type = %v, want Widget", f.ParamTypes)
 	}
 
-	// Call sites drive the graph: they belong to the enclosing function.
 	m := byName["main"]
 	if m == nil {
 		t.Fatal("main not extracted")
@@ -112,11 +111,9 @@ func TestAssociationLadder(t *testing.T) {
 		return nil
 	}
 
-	// Name prefix and first parameter agree: settled for free.
 	if a := get("widget_free"); a.Confidence != ConfHigh || st.TypeName(a.Chosen) != "Widget" {
 		t.Errorf("widget_free -> %q (%s), want Widget (high)", st.TypeName(a.Chosen), a.Confidence)
 	}
-	// Return type only.
 	if a := get("rect_make"); st.TypeName(a.Chosen) != "Rect" {
 		t.Errorf("rect_make -> %q, want Rect", st.TypeName(a.Chosen))
 	}
@@ -146,7 +143,6 @@ func TestAssociationLadder(t *testing.T) {
 	}
 }
 
-// The verifier is what makes an LLM answer safe to accept.
 func TestVerifierRejectsUnsupportedAttribution(t *testing.T) {
 	raw := extract(t)
 	st := BuildSymbolTable(raw)
@@ -164,7 +160,6 @@ func TestVerifierRejectsUnsupportedAttribution(t *testing.T) {
 	if st.ApplyLLM(clamp, typeID("widget.c", "Widget")) != LLMRejected {
 		t.Error("verifier accepted an attribution with no AST evidence")
 	}
-	// An id outside the candidate list must be refused too.
 	if st.ApplyLLM(clamp, "nonexistent.c::Ghost") != LLMRejected {
 		t.Error("verifier accepted a type that is not a candidate")
 	}
@@ -191,12 +186,10 @@ func TestDraftAssemblesModulesAndEdges(t *testing.T) {
 		t.Errorf("got %d types and %d modules, want both", types, modules)
 	}
 
-	// Free functions must survive as a module rather than being discarded.
 	if !byID[moduleID("widget.c")] {
 		t.Error("widget.c has unattached functions but produced no module building")
 	}
 
-	// Edges reference building ids, and both ends must exist.
 	for _, e := range d.Edges {
 		if !byID[e.Source] || !byID[e.Target] {
 			t.Errorf("edge %s -> %s references an unknown building", e.Source, e.Target)

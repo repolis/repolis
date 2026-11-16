@@ -1,6 +1,3 @@
-//! Applies the appearance the frontend decided: a colour and a state per
-//! building, a ground colour per district, and which arcs to highlight.
-
 use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
 
@@ -10,7 +7,6 @@ use crate::picking::Pickable;
 use crate::render::*;
 use crate::{CityIndex, HighlightLinkLayer, LinkLayer};
 
-// Building states, as sent by the frontend.
 const DIM: u8 = 1;
 const BRIGHT: u8 = 2;
 const FADED: u8 = 3;
@@ -28,7 +24,6 @@ pub(crate) struct Appearance {
     pub links: Vec<u32>,
 }
 
-/// Whether every dependency arc is shown, not only the highlighted ones.
 #[derive(Resource, Default)]
 pub(crate) struct ShowLinks(pub bool);
 

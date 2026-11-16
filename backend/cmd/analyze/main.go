@@ -1,6 +1,3 @@
-// Command analyze runs the deterministic extraction pipeline against a local
-// checkout and prints a diagnostic report. No LLM, no server, no network —
-// this is the fast loop for working on extraction quality.
 package main
 
 import (

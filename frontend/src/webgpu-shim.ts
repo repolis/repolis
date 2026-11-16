@@ -1,7 +1,4 @@
-// wgpu 0.20 (Bevy 0.14) still requests WebGPU limits such as
-// 'maxInterStageShaderComponents' that Chrome 130+ has removed, and asking for
-// a limit the adapter does not know fails the whole device request. Every
-// device request drops such limits first.
+// wgpu 0.20 requests limits Chrome 130+ removed, and an unknown limit fails the whole request.
 
 function patchRequestDevice(target: GPUAdapter) {
   const original = target.requestDevice;
@@ -26,8 +23,7 @@ function patchRequestDevice(target: GPUAdapter) {
   };
 }
 
-// Both the prototype and each adapter handed out, since not every browser
-// routes requestDevice through the prototype.
+// Not every browser routes requestDevice through the prototype.
 if ("GPUAdapter" in window) patchRequestDevice(GPUAdapter.prototype);
 
 if (navigator.gpu) {

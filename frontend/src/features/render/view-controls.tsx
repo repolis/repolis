@@ -29,14 +29,12 @@ export const EMPTY_FILTER: FilterState = {
   only_cycles: false,
 };
 
-/** Filters set in the panel; the text search has no control here. */
 function activeCount(f: FilterState): number {
   return (Object.keys(EMPTY_FILTER) as (keyof FilterState)[]).filter(
     (k) => k !== "text" && f[k] !== EMPTY_FILTER[k],
   ).length;
 }
 
-/** A toggle chip. Clicking sets the value, clicking again clears it. */
 function Chip({
   on,
   label,

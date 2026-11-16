@@ -1,6 +1,3 @@
-//! Entry point: the Bevy app, the shared resources and city (re)loading.
-//! The wasm API lives in `api`, everything else in one module per concern.
-
 use bevy::pbr::CascadeShadowConfigBuilder;
 use bevy::prelude::*;
 use bevy::render::settings::{Backends, RenderCreation, WgpuSettings};
@@ -49,20 +46,16 @@ struct LinkLayer;
 #[derive(Component)]
 struct HighlightLinkLayer;
 
-/// What the systems need to know about the loaded city.
 #[derive(Resource, Default)]
 struct CityIndex {
     links: Vec<Link>,
-    /// Where each district's label sits, in district order.
     labels: Vec<Vec3>,
     materials: HashMap<u32, BuildingMaterials>,
     faded: Option<Handle<StandardMaterial>>,
     radius: f32,
 }
 
-// Registers every resource and system the city needs. Split out from
-// `run_bevy_app` so a headless test can build the same schedule: Bevy only
-// validates system parameters on the first run, not at compile time.
+// Split out so a headless test can run the same schedule (Bevy checks params at runtime).
 pub fn add_city_systems(app: &mut App) {
     app.init_resource::<Hovered>()
         .init_resource::<CityIndex>()
@@ -71,8 +64,7 @@ pub fn add_city_systems(app: &mut App) {
         .insert_resource(ClearColor(SKY_COLOR))
         .insert_resource(AmbientLight {
             color: Color::srgb(0.80, 0.86, 0.96),
-            // Low: shadows carry the depth cue, and more washes the massing
-            // flat.
+            // Low: shadows carry the depth cue, and more washes the massing flat.
             brightness: 260.0,
         })
         .add_systems(Startup, setup_scene)
@@ -110,8 +102,7 @@ pub fn run_bevy_app() {
             })
             .set(RenderPlugin {
                 render_creation: RenderCreation::Automatic(WgpuSettings {
-                    // WebGL2 too: WebGPU alone is a blank canvas in
-                    // Firefox and older Safari.
+                    // WebGL2 too: WebGPU alone is a blank canvas in Firefox and older Safari.
                     backends: Some(Backends::BROWSER_WEBGPU | Backends::GL),
                     ..default()
                 }),
@@ -139,8 +130,7 @@ fn setup_scene(mut commands: Commands) {
         CityCamera::default(),
     ));
 
-    // Height is the primary metric, and without cast shadows the massing
-    // reads flat at every angle.
+    // Without cast shadows the height-based massing reads flat.
     commands.spawn(DirectionalLightBundle {
         directional_light: DirectionalLight {
             illuminance: 11000.0,
@@ -161,13 +151,11 @@ fn setup_scene(mut commands: Commands) {
     });
 }
 
-/// How far the overview camera sits from the centre of a city.
 fn home_distance(radius: f32) -> f32 {
     radius * 2.35 + 60.0
 }
 
-/// Haze that starts just past the city's near half, as seen from the home
-/// view, and hides the ground's edge long before the camera can reach it.
+/// Starts past the city's near half and hides the ground's edge before the camera reaches it.
 fn city_fog(radius: f32) -> FogSettings {
     let home = home_distance(radius);
     FogSettings {

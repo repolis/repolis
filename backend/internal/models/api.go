@@ -2,10 +2,8 @@ package models
 
 import "slices"
 
-// Refresh levels control how much work a re-analysis redoes. Each level
-// implies the ones above it, and each costs noticeably more than the last.
+// Each level implies the ones above it and costs noticeably more.
 const (
-	// RefreshNone serves the cached city map when one exists.
 	RefreshNone = ""
 	// RefreshCity re-runs the pipeline but keeps the checkout and the cached
 	// model answers. Use it after changing extraction, clustering or layout.
@@ -19,20 +17,19 @@ const (
 	RefreshClone = "clone"
 )
 
-// RefreshLevels lists the accepted values, weakest first.
+// Weakest first.
 var RefreshLevels = []string{RefreshNone, RefreshCity, RefreshModel, RefreshClone}
 
 type AnalyzeRequest struct {
 	RepoURL string `json:"repo_url"`
-	// Refresh is one of the Refresh* constants. Empty means "use the cache".
+	// Empty means "use the cache".
 	Refresh string `json:"refresh,omitempty"`
 	// Force is the older boolean spelling, equivalent to Refresh="city".
 	Force bool `json:"force,omitempty"`
 }
 
-// RefreshLevel normalises the request into exactly one known level. An
-// unrecognised value is treated as no refresh rather than rejected, so a
-// stale client cannot be made to fail by a value it does not know about.
+// An unrecognised value means no refresh rather than an error, so a stale
+// client cannot be made to fail.
 func (r AnalyzeRequest) RefreshLevel() string {
 	if r.Refresh != RefreshNone && slices.Contains(RefreshLevels, r.Refresh) {
 		return r.Refresh
@@ -43,7 +40,6 @@ func (r AnalyzeRequest) RefreshLevel() string {
 	return RefreshNone
 }
 
-// Redoes reports whether this level is at least as strong as `level`.
 func Redoes(current, level string) bool {
 	// An unknown level ranks as no refresh.
 	rank := func(l string) int { return max(slices.Index(RefreshLevels, l), 0) }

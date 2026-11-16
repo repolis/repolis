@@ -10,15 +10,13 @@ export interface BuildingInfo {
   num_fields: number;
   num_methods: number;
   lines_of_code: number;
-  /** Worst cyclomatic complexity among this building's functions. */
   max_complexity: number;
   sum_complexity: number;
-  /** How many other buildings depend on this one, and it on them. */
   fan_in: number;
   fan_out: number;
   /** Martin's instability: 0 depended upon, 1 depends on others. */
   instability: number;
-  /** In the top few percent by fan-in for this repository. */
+  /** Top few percent by fan-in for this repository. */
   hub: boolean;
   commit_churn: number;
   churn_rank: number;
@@ -27,9 +25,9 @@ export interface BuildingInfo {
   born_day: number;
   primary_author: string;
   summary: string;
-  /** How this building's functions were attributed: rule | llm | none. */
+  /** rule | llm | none */
   assoc_source: string;
-  /** Dependency cycle this building belongs to, or 0. */
+  /** 0 when not in a cycle. */
   cycle_id: number;
   fields: string[];
   methods: string[];
@@ -90,7 +88,6 @@ export interface PathInfo {
   from_name: string;
   to_id: string;
   to_name: string;
-  /** Building names in order. Empty when no path exists. */
   hops: string[];
 }
 

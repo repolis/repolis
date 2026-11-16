@@ -12,9 +12,8 @@ const explainSystemFmt = `You explain %s code entities to a developer exploring 
 Write 2-3 short sentences: what it represents, what it is used for, and anything notable.
 Plain prose. No markdown, no bullet points, no preamble.`
 
-// ExplainBuilding describes one building on demand. The only use of the larger
-// model, and never on the critical path: summarising every building up front
-// cost ~54 calls per repo to produce text nobody read.
+// Never on the critical path: summarising every building up front cost ~54
+// calls per repo to produce text nobody read.
 func (c *Client) ExplainBuilding(ctx context.Context, b models.Building, source string, callers, callees []string) (string, error) {
 	language := b.Language
 	if language == "" {

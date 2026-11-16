@@ -1,6 +1,3 @@
-// Association ladder: which type each free function belongs to, decided by
-// rules where the language cannot say, then checked against the AST.
-
 package analyzer
 
 import (
@@ -11,7 +8,6 @@ import (
 	"github.com/repolis/repolis/backend/internal/analyzer/lang"
 )
 
-// Confidence levels produced by the deterministic ladder.
 const (
 	ConfHigh   = "high"
 	ConfMedium = "medium"
@@ -27,7 +23,6 @@ const (
 	SourceNone   = "none"
 )
 
-// Assoc is one function's association decision.
 type Assoc struct {
 	Fn         *RawFunction
 	Candidates []string // TypeEntry IDs, closed set shown to the LLM
@@ -36,11 +31,8 @@ type Assoc struct {
 	Source     string // "rule" | "llm" | "none"
 }
 
-// Receiver is the syntactic owner the language reported, if any.
 func (a *Assoc) Receiver() string { return a.Fn.Receiver }
 
-// prefixScoreIdx returns the length of type i's normalised name when the
-// function name starts with it, with the repo prefix optionally stripped.
 // Names are normalised once up front, so this allocates nothing.
 func (st *SymbolTable) prefixScoreIdx(fnNorm, fnStripped string, i int) int {
 	t := st.normNames[i]
@@ -65,7 +57,6 @@ func (st *SymbolTable) fnForms(fnName string) (string, string) {
 	return fnNorm, fnStripped
 }
 
-// prefixScore is the single-pair form, used by the verifier.
 func (st *SymbolTable) prefixScore(fnName, typeName string) int {
 	if len(typeName) < 3 {
 		return 0
@@ -81,8 +72,6 @@ func (st *SymbolTable) prefixScore(fnName, typeName string) int {
 	return 0
 }
 
-// bestPrefixType finds the longest type name that prefixes this function name,
-// resolved to a concrete definition reachable from the function's file.
 func (st *SymbolTable) bestPrefixType(fn *RawFunction) (string, int) {
 	fnNorm, fnStripped := st.fnForms(fn.Name)
 	bestIdx, bestPS := -1, 0
@@ -97,9 +86,8 @@ func (st *SymbolTable) bestPrefixType(fn *RawFunction) (string, int) {
 	return st.resolve(st.Types[bestIdx].Name, fn.SourceFile), bestPS
 }
 
-// candidateSet is the closed list the LLM chooses from. Small and AST-derived
-// is what stops a small model hallucinating: it cannot name a type it was not
-// shown.
+// The closed, AST-derived set stops a small model hallucinating: it cannot name
+// a type it was not shown.
 func (st *SymbolTable) candidateSet(fn *RawFunction) []string {
 	type cand struct {
 		id    string
@@ -116,7 +104,6 @@ func (st *SymbolTable) candidateSet(fn *RawFunction) []string {
 		}
 	}
 
-	// Parameter types, first parameter weighted highest.
 	for i, pt := range fn.ParamTypes {
 		s := 40
 		if i == 0 {
@@ -128,7 +115,6 @@ func (st *SymbolTable) candidateSet(fn *RawFunction) []string {
 	}
 	add(st.resolve(fn.ReturnType, fn.SourceFile), 60)
 
-	// Types referenced in the body, weighted by how often.
 	freq := make(map[string]int)
 	for _, t := range fn.TypesUsed {
 		freq[st.resolveRef(t, fn.SourceFile)]++
@@ -137,12 +123,10 @@ func (st *SymbolTable) candidateSet(fn *RawFunction) []string {
 		add(id, min(10+n, 35))
 	}
 
-	// Types defined in the same file.
 	for _, i := range st.byFile[fn.SourceFile] {
 		add(st.Types[i].ID, 25)
 	}
 
-	// Anything the function name prefixes.
 	if id, ps := st.bestPrefixType(fn); ps > 0 {
 		add(id, 90+ps)
 	}
@@ -167,8 +151,8 @@ func (st *SymbolTable) candidateSet(fn *RawFunction) []string {
 func (st *SymbolTable) associate(fn *RawFunction) *Assoc {
 	a := &Assoc{Fn: fn, Confidence: ConfNone, Source: SourceNone}
 
-	// R0: the language already said so. Everything below exists only because
-	// C has no such construct.
+	// The language said so. Everything below exists only because C has no such
+	// construct.
 	if fn.Receiver != "" {
 		if id := st.resolve(fn.Receiver, fn.SourceFile); id != "" {
 			a.Chosen, a.Confidence, a.Source = id, ConfHigh, SourceSyntax
@@ -176,9 +160,8 @@ func (st *SymbolTable) associate(fn *RawFunction) *Assoc {
 		return a
 	}
 
-	// No receiver, in a language that has them, means genuinely free. C's
-	// heuristics would attach `fn squarify(&[Item])` to Item on its first
-	// parameter alone, inventing a method the language never declared.
+	// No receiver in a language that has them means genuinely free; C's rules
+	// would attach `fn squarify(&[Item])` to Item and invent a method.
 	if st.syntactic[fn.SourceFile] {
 		return a
 	}
@@ -188,19 +171,15 @@ func (st *SymbolTable) associate(fn *RawFunction) *Assoc {
 		return a
 	}
 
-	// R1: longest type-name prefix of the function name.
 	byPrefix, _ := st.bestPrefixType(fn)
 
-	// R2: first parameter type — the dominant "method receiver" convention in C.
 	byParam := ""
 	if len(fn.ParamTypes) > 0 {
 		byParam = st.resolve(fn.ParamTypes[0], fn.SourceFile)
 	}
 
-	// R3: return type (constructor idiom).
 	byReturn := st.resolve(fn.ReturnType, fn.SourceFile)
 
-	// R4: most frequently referenced type in the body.
 	byBody := ""
 	{
 		freq := make(map[string]int)
@@ -221,9 +200,9 @@ func (st *SymbolTable) associate(fn *RawFunction) *Assoc {
 	case byPrefix != "" && byParam != "" && byPrefix == byParam:
 		a.Chosen, a.Confidence, a.Source = byPrefix, ConfHigh, SourceRule
 	case byPrefix != "" && byParam != "" && byPrefix != byParam:
-		// Genuine ambiguity, but a tentative answer is still recorded so an
-		// unavailable or budgeted-out LLM does not orphan the function. The
-		// name prefix is the better prior in C; the LLM may overturn it.
+		// Genuine ambiguity, but record a tentative answer so a missing or
+		// budgeted-out LLM does not orphan the function. Name prefix is the
+		// better prior in C.
 		a.Chosen, a.Confidence, a.Source = byPrefix, ConfLow, SourceRule
 	case byParam != "":
 		a.Chosen, a.Confidence, a.Source = byParam, ConfHigh, SourceRule
@@ -243,8 +222,8 @@ func (st *SymbolTable) associate(fn *RawFunction) *Assoc {
 	return a
 }
 
-// verify is the check every association must pass, the LLM's included: an
-// attribution no AST evidence supports would silently inflate a building.
+// Every association must pass this, the LLM's included: an attribution without
+// AST evidence would silently inflate a building.
 func (st *SymbolTable) verify(fn *RawFunction, typeID string) bool {
 	idx, ok := st.byID[typeID]
 	if !ok {
@@ -258,10 +237,8 @@ func (st *SymbolTable) verify(fn *RawFunction, typeID string) bool {
 		slices.ContainsFunc(fn.TypesUsed, func(t lang.Ref) bool { return t.Name == name })
 }
 
-// Residual returns what the rules could not settle, most consequential first.
-// Every entry already carries a tentative answer, so a caller may stop early
-// and trade accuracy for latency without losing a function. Impact is the
-// state the competing types hold, since that is what a wrong answer distorts.
+// Most consequential first; every entry already carries a tentative answer, so
+// callers may stop early. Impact is the state the competing types hold.
 func (st *SymbolTable) Residual() []*Assoc {
 	var out []*Assoc
 	for _, a := range st.Assocs {
@@ -286,7 +263,6 @@ func (st *SymbolTable) Residual() []*Assoc {
 	return out
 }
 
-// LLMResult is what an adjudicated answer did to an association.
 type LLMResult int
 
 const (
@@ -295,7 +271,6 @@ const (
 	LLMApplied                    // replaced the rule's choice
 )
 
-// ApplyLLM records an adjudicated choice, after the same verification.
 func (st *SymbolTable) ApplyLLM(a *Assoc, chosenID string) LLMResult {
 	if !slices.Contains(a.Candidates, chosenID) || !st.verify(a.Fn, chosenID) {
 		return LLMRejected
@@ -308,8 +283,7 @@ func (st *SymbolTable) ApplyLLM(a *Assoc, chosenID string) LLMResult {
 	return LLMUnchanged
 }
 
-// Detach unattaches a function: the model answered NONE, which is an answer
-// rather than a failure.
+// The model answered NONE, which is an answer rather than a failure.
 func (a *Assoc) Detach() {
 	a.Chosen, a.Confidence, a.Source = "", ConfNone, SourceNone
 }

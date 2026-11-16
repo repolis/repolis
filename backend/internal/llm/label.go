@@ -9,7 +9,6 @@ import (
 	"github.com/repolis/repolis/backend/internal/logger"
 )
 
-// Label is the naming the LLM contributes for one district.
 type Label struct {
 	Name     string
 	Typology string
@@ -43,10 +42,9 @@ const (
 	exampleDesc = "reads and writes packed object storage"
 )
 
-// LabelClusters names each district in one small, independent call: ~150
-// tokens, inside a small model's effective context, cached and retried on its
-// own, and a failure costs one name rather than the city's. Membership was
-// already decided deterministically, so the model cannot damage the structure.
+// One small call per district: ~150 tokens, inside a small model's effective
+// context, cached and retried alone, so a failure costs one name rather than
+// the city's.
 func (c *Client) LabelClusters(ctx context.Context, clusters []analyzer.Cluster, progress func(done, total int)) []Label {
 	labels := fallbacks(clusters)
 	if len(clusters) == 0 {
@@ -62,7 +60,6 @@ func (c *Client) LabelClusters(ctx context.Context, clusters []analyzer.Cluster,
 	// Strip what every cluster shares: seeing "git_repository, git_index..."
 	// in all sixteen prompts, the model named all sixteen "Git <something>".
 	common := analyzer.CommonDirSegments(clusters)
-	// The project's own name, and anything else true of the whole codebase.
 	noise := append([]string(nil), clusters[0].Noise...)
 	if p := strings.Trim(clusters[0].SymbolPrefix, "_0123456789"); p != "" {
 		noise = append(noise, strings.ToLower(p))
@@ -117,9 +114,6 @@ func (c *Client) LabelClusters(ctx context.Context, clusters []analyzer.Cluster,
 	return labels
 }
 
-// FallbackLabels names districts without a model: from the dominant directory
-// and symbols. LabelClusters starts from the same names and keeps them
-// wherever the model's answer is unusable.
 func FallbackLabels(clusters []analyzer.Cluster) []Label {
 	labels := fallbacks(clusters)
 	uniqueNames(labels, clusters)
@@ -139,9 +133,6 @@ func fallbacks(clusters []analyzer.Cluster) []Label {
 	return labels
 }
 
-// uniqueNames makes every district name distinct: names are how a user
-// identifies a place, and duplicates make them useless. A clash is resolved by
-// the district's own directory, then its main symbol, then a number.
 func uniqueNames(labels []Label, clusters []analyzer.Cluster) {
 	common := analyzer.CommonDirSegments(clusters)
 	seen := make(map[string]bool)
@@ -189,16 +180,12 @@ func (c *Client) labelRequest(language string, symbols, dirs []string, size int,
 	}
 }
 
-// Labels that describe every cluster equally and so identify none. A rejected
-// name falls back to the dominant directory, which at least locates it.
 var vagueNames = map[string]bool{
 	"library": true, "subsystem": true, "system": true, "module": true,
 	"core": true, "utilities": true, "utility": true, "misc": true,
 	"components": true, "code": true, "implementation": true,
 }
 
-// isVague: once the project's own token is removed, does anything
-// distinguishing remain?
 func isVague(name string, noise []string) bool {
 	banned := make(map[string]bool, len(noise))
 	for _, w := range noise {
@@ -215,8 +202,8 @@ func isVague(name string, noise []string) bool {
 	return kept == 0
 }
 
-// stripProjectToken removes the project's own name: every libgit2 district is
-// "Git something", and the word crowds out the two that carry information.
+// Every libgit2 district is "Git something", and the word crowds out the two
+// that carry information.
 func stripProjectToken(name string, noise []string) string {
 	if len(noise) == 0 {
 		return name
@@ -259,7 +246,6 @@ func parseLabel(s string) *Label {
 	return l
 }
 
-// stripNoise drops codebase-wide words from the symbols shown to the model.
 func stripNoise(names, noise []string) []string {
 	if len(noise) == 0 {
 		return names

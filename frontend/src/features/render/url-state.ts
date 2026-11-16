@@ -1,10 +1,6 @@
 import { EMPTY_FILTER, type FilterState } from "./view-controls";
 
-/**
- * The part of the view worth putting in a link. Encoded in the fragment so it
- * never reaches the server, and written with replaceState so panning does not
- * fill the back button.
- */
+// In the fragment so it never reaches the server.
 export interface ViewURL {
   mode: string;
   filter: FilterState;
@@ -21,7 +17,7 @@ export const EMPTY_VIEW: ViewURL = {
   camera: null,
 };
 
-/** Short URL names for the filter fields. A new field needs one entry here. */
+// A new filter field needs one entry here.
 const FILTER_CODES: Record<keyof FilterState, string> = {
   text: "q",
   language: "lang",
@@ -36,8 +32,7 @@ const FILTER_CODES: Record<keyof FilterState, string> = {
 };
 const FILTER_KEYS = Object.keys(FILTER_CODES) as (keyof FilterState)[];
 
-/** Compact filter encoding: only what differs from the default is written,
- * a flag as its bare name and anything else as `name:value`. */
+// Only non-default fields: a flag as its bare name, anything else as `name:value`.
 function encodeFilter(f: FilterState): string {
   return FILTER_KEYS.filter((k) => f[k] !== EMPTY_FILTER[k])
     .map((k) =>
@@ -115,7 +110,6 @@ export function decodeView(hash: string): ViewURL {
   };
 }
 
-/** True when a decoded view carries nothing worth restoring. */
 export function isDefaultView(v: ViewURL): boolean {
   return (
     v.mode === "typology" &&

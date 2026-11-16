@@ -13,10 +13,6 @@ import (
 // up to this size a cycle is verifiable by hand against the source.
 const maxReliableCycle = 12
 
-// FindCycles labels every strongly connected component of more than one
-// building (Tarjan). A dependency cycle is the clearest thing a city shows
-// that a file tree cannot, and the edge set already has everything needed.
-//
 // Iterative on purpose: recursion depth would be bounded by the graph's
 // longest path, and a blown stack here takes the whole request down.
 func FindCycles(buildings []models.Building, edges []models.DependencyEdge) []models.Cycle {
@@ -88,7 +84,6 @@ func FindCycles(buildings []models.Building, edges []models.DependencyEdge) []mo
 				continue
 			}
 
-			// v is finished: close its component if it is a root.
 			if low[v] == disc[v] {
 				var comp []int
 				for {
@@ -116,7 +111,6 @@ func FindCycles(buildings []models.Building, edges []models.DependencyEdge) []mo
 		}
 	}
 
-	// Largest first: those are worth looking at.
 	out := make([]models.Cycle, 0, len(components))
 	for _, comp := range components {
 		members := make([]string, 0, len(comp))
@@ -150,7 +144,6 @@ func FindCycles(buildings []models.Building, edges []models.DependencyEdge) []mo
 	return out
 }
 
-// MarkCycles tags each member building and every edge running between two
 // members. An edge leaving the component is not part of the cycle.
 func MarkCycles(buildings []models.Building, edges []models.DependencyEdge, cycles []models.Cycle) {
 	// Only findings are drawn: a 68-building tangle would bury the

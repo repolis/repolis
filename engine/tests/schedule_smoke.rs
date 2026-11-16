@@ -1,9 +1,3 @@
-//! Boots the real schedule headlessly and runs frames.
-//!
-//! Bevy validates system parameters on a schedule's first run, so conflicting
-//! queries panic at runtime rather than failing to compile - and in a wasm
-//! build the only symptom is a blank canvas.
-
 use bevy::asset::AssetPlugin;
 use bevy::prelude::*;
 use bevy::render::mesh::MeshPlugin;
@@ -41,6 +35,7 @@ fn entity_count(app: &mut App) -> usize {
         .count()
 }
 
+// Bevy checks system params only at runtime; in wasm a conflict is just a blank canvas.
 #[test]
 fn schedule_runs_without_system_conflicts() {
     let mut app = headless_app();

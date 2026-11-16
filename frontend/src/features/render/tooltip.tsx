@@ -2,9 +2,7 @@ import { useEffect, useState } from "react";
 
 import type { HoverInfo } from "./types";
 
-/** Cursor tooltip, deliberately tiny: hover detail vanishes the moment the
- * pointer moves toward it, so the full record lives in the pinned inspector.
- * It follows the cursor itself, so moving the mouse re-renders only this. */
+// Tracks the cursor itself so mouse moves re-render only this.
 export function Tooltip({ hover }: { hover: HoverInfo | null }) {
   const [pos, setPos] = useState({ x: 0, y: 0 });
 

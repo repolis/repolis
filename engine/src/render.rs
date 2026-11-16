@@ -1,12 +1,9 @@
-//! Mesh construction and the visual encoding.
-
 use bevy::prelude::*;
 use bevy::render::mesh::{Indices, PrimitiveTopology};
 use bevy::render::render_asset::RenderAssetUsages;
 
 use crate::layout::Link;
 
-/// Normal, dimmed and highlighted variants of one quantised building colour.
 #[derive(Clone)]
 pub struct BuildingMaterials {
     pub normal: Handle<StandardMaterial>,
@@ -46,7 +43,7 @@ pub fn make_building_materials(
     }
 }
 
-/// Unlit and translucent, so arcs read as overlays rather than structure.
+/// Unlit and translucent so arcs read as overlays, not structure.
 pub fn link_material(
     materials: &mut Assets<StandardMaterial>,
     base_color: Color,
@@ -63,9 +60,7 @@ pub fn link_material(
     })
 }
 
-/// Builds one mesh containing every arc, so the whole dependency graph is a
-/// single draw call rather than one entity per link. The highlighted subset is
-/// rebuilt separately into a second, small mesh.
+/// One mesh for every arc: a single draw call instead of an entity per link.
 pub fn build_link_mesh(links: &[&Link], vertical: f32) -> Mesh {
     let mut positions: Vec<[f32; 3]> = Vec::new();
     let mut normals: Vec<[f32; 3]> = Vec::new();
@@ -79,7 +74,6 @@ pub fn build_link_mesh(links: &[&Link], vertical: f32) -> Mesh {
         }
         let base = positions.len() as u32;
         for (i, &p) in pts.iter().enumerate() {
-            // Half the ribbon's width, sideways to the arc on the ground plane.
             let along = pts[(i + 1).min(pts.len() - 1)] - pts[i.saturating_sub(1)];
             let side = along.xz().normalize_or_zero().perp() * (link.width * 0.5);
             let side = Vec3::new(side.x, 0.0, side.y);

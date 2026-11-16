@@ -1,8 +1,7 @@
 package impls
 
-// Three stateless types implementing the same interface, with unnamed
-// receivers. Idiomatic Go, and the shape that used to make one type absorb
-// every same-named method in the file.
+// Unnamed receivers on types sharing method names: the shape that used to make
+// one type absorb every same-named method in the file.
 
 type jsonCodec struct{}
 type xmlCodec struct{}

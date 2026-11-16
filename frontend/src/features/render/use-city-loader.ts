@@ -21,11 +21,6 @@ interface StreamMessage {
   error?: string;
 }
 
-/**
- * Boots the engine, asks the backend for the city and follows the analysis
- * job. `onCity` gets every city that arrives: the draft from the deterministic
- * pass, then the one the model refined.
- */
 export function useCityLoader(repoUrl: string, onCity: (raw: RawCity) => void) {
   // Separate from "is a city shown": a regeneration keeps the city on screen.
   const [busy, setBusy] = useState(false);
@@ -54,16 +49,13 @@ export function useCityLoader(repoUrl: string, onCity: (raw: RawCity) => void) {
       const data = await res.json();
       if (!res.ok) return fail(data.error ?? "Analysis failed");
 
-      // A cached city comes straight back; otherwise we follow the job.
       if (data.cityData) {
         onCity(data.cityData);
         return setBusy(false);
       }
       if (!data.job_id) return fail("Server did not start an analysis");
 
-      // The draft city arrives over SSE too: the deterministic pass lands in
-      // seconds and the LLM pass replaces it, so the city is usable long
-      // before the model finishes.
+      // The deterministic draft arrives over SSE in seconds; the LLM pass replaces it later.
       const src = new EventSource(`/api/jobs/${data.job_id}/events`, {
         withCredentials: true,
       });

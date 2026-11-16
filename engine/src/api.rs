@@ -1,5 +1,3 @@
-//! The wasm API. Calls from JS only queue work; systems pick it up next frame.
-
 use bevy::prelude::*;
 use wasm_bindgen::prelude::*;
 
@@ -9,7 +7,6 @@ use crate::events::*;
 use crate::picking::{frame, Pickable};
 use crate::{CityIndex, CityMap};
 
-// Test-only hook that feeds a city in without going through wasm bindings.
 pub fn queue_city_for_test(city: CityMap) {
     PENDING_DATA.with(|c| *c.borrow_mut() = Some(city));
 }
@@ -59,8 +56,7 @@ pub fn load_city_data(val: JsValue) {
     }
 }
 
-/// Focuses the camera on a building, by its index in city order, and selects
-/// it.
+/// Index is in city order; also selects the building.
 #[wasm_bindgen]
 pub fn focus_building(index: usize) {
     queue(Command::Focus(index));
@@ -85,21 +81,17 @@ pub fn label_positions() -> Vec<f32> {
     LABELS_OUT.with(|l| l.borrow().clone())
 }
 
-/// Restores a camera previously returned by `camera_state`.
 #[wasm_bindgen]
 pub fn set_camera_state(state: String) {
     queue(Command::Camera(state));
 }
 
-/// Shows or hides every dependency arc at once. Hidden by default.
 #[wasm_bindgen]
 pub fn set_show_links(show: bool) {
     queue(Command::Links(show));
 }
 
-/// Sets what every building looks like; see `Appearance` for the layout of
-/// each array. The frontend decides colour mode, filter, timeline, selection
-/// and path, and sends only the result.
+/// See `Appearance` for the array layout.
 #[wasm_bindgen]
 pub fn set_appearance(colors: Vec<f32>, states: Vec<u8>, grounds: Vec<f32>, links: Vec<u32>) {
     queue(Command::Appearance(Appearance {
@@ -153,8 +145,7 @@ pub(crate) fn publish_labels(
         .flat_map(|&world| {
             let dist = cam_tf.translation().distance(world);
             match camera.world_to_viewport(cam_tf, world) {
-                // Hidden where labels would overlap into noise, and when
-                // zoomed right into one building.
+                // Hidden where labels would overlap, and when zoomed into one building.
                 Some(p) if dist > 12.0 && dist < far => {
                     [p.x, p.y, (1.0 - dist / far).clamp(0.25, 1.0)]
                 }

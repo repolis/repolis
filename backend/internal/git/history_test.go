@@ -20,8 +20,6 @@ func run(t *testing.T, dir string, args ...string) {
 	}
 }
 
-// One repo-wide pass must produce the same per-file churn the old three
-// subprocesses-per-file version did.
 func TestExtractHistory(t *testing.T) {
 	dir := t.TempDir()
 	run(t, dir, "init", "-q", "-b", "main")

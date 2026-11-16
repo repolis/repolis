@@ -1,8 +1,7 @@
 use bevy::input::mouse::{MouseMotion, MouseScrollUnit, MouseWheel};
 use bevy::prelude::*;
 
-/// Vertical field of view of the city camera, mirrored in `setup_scene` so the
-/// framing maths and the projection cannot drift apart.
+/// Mirrored in `setup_scene` so framing maths and projection cannot drift apart.
 pub const CAMERA_FOV: f32 = std::f32::consts::FRAC_PI_4;
 
 /// Fraction of the viewport height a focused object should fill.
@@ -14,7 +13,6 @@ pub struct CityCamera {
     pub radius: f32,
     pub alpha: f32,
     pub beta: f32,
-    /// Targets for smooth interpolation when focusing on something.
     pub target_focus: Vec3,
     pub target_radius: f32,
     pub home_focus: Vec3,
@@ -37,7 +35,7 @@ impl Default for CityCamera {
 }
 
 impl CityCamera {
-    /// Sets both the current and the "home" view, used by the reset button.
+    /// Also sets the "home" view used by reset.
     pub fn frame(&mut self, center: Vec3, radius: f32) {
         self.focus = center;
         self.target_focus = center;
@@ -49,10 +47,7 @@ impl CityCamera {
         self.beta = 0.62;
     }
 
-    /// Frames an object so it fills roughly FOCUS_FILL of the viewport height.
-    /// `size` must be the larger of footprint and height: scaling by the
-    /// footprint alone frames a tall tower as its own base and puts the camera
-    /// inside it.
+    /// `size` must be max(footprint, height), or a tall tower puts the camera inside it.
     pub fn frame_object(&mut self, center: Vec3, size: f32) {
         // Half the object subtends half of FOCUS_FILL of the vertical FOV.
         let half_angle = (CAMERA_FOV * 0.5 * FOCUS_FILL).max(0.01);
@@ -117,7 +112,6 @@ pub fn camera_controls(
             cam.beta = (cam.beta + drag.y * 0.005).clamp(0.06, 1.52);
         }
 
-        // WASD pans the orbit centre.
         let mut pan = Vec2::ZERO;
         if keys.pressed(KeyCode::KeyW) || keys.pressed(KeyCode::ArrowUp) {
             pan.y += 1.0;
@@ -146,14 +140,11 @@ pub fn camera_controls(
         }
 
         if scroll != 0.0 {
-            // Purely proportional, so a notch always covers the same
-            // fraction of the distance. A flat floor makes one notch
-            // jump straight through whatever is being inspected.
+            // Purely proportional: a flat floor makes one notch jump through the target.
             let factor = (1.0 - scroll * 0.12).clamp(0.45, 2.2);
             cam.target_radius = (cam.target_radius * factor).clamp(2.5, 20000.0);
         }
 
-        // Damped, so focusing reads as a move rather than a teleport.
         let k = (1.0 - (-12.0 * dt).exp()).clamp(0.0, 1.0);
         let focus_delta = (cam.target_focus - cam.focus) * k;
         let radius_delta = (cam.target_radius - cam.radius) * k;

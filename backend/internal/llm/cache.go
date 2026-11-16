@@ -5,8 +5,8 @@ import (
 	"sync"
 )
 
-// Cache persists every LLM decision, keyed by the hash of its exact inputs, so
-// a re-analysis, a later commit or a shared vendored library costs nothing.
+// Keyed by the hash of the exact inputs, so a re-analysis, a later commit or a
+// shared vendored library costs nothing.
 type Cache struct {
 	db *sql.DB
 	mu sync.RWMutex

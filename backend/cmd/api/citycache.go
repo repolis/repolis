@@ -1,5 +1,3 @@
-// The on-disk city cache: one JSON file per repository and commit.
-
 package main
 
 import (
@@ -34,8 +32,7 @@ func readCachedCity(key string) *models.CityMap {
 	return &city
 }
 
-// writeCachedCity writes atomically: a plain WriteFile can be read
-// half-written by a concurrent request.
+// Atomic: a plain WriteFile can be read half-written by a concurrent request.
 func writeCachedCity(key string, city *models.CityMap) {
 	b, err := json.Marshal(city)
 	if err != nil {

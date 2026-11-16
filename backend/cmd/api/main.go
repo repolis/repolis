@@ -53,8 +53,7 @@ func CookieMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// CORSMiddleware lets the frontend run on a different origin. A no-op behind
-// Vite's dev proxy, required for any deployment that does not proxy.
+// A no-op behind Vite's dev proxy, required for any deployment that does not proxy.
 func CORSMiddleware(next http.Handler) http.Handler {
 	allowed := os.Getenv("CORS_ORIGIN")
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

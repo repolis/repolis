@@ -2,27 +2,19 @@ import { useEffect, useState } from "react";
 
 import type { CitySummary } from "./types";
 
-/**
- * Scrubs the city back through its own history. A building appears on the day
- * its file did, which comes free from the backend's `git log` pass: nothing is
- * re-parsed and no commit is checked out, so scrubbing is instant. It shows
- * when each part came into existence, not buildings growing.
- */
 export function Timeline({
   summary,
   day,
   onChange,
 }: {
   summary: CitySummary | null;
-  /** Day of history shown, counted from the first commit; null for today. */
   day: number | null;
   onChange: (day: number | null) => void;
 }) {
   const [playing, setPlaying] = useState(false);
   const total = summary?.history_days ?? 0;
 
-  // Plays from the first commit to today in about twelve seconds, whatever
-  // the length of the history.
+  // About twelve seconds from first commit to today, whatever the history length.
   useEffect(() => {
     if (!playing || total <= 0) return;
     let frame = 0;

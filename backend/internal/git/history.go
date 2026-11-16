@@ -7,11 +7,9 @@ import (
 	"time"
 )
 
-// FileHistory is the aggregated git history for one path.
 type FileHistory struct {
 	Churn        int // number of commits touching the file
 	LastModified time.Time
-	// The oldest commit touching the file: when this part came into being.
 	// Free, since `git log` is already walked to its end.
 	FirstSeen     time.Time
 	PrimaryAuthor string
@@ -22,8 +20,7 @@ const (
 	fieldSep = "\x1f" // between fields of the commit header
 )
 
-// ExtractHistory walks the whole history exactly once: O(commits) rather than
-// the O(files x commits) of a `git log` per file.
+// One pass over the whole history: O(commits) rather than a `git log` per file.
 func ExtractHistory(repoPath string) (map[string]*FileHistory, error) {
 	// --name-only, not --numstat: line counts need every revision's blobs,
 	// which in a blobless clone means a fetch per commit (9.8s on 7 files).

@@ -5,7 +5,6 @@ import "testing"
 func TestRustNamespace(t *testing.T) {
 	l := rustLang{}
 	cases := map[string]string{
-		// Single-crate layout.
 		"src/lib.rs":           "crate",
 		"src/main.rs":          "crate",
 		"src/layout.rs":        "crate::layout",
@@ -37,7 +36,6 @@ func TestRustImportTargets(t *testing.T) {
 		return false
 	}
 
-	// Relative forms resolve against the importing module.
 	got := l.ImportTargets(Import{Path: "super::render"}, "crate::layout::treemap")
 	if !has(got, "crate::layout::render") {
 		t.Errorf("super:: from crate::layout::treemap gave %v", got)

@@ -1,10 +1,3 @@
-//! Places districts, directory blocks and buildings as three nested squarified
-//! treemaps, so nothing can overlap and everything stays axis aligned.
-//!
-//! Buildings are numbered in city order (each district's buildings in turn),
-//! the same order the frontend uses, and that number is the only way the rest
-//! of the engine refers to one.
-
 use crate::data::CityMap;
 use crate::treemap::{area, inset, squarify};
 use bevy::math::{Rect, Vec2, Vec3};
@@ -12,13 +5,9 @@ use std::collections::HashMap;
 
 const MIN_FOOTPRINT: f32 = 4.0;
 const MIN_HEIGHT: f32 = 3.0;
-// Gap left around each building lot; becomes the alley between buildings.
 const LOT_MARGIN: f32 = 1.1;
-// Gap left around each directory block; becomes a street.
 const STREET_WIDTH: f32 = 4.5;
-// Gap between a district's ground and its built-up area.
 const DISTRICT_PADDING: f32 = 7.0;
-// Open land between neighbouring districts.
 const DISTRICT_GAP: f32 = 8.0;
 
 pub struct PlacedBuilding {
@@ -27,18 +16,15 @@ pub struct PlacedBuilding {
     pub district: usize,
     /// Footprint centre on the ground plane (world x, z).
     pub center: Vec2,
-    /// Width, height and depth.
     pub size: Vec3,
 }
 
-/// A dependency drawn as an elevated arc rather than a ground road.
 #[derive(Default)]
 pub struct Link {
     pub points: Vec<Vec3>,
     pub width: f32,
-    /// Both ends sit in the same reported dependency cycle.
     pub in_cycle: bool,
-    /// Building order of each end.
+    /// Building indices, in city order.
     pub source: usize,
     pub target: usize,
 }
@@ -48,15 +34,12 @@ pub struct LayoutResult {
     /// Each district's ground, in city order.
     pub districts: Vec<Rect>,
     pub buildings: Vec<PlacedBuilding>,
-    /// One pavement slab per directory block; the gaps between are streets.
     pub blocks: Vec<Rect>,
-    /// Thin strips down the middle of every street and avenue.
     pub lane_lines: Vec<Rect>,
     pub links: Vec<Link>,
     pub radius: f32,
 }
 
-/// A building's intended size, before its lot is known.
 struct Sized<'a> {
     order: usize,
     district: usize,
@@ -98,9 +81,7 @@ pub fn compute_layout(city: &CityMap) -> LayoutResult {
         };
     }
 
-    // Area each district must accommodate. Streets, gutters and the gap to
-    // the neighbours are real area: budget for them, or the plot is sized for
-    // the footprints alone.
+    // Budget for streets, gutters and gaps too, or plots fit only the footprints.
     let mut footprint = vec![0.0; city.districts.len()];
     for s in &sized {
         footprint[s.district] += s.lot_area();
@@ -128,7 +109,7 @@ pub fn compute_layout(city: &CityMap) -> LayoutResult {
             cell,
             (cell.width().min(cell.height()) * 0.08).clamp(1.0, DISTRICT_GAP),
         );
-        // Scaled: a fixed inset ate a one-building district's whole plot.
+        // Scaled, not fixed: a fixed inset ate a one-building district's whole plot.
         let plot = inset(
             ground,
             (ground.width().min(ground.height()) * 0.07).clamp(0.5, DISTRICT_PADDING),
@@ -194,7 +175,6 @@ fn pack_district(
         return;
     }
 
-    // One block per source directory, sized by its total footprint.
     let mut by_dir: HashMap<&str, Vec<&Sized>> = HashMap::new();
     for s in mine {
         by_dir.entry(s.dir).or_default().push(s);
@@ -210,8 +190,7 @@ fn pack_district(
     let cells = squarify(&dir_areas, plot);
     centre_lines(&cells, plot, lane_lines);
     for (in_dir, block) in dirs.iter().zip(cells) {
-        // The street between blocks, proportional so a block never disappears
-        // into its own gutter.
+        // Proportional so a block never disappears into its own gutter.
         let inner = inset(
             block,
             (block.width().min(block.height()) * 0.09).clamp(0.25, STREET_WIDTH * 0.5),
@@ -221,7 +200,6 @@ fn pack_district(
         }
         blocks.push(inner);
 
-        // One lot per building inside its directory's block.
         let lot_areas: Vec<f32> = in_dir.iter().map(|s| s.lot_area()).collect();
         for (s, lot) in in_dir.iter().zip(squarify(&lot_areas, inner)) {
             let cell = inset(
@@ -231,8 +209,7 @@ fn pack_district(
             if cell.width() <= 1e-4 || cell.height() <= 1e-4 {
                 continue;
             }
-            // Shrink to fit when the lot is smaller. Either way the building
-            // stays inside its lot, so no two can touch.
+            // Shrink to fit so the building never leaves its lot.
             buildings.push(PlacedBuilding {
                 order: s.order,
                 district: s.district,
@@ -247,8 +224,7 @@ fn pack_district(
     }
 }
 
-/// Strips along the edges where treemap cells meet, which is the middle of
-/// the street between them. Edges on `bounds` face open ground and get none.
+/// Edges on `bounds` face open ground and get no centre line.
 fn centre_lines(cells: &[Rect], bounds: Rect, out: &mut Vec<Rect>) {
     let on = |v: f32, a: f32, b: f32| (v - a).abs() < 0.01 || (v - b).abs() < 0.01;
     for c in cells {
@@ -270,10 +246,7 @@ fn centre_lines(cells: &[Rect], bounds: Rect, out: &mut Vec<Rect>) {
     }
 }
 
-/// Dependency links, drawn as arcs above the rooftops. A ground road runs
-/// centre to centre, so it starts under its source building, ends under its
-/// target and crosses everything between; an arc cannot intersect the city and
-/// leaves the ground plane to the street grid.
+/// Arcs, not ground roads: a road centre to centre would cross every building between.
 fn build_links(city: &CityMap, buildings: &[PlacedBuilding]) -> Vec<Link> {
     let ids: Vec<&str> = city
         .districts
@@ -316,8 +289,6 @@ fn build_links(city: &CityMap, buildings: &[PlacedBuilding]) -> Vec<Link> {
     links
 }
 
-/// A quadratic arc from roof to roof, sampled just densely enough to read as a
-/// curve. Arcs between districts are flatter and smoother.
 fn arc(src: &PlacedBuilding, tgt: &PlacedBuilding) -> Vec<Vec3> {
     let inter = src.district != tgt.district;
     let start = Vec3::new(src.center.x, src.size.y + 1.0, src.center.y);
@@ -365,8 +336,7 @@ mod tests {
         Rect::from_center_size(b.center, Vec2::new(b.size.x, b.size.z))
     }
 
-    /// The core invariant: no two buildings overlap, whatever the relative
-    /// district sizes.
+    /// Core invariant: no two buildings overlap, whatever the district sizes.
     #[test]
     fn no_building_overlaps_even_with_extreme_size_spread() {
         let c = city(&[
@@ -406,7 +376,6 @@ mod tests {
         }
     }
 
-    /// Ground area must track district size.
     #[test]
     fn district_area_scales_with_content() {
         let c = city(&[("big", 150), ("small", 6)]);

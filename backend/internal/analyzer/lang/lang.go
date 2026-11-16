@@ -1,6 +1,3 @@
-// Package lang holds everything that knows about a specific language. Nothing
-// outside it names a tree-sitter node type; adding a language means
-// implementing Language and registering it.
 package lang
 
 import (
@@ -10,13 +7,10 @@ import (
 	sitter "github.com/smacker/go-tree-sitter"
 )
 
-// Ref is a symbol reference as written. The qualifier is kept separate because
-// `layout::compute()` and a bare `compute()` resolve differently.
 type Ref struct {
 	Qualifier string // "crate::layout", "pkg", or "" when unqualified
 	Name      string
-	// A method call on a value (`x.foo()`): the receiver's type is unknown,
-	// so these resolve on name alone.
+	// `x.foo()`: the receiver's type is unknown, so these resolve on name alone.
 	Method bool
 }
 
@@ -27,7 +21,6 @@ func (r Ref) String() string {
 	return r.Qualifier + "::" + r.Name
 }
 
-// Import is one import/include/use statement.
 type Import struct {
 	Path  string // as written: "crate::layout::Rect", "git2/oid.h"
 	Alias string // local name when renamed, else ""
@@ -35,8 +28,7 @@ type Import struct {
 	Wildcard bool
 }
 
-// TypeDef is a type that actually declares members. Forward declarations must
-// not be reported.
+// Only types that declare members; forward declarations must not be reported.
 type TypeDef struct {
 	Name       string
 	Fields     []string
@@ -45,11 +37,9 @@ type TypeDef struct {
 	Start, End uint32 // byte range, for quoting source
 }
 
-// FuncDef is a function or method.
 type FuncDef struct {
 	Name string
-	// The type this is a method of, from syntax where the language has it.
-	// Always empty for C, which cannot express the idea.
+	// From syntax only; always empty for C.
 	Receiver   string
 	Signature  string
 	ReturnType string
@@ -61,7 +51,6 @@ type FuncDef struct {
 	Start, End uint32
 }
 
-// FileFacts is everything one file contributes.
 type FileFacts struct {
 	Imports  []Import
 	Types    []TypeDef
@@ -69,17 +58,16 @@ type FileFacts struct {
 	ScopeVar int // file-scope variables, used to size "module" buildings
 }
 
-// Language is the plug-in point. Implement it, register it, done.
 type Language interface {
-	// Name is the display name, also used in LLM prompts.
+	// Display name, also used in LLM prompts.
 	Name() string
-	// Extensions are the file suffixes this language claims, including the dot.
+	// File suffixes, including the dot.
 	Extensions() []string
 	Grammar() *sitter.Language
 
-	// Does the grammar state method ownership (Rust `impl`, Go receivers)?
-	// When true, a function without a Receiver is genuinely free and nothing
-	// may be guessed. Only C, which cannot express the idea, needs the ladder.
+	// Does the grammar state method ownership (Rust `impl`, Go receivers)? If
+	// so, a function without a Receiver is genuinely free; only C needs the
+	// ladder.
 	SyntacticMethods() bool
 
 	// Does an unqualified name resolve only within the current module plus
@@ -103,7 +91,6 @@ var registry []Language
 
 func Register(l Language) { registry = append(registry, l) }
 
-// ByName finds a registered language by its display name, or nil.
 func ByName(name string) Language {
 	for _, l := range registry {
 		if l.Name() == name {
@@ -113,7 +100,6 @@ func ByName(name string) Language {
 	return nil
 }
 
-// ForFile picks the language that claims a path, or nil.
 func ForFile(relPath string) Language {
 	lower := strings.ToLower(relPath)
 	for _, l := range registry {
@@ -126,9 +112,6 @@ func ForFile(relPath string) Language {
 	return nil
 }
 
-// ---- helpers shared by implementations ----
-
-// Text returns a node's source text.
 func Text(n *sitter.Node, src []byte) string {
 	if n == nil {
 		return ""
@@ -144,12 +127,10 @@ func Lines(n *sitter.Node) int {
 	return int(n.EndPoint().Row-n.StartPoint().Row) + 1
 }
 
-// Collapse squeezes whitespace onto one line, for signatures.
 func Collapse(s string) string {
 	return strings.Join(strings.Fields(strings.ReplaceAll(s, "\n", " ")), " ")
 }
 
-// Children yields a node's direct children.
 func Children(n *sitter.Node) iter.Seq[*sitter.Node] {
 	return func(yield func(*sitter.Node) bool) {
 		for i := range int(n.ChildCount()) {
@@ -160,8 +141,7 @@ func Children(n *sitter.Node) iter.Seq[*sitter.Node] {
 	}
 }
 
-// FieldChildren yields the children stored under one field name. A field can
-// repeat: `int x, y;` is one declaration with two declarators.
+// A field can repeat: `int x, y;` is one declaration with two declarators.
 func FieldChildren(n *sitter.Node, field string) iter.Seq[*sitter.Node] {
 	return func(yield func(*sitter.Node) bool) {
 		for i := range int(n.ChildCount()) {
@@ -185,8 +165,6 @@ func Walk(n *sitter.Node, fn func(*sitter.Node) bool) {
 	}
 }
 
-// splitLast splits a "::" path at its last separator; ok is false when there
-// is none.
 func splitLast(p string) (parent, last string, ok bool) {
 	i := strings.LastIndex(p, "::")
 	if i < 0 {
@@ -195,7 +173,6 @@ func splitLast(p string) (parent, last string, ok bool) {
 	return p[:i], p[i+2:], true
 }
 
-// newType builds a TypeDef for the node that declares it.
 func newType(n *sitter.Node, name string, fields, types []string) *TypeDef {
 	return &TypeDef{
 		Name: name, Fields: fields, FieldTypes: types, LOC: Lines(n),
@@ -203,9 +180,7 @@ func newType(n *sitter.Node, name string, fields, types []string) *TypeDef {
 	}
 }
 
-// newFunc builds what every language derives the same way: position, size,
-// signature and parameter types. paramType names one child of the parameter
-// list, reporting false for children that are not parameters.
+// paramType reports false for parameter-list children that are not parameters.
 func newFunc(n, params *sitter.Node, src []byte, name, receiver string, paramType func(p *sitter.Node) (string, bool)) *FuncDef {
 	fn := &FuncDef{
 		Name: name, Receiver: receiver, LOC: Lines(n),
@@ -222,9 +197,8 @@ func newFunc(n, params *sitter.Node, src []byte, name, receiver string, paramTyp
 	return fn
 }
 
-// scanBody records a function body's references and its McCabe complexity:
-// one plus the decision points. `&&` and `||` are matched on operator text
-// because the grammars share one node type for every binary expression.
+// `&&` and `||` match on operator text: the grammars share one node type for
+// every binary expression.
 func (fn *FuncDef) scanBody(body *sitter.Node, src []byte, branches map[string]bool, refs func(*sitter.Node, []byte, *FuncDef)) {
 	if body == nil {
 		return

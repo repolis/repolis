@@ -1,20 +1,18 @@
 package llm
 
-// Live model evaluation. Skipped unless LLM_EVAL names the profiles to run:
+// Skipped unless LLM_EVAL names the profiles to run:
 //
 //	LLM_EVAL=local,remote go test ./internal/llm -run TestEval -v -count=1 -timeout 30m
 //
 // LLM_EVAL_PARTS=adjudicate,label,explain picks sections; empty runs all.
 //
-// "local" uses backend/.env as is. "remote" points the same client at Google
-// AI Studio's OpenAI-compatible endpoint with GOOGLE_AI_STUDIO_API_KEY. Any
-// profile's models can be overridden with LLM_EVAL_<PROFILE>_FAST and
-// LLM_EVAL_<PROFILE>_MODEL, so one run can compare several.
+// "local" uses backend/.env; "remote" uses AI Studio with
+// GOOGLE_AI_STUDIO_API_KEY. Override models with LLM_EVAL_<PROFILE>_FAST and
+// LLM_EVAL_<PROFILE>_MODEL.
 //
-// The adjudication cases are real residual associations (rules could not
-// settle them) from tsoding/nothing c20e7c4, rgamble/libcsv b1d5212 and
-// libgit2/libgit2 0551dfd, hand-labelled. Several are deliberately ones the
-// rule gets wrong; `rule` records what the rule chose, for the baseline.
+// Adjudication cases are hand-labelled residuals from tsoding/nothing c20e7c4,
+// rgamble/libcsv b1d5212 and libgit2/libgit2 0551dfd; several are ones the rule
+// gets wrong.
 
 import (
 	"context"
@@ -148,7 +146,6 @@ var paceMu sync.Mutex
 var paceNext time.Time
 var paceGap time.Duration
 
-// pace blocks until the profile's request rate allows another call.
 func pace() {
 	if paceGap == 0 {
 		return

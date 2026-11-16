@@ -1,5 +1,3 @@
-// HTTP handlers: start an analysis, stream its progress, explain a building.
-
 package main
 
 import (
@@ -80,8 +78,7 @@ func (s *server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, models.AnalyzeResponse{Status: "pending", JobID: job.ID})
 }
 
-// runAnalysis runs the two passes on a detached context, so the work survives
-// the originating request.
+// Detached context, so the work survives the originating request.
 func (s *server) runAnalysis(j *jobs.Job, key, level string) {
 	ctx, cancel := context.WithTimeout(context.Background(), analysisLimit)
 	defer cancel()
@@ -126,8 +123,7 @@ func (s *server) runAnalysis(j *jobs.Job, key, level string) {
 		return
 	}
 
-	// The deterministic city is complete and navigable, and ready in a
-	// fraction of the LLM pass's time.
+	// Navigable on its own and ready in a fraction of the LLM pass's time.
 	j.Emit(jobs.Event{Type: jobs.EventCity, City: draft, Refined: false})
 	writeCachedCity(key, draft)
 	logger.Log(logger.InfoLevel, "Draft city published: %d districts, %d buildings, %d edges",
@@ -207,8 +203,7 @@ func (s *server) handleJobEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleExplain describes one building on demand: the only place the large
-// model runs, and nothing waits on it.
+// The only place the large model runs, and nothing waits on it.
 func (s *server) handleExplain(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 

@@ -20,11 +20,6 @@ Reply with exactly one name copied from the list, or NONE.
 Pick the type the function reads or modifies most: usually the one it is named after, or the type of its first pointer parameter.
 Reply with the name only. No punctuation, no explanation.`
 
-// AdjudicateAssociations settles what the rules could not - typically where
-// the naming and first-parameter conventions disagree, as in sqlite's
-// `vdbeCommit(sqlite3 *db, Vdbe *p)`. The rules handle 485 of nothing's 496
-// functions alone.
-//
 // Every answer must both appear in the candidate list and survive the AST
 // verifier; an unverifiable one becomes an orphan, not a wrong height.
 func (c *Client) AdjudicateAssociations(ctx context.Context, st *analyzer.SymbolTable, progress func(done, total int)) int {

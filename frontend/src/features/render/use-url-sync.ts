@@ -5,10 +5,7 @@ import { camera_state } from "@/wasm/engine";
 import { encodeView } from "./url-state";
 import type { FilterState } from "./view-controls";
 
-/**
- * Keeps the URL fragment in step with the view. replaceState, and the camera
- * only polled, so orbiting does not bury the back button in history entries.
- */
+// replaceState and a polled camera, so orbiting does not flood history.
 export function useUrlSync(
   active: boolean,
   mode: string,

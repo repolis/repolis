@@ -17,11 +17,10 @@ func (goLang) Extensions() []string      { return []string{".go"} }
 func (goLang) Grammar() *sitter.Language { return tsgo.GetLanguage() }
 func (goLang) Separator() string         { return "." }
 
-// A receiver states the owning type, so nothing has to be guessed.
 func (goLang) SyntacticMethods() bool { return true }
 func (goLang) ModuleScoped() bool     { return true }
 
-// Namespace: a Go package is a directory, so the directory is the scope.
+// A Go package is a directory.
 func (goLang) Namespace(relPath string) string {
 	d := path.Dir(path.Clean(relPath))
 	if d == "." || d == "/" || d == "" {
@@ -30,12 +29,10 @@ func (goLang) Namespace(relPath string) string {
 	return d
 }
 
-// ImportTargets turns an import path into namespace candidates. Imports are
-// absolute module paths while namespaces are repo-relative directories, so the
-// path is offered with successively fewer leading segments.
-//
-// A dotless first segment is the standard library, and returning nothing for
-// those keeps `import "os"` from matching a repo's own `internal/os`.
+// Imports are absolute module paths while namespaces are repo-relative
+// directories, so the path is offered with fewer and fewer leading segments. A
+// dotless first segment is the standard library; skipping it keeps `import
+// "os"` from matching a repo's own `internal/os`.
 func (goLang) ImportTargets(imp Import, _ string) []string {
 	p := strings.Trim(imp.Path, `"`)
 	if p == "" {
@@ -173,7 +170,6 @@ func goTypeDef(spec *sitter.Node, src []byte) *TypeDef {
 	return newType(spec, name, fields, types)
 }
 
-// goReceiverType reads the owning type out of `func (c *Camera) Frame()`.
 func goReceiverType(n *sitter.Node, src []byte) string {
 	recv := n.ChildByFieldName("receiver")
 	if recv == nil {
@@ -249,7 +245,6 @@ func goBodyRefs(n *sitter.Node, src []byte, fn *FuncDef) {
 	})
 }
 
-// goTypeName reduces a type node to a bare user-defined name, "" for builtins.
 func goTypeName(t *sitter.Node, src []byte) string {
 	if t == nil {
 		return ""

@@ -19,8 +19,6 @@ func (rustLang) Separator() string         { return "::" }
 func (rustLang) SyntacticMethods() bool    { return true }
 func (rustLang) ModuleScoped() bool        { return true }
 
-// Namespace maps a file to its module path.
-//
 //	src/lib.rs, src/main.rs      -> crate
 //	src/layout.rs                -> crate::layout
 //	src/layout/mod.rs            -> crate::layout
@@ -46,7 +44,6 @@ func (rustLang) Namespace(relPath string) string {
 	var mod []string
 	switch {
 	case root >= 0:
-		// The segment just before the source root names the crate.
 		if root > 0 {
 			crate = parts[root-1]
 		}
@@ -77,15 +74,12 @@ func (rustLang) Namespace(relPath string) string {
 	return crate + "::" + strings.Join(mod, "::")
 }
 
-// ImportTargets expands a `use`. The last segment is often a type rather than
-// a module, so the parent path is offered too and the resolver picks.
 func (rustLang) ImportTargets(imp Import, from string) []string {
 	p := imp.Path
 	if p == "" {
 		return nil
 	}
 
-	// Relative forms are resolved against the importing module.
 	switch {
 	case strings.HasPrefix(p, "self::"):
 		p = from + "::" + strings.TrimPrefix(p, "self::")
@@ -116,8 +110,8 @@ func (rustLang) ImportTargets(imp Import, from string) []string {
 	return withParent(nil, p)
 }
 
-// withParent appends a path and, when it has one, its parent: the last
-// segment of a `use` is often a type rather than a module.
+// The last segment of a `use` is often a type rather than a module, so the
+// parent is offered too.
 func withParent(out []string, p string) []string {
 	out = append(out, p)
 	if parent, _, _ := splitLast(p); parent != "" {
@@ -129,8 +123,6 @@ func withParent(out []string, p string) []string {
 func (rustLang) Parse(root *sitter.Node, src []byte) FileFacts {
 	var out FileFacts
 
-	// The enclosing impl names the receiver: what C guesses at with three
-	// rules and an LLM is a field lookup here.
 	var scan func(n *sitter.Node, receiver string)
 	scan = func(n *sitter.Node, receiver string) {
 		for ch := range Children(n) {
@@ -187,7 +179,6 @@ func (rustLang) Parse(root *sitter.Node, src []byte) FileFacts {
 	return out
 }
 
-// rustUse flattens one use-tree into flat imports.
 func rustUse(n *sitter.Node, src []byte, prefix string, out *[]Import) {
 	join := func(a, b string) string {
 		if a == "" {
@@ -337,8 +328,7 @@ func rustBodyRefs(n *sitter.Node, src []byte, fn *FuncDef) {
 	})
 }
 
-// rustTypeName reduces a type node to a bare user-defined name, "" for
-// primitives. `&mut Vec<Rect>` yields "Vec".
+// "" for primitives; `&mut Vec<Rect>` yields "Vec".
 func rustTypeName(t *sitter.Node, src []byte) string {
 	if t == nil {
 		return ""
@@ -368,7 +358,6 @@ func rustTypeName(t *sitter.Node, src []byte) string {
 	return rustBareType(Text(t, src))
 }
 
-// rustBareType strips generics, references and paths from written type text.
 func rustBareType(s string) string {
 	s = strings.TrimSpace(s)
 	s = strings.TrimPrefix(s, "&")

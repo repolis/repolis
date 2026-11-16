@@ -12,9 +12,8 @@ import (
 	"github.com/repolis/repolis/backend/internal/models"
 )
 
-// Draft is the fully deterministic city: everything derivable from the AST,
-// the call graph and git history, with no LLM at all. It is renderable on its
-// own, which is what lets the API stream a usable city in seconds.
+// Renderable on its own with no LLM, which is what lets the API stream a usable
+// city in seconds.
 type Draft struct {
 	Buildings []models.Building
 	Edges     []models.DependencyEdge
@@ -27,15 +26,13 @@ type Draft struct {
 	lastCommit  time.Time
 }
 
-// BuildDraft assembles the deterministic city. The symbol table is passed in
-// so the pipeline can assemble twice from it: once with rule-only
-// associations, again after the LLM has settled the ambiguous ones.
+// The symbol table is passed in so the pipeline can build twice: with rule-only
+// associations, then after the LLM has settled the ambiguous ones.
 func BuildDraft(raw *RawExtraction, history map[string]*git.FileHistory, st *SymbolTable) *Draft {
 	if st == nil {
 		st = BuildSymbolTable(raw)
 	}
 
-	// Owner of every function: its associated type, else its file's module.
 	ownerOf := make(map[string]string, len(raw.Functions))
 	for _, a := range st.Assocs {
 		if a.Chosen != "" {
@@ -107,7 +104,6 @@ func (d *Draft) assemble(raw *RawExtraction, st *SymbolTable, ownerOf map[string
 		fileNS[f.Path] = f.Namespace
 	}
 
-	// One building per concrete type definition.
 	for _, t := range st.Types {
 		methods := methodsOf[t.ID]
 		sort.Strings(methods)
@@ -165,8 +161,8 @@ func nonNil(s []string) []string {
 	return s
 }
 
-// attachHistory copies git metrics onto each building, turning raw churn into
-// a percentile so the renderer gets a bounded signal whatever the repo's pace.
+// Churn becomes a percentile so the renderer gets a bounded signal whatever the
+// repo's pace.
 func (d *Draft) attachHistory(history map[string]*git.FileHistory) {
 	now := time.Now()
 	churns := make([]int, 0, len(d.Buildings))
@@ -264,10 +260,8 @@ func (d *Draft) computeStats(raw *RawExtraction, st *SymbolTable) {
 	d.Stats = s
 }
 
-// computeCoupling derives fan-in, fan-out and instability from the finished
-// edge set. Deliberately absent: a "dead code" flag - zero fan-in usually
-// means a library's public API, not dead code, and that judgement is the
-// user's to make from the numbers.
+// Deliberately no "dead code" flag: zero fan-in usually means a library's
+// public API, and that judgement is the user's.
 func (d *Draft) computeCoupling() {
 	in := make(map[string]int, len(d.Buildings))
 	out := make(map[string]int, len(d.Buildings))
@@ -299,9 +293,9 @@ func (d *Draft) computeCoupling() {
 	}
 }
 
-// FallbackName derives a district name with no LLM. It has to be good: it is
-// the name before the model answers, without a model, and after a vague model
-// answer. The dominant directory locates the code, the largest symbol names it.
+// This name shows before the model answers, without a model, and after a vague
+// answer, so it has to be good. The dominant directory locates the code, the
+// largest symbol names it.
 func (c Cluster) FallbackName() string {
 	banned := make(map[string]bool, len(c.Noise))
 	for _, w := range c.Noise {
@@ -351,7 +345,6 @@ func (c Cluster) FallbackName() string {
 	}
 }
 
-// titleize turns snake_case or a bare path segment into display words.
 func titleize(s string) string {
 	s = strings.ReplaceAll(strings.ReplaceAll(s, "_", " "), "-", " ")
 	parts := strings.Fields(s)
@@ -368,7 +361,6 @@ func titleize(s string) string {
 	return strings.Join(parts, " ")
 }
 
-// FallbackTypology guesses a typology from directory and symbol names.
 func (c Cluster) FallbackTypology() string {
 	joined := ""
 	for _, d := range c.TopDirs {

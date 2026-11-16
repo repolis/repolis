@@ -16,18 +16,15 @@ func (cLang) Extensions() []string      { return []string{".c", ".h"} }
 func (cLang) Grammar() *sitter.Language { return tsc.GetLanguage() }
 func (cLang) Separator() string         { return "" }
 
-// C cannot express method ownership at all, which is why the heuristic
-// ladder and its LLM adjudicator exist.
 func (cLang) SyntacticMethods() bool { return false }
 func (cLang) ModuleScoped() bool     { return false }
 
-// Namespace: C has one global namespace, so the file is the scope. It means
-// nothing for lookup, but lets the resolver rank an included symbol above an
-// identically named one that is not included.
+// The file is the scope: meaningless for lookup, but it lets the resolver rank
+// an included symbol above an identically named one that is not.
 func (cLang) Namespace(relPath string) string { return relPath }
 
-// ImportTargets: an #include names a file. Namespaces are file paths, so a
-// suffix match resolves `#include "git2/oid.h"` to `include/git2/oid.h`.
+// Namespaces are file paths, so a suffix match resolves `#include "git2/oid.h"`
+// to `include/git2/oid.h`.
 func (cLang) ImportTargets(imp Import, _ string) []string {
 	if imp.Path == "" {
 		return nil
@@ -85,9 +82,8 @@ func cIsTypeSpecifier(t string) bool {
 	return t == "struct_specifier" || t == "union_specifier" || t == "enum_specifier"
 }
 
-// cBodyList returns the member list, nil for a forward declaration or a bare
-// reference: `struct Level *p;` is also a struct_specifier, and recording it
-// as a definition overwrites the real one.
+// nil for a forward declaration or bare reference: `struct Level *p;` is also a
+// struct_specifier, and recording it overwrites the real definition.
 func cBodyList(n *sitter.Node) *sitter.Node {
 	if b := n.ChildByFieldName("body"); b != nil {
 		return b
@@ -174,7 +170,6 @@ func cUnwrap(n *sitter.Node, src []byte) string {
 	return ""
 }
 
-// cBaseType reduces a type node to a user-defined name, "" for primitives.
 func cBaseType(t *sitter.Node, src []byte) string {
 	if t == nil {
 		return ""
@@ -260,7 +255,6 @@ func cBodyRefs(n *sitter.Node, src []byte, fn *FuncDef) {
 	})
 }
 
-// cIncludePath reads the file out of `#include "x.h"` or `#include <x.h>`.
 func cIncludePath(include string) string {
 	for _, q := range [][2]string{{`"`, `"`}, {"<", ">"}} {
 		if _, rest, ok := strings.Cut(include, q[0]); ok {

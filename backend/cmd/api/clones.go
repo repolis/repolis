@@ -1,5 +1,3 @@
-// Repository checkouts on disk, and their cleanup.
-
 package main
 
 import (

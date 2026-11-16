@@ -1,26 +1,14 @@
-//! Squarified treemap packing (Bruls, Huizing & van Wijk, 2000).
-//!
-//! A treemap cannot produce an overlap: it recursively subdivides a rectangle,
-//! so disjointness comes from the construction rather than from a collision
-//! test afterwards. It is also what the original CodeCity work used, is
-//! O(n log n), and is stable - similar inputs give similar pictures.
-//!
-//! Rectangles live on the ground plane: `x` is world x, `y` is world z.
-
 use bevy::math::{Rect, Vec2};
 
 pub fn area(r: Rect) -> f32 {
     r.width() * r.height()
 }
 
-/// Shrinks a rectangle by `m` on every side, never past its centre; the band
-/// removed becomes a street or an alley.
 pub fn inset(r: Rect, m: f32) -> Rect {
     Rect::from_center_half_size(r.center(), (r.half_size() - m).max(Vec2::ZERO))
 }
 
-/// Packs `areas` into `bounds`, one rectangle per area, in input order. Areas
-/// are scaled to fill `bounds` exactly, so only their relative size matters.
+/// One rect per area, in input order; areas are scaled to fill `bounds`.
 pub fn squarify(areas: &[f32], bounds: Rect) -> Vec<Rect> {
     let mut out = vec![Rect::default(); areas.len()];
     if areas.is_empty() || area(bounds) <= 0.0 {
@@ -41,14 +29,13 @@ pub fn squarify(areas: &[f32], bounds: Rect) -> Vec<Rect> {
     while start < order.len() {
         let side = free.width().min(free.height());
         if side <= 1e-6 {
-            // Degenerate strip: zero-area rects rather than lost items.
+            // Degenerate strip: emit zero-area rects rather than drop items.
             for &i in &order[start..] {
                 out[i] = Rect::from_corners(free.min, free.min);
             }
             break;
         }
 
-        // Grow the row while its worst aspect ratio keeps improving.
         let mut end = start + 1;
         while end < order.len()
             && worst_ratio(&sizes[start..=end], side) <= worst_ratio(&sizes[start..end], side)
@@ -56,8 +43,6 @@ pub fn squarify(areas: &[f32], bounds: Rect) -> Vec<Rect> {
             end += 1;
         }
 
-        // Lay the row as a strip across the shorter side, then shrink the
-        // free space past it.
         let row_area: f32 = sizes[start..end].iter().sum();
         let vertical = free.width() >= free.height();
         let thickness = row_area
@@ -91,8 +76,7 @@ pub fn squarify(areas: &[f32], bounds: Rect) -> Vec<Rect> {
     out
 }
 
-/// Worst (largest) aspect ratio in a row laid along `side`. The row is sorted
-/// largest first.
+/// `row` must be sorted largest first.
 fn worst_ratio(row: &[f32], side: f32) -> f32 {
     let sum: f32 = row.iter().sum();
     let (largest, smallest) = (row[0], row[row.len() - 1]);

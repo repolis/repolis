@@ -1,6 +1,3 @@
-//! The parts of the backend's CityMap the engine reads: enough to lay the city
-//! out and report what was clicked. Everything else stays in the frontend.
-
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize, Default)]

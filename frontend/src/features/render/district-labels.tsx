@@ -4,8 +4,6 @@ import { label_positions } from "@/wasm/engine";
 
 import type { DistrictInfo } from "./types";
 
-/** District names over the canvas. The engine projects them; this moves the
- * elements every frame without re-rendering. */
 export function DistrictLabels({ districts }: { districts: DistrictInfo[] }) {
   const refs = useRef<(HTMLDivElement | null)[]>([]);
 

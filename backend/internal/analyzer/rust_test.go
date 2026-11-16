@@ -56,7 +56,6 @@ func TestRustAssociationIsSyntacticOnly(t *testing.T) {
 		return nil
 	}
 
-	// Methods inside `impl Rect`.
 	for _, m := range []string{"area", "new"} {
 		found := false
 		for _, a := range st.Assocs {
@@ -125,7 +124,6 @@ func TestRustImportResolutionPicksTheImportedSymbol(t *testing.T) {
 		}
 	}
 
-	// `clamp` is imported from util and called; that edge must exist.
 	foundClamp := false
 	for _, e := range d.Edges {
 		if e.Source == "src/lib.rs::Canvas" && e.Target == "src/util.rs::<module>" {
@@ -136,7 +134,6 @@ func TestRustImportResolutionPicksTheImportedSymbol(t *testing.T) {
 		t.Error("call to the imported util::clamp produced no edge")
 	}
 
-	// `Rect::area(s)` is a qualified call on a type; it must reach Rect.
 	foundRect := false
 	for _, e := range d.Edges {
 		if e.Source == "src/lib.rs::Canvas" && e.Target == "src/shapes/rect.rs::Rect" {
@@ -171,7 +168,6 @@ func TestRustTypesAndFields(t *testing.T) {
 	if methods["Canvas"] != 4 {
 		t.Errorf("Canvas has %d methods, want 4", methods["Canvas"])
 	}
-	// Free functions become part of their file's module building.
 	if methods["rect.rs"] != 1 {
 		t.Errorf("rect.rs module has %d functions, want 1 (bounding)", methods["rect.rs"])
 	}

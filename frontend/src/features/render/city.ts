@@ -8,7 +8,6 @@ import type {
   SelectPayload,
 } from "./types";
 
-/** The backend's CityMap, as passed to `load_city_data`. */
 export interface RawCity {
   districts: RawDistrict[];
   dependencies: { source: string; target: string }[] | null;
@@ -43,11 +42,8 @@ type RawStats = Omit<
     | null;
 };
 
-/** What the engine reports: a building or district by its index in city
- * order. Absent when the cursor is over nothing. */
 export type EngineTarget =
   { type: "Building" | "District"; index: number } | null | undefined;
-/** A path query's answer, as building ids; `hops` is empty when unreachable. */
 export interface PathQuery {
   from_id: string;
   to_id: string;
@@ -58,11 +54,9 @@ export interface City {
   summary: CitySummary;
   buildings: Map<string, BuildingInfo>;
   districts: Map<string, DistrictInfo>;
-  /** Every building in city order, the order the engine's arrays use. */
+  /** City order, matching the engine's arrays. */
   list: BuildingInfo[];
-  /** A building's position in `list`, by id. */
   indexOf: Map<string, number>;
-  /** Dependency neighbours, ignoring direction. */
   adj: Map<string, Set<string>>;
   scales: Scales;
 }
@@ -75,7 +69,6 @@ export function buildCity(raw: RawCity): City {
   for (const d of raw.districts)
     for (const b of d.buildings ?? []) name.set(b.id, b.name);
 
-  // Dependency lookups for the inspector, by building id.
   const calls = new Map<string, string[]>();
   const calledBy = new Map<string, string[]>();
   const adj = new Map<string, Set<string>>();
@@ -201,7 +194,6 @@ export function pathInfo(city: City, p: PathQuery): PathInfo {
   };
 }
 
-/** Exact id, then exact name, then prefix, then a case-insensitive substring. */
 export function resolveSymbol(city: City, query: string): string | null {
   if (city.buildings.has(query)) return query;
   const q = query.toLowerCase();

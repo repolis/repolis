@@ -25,7 +25,6 @@ func TestParseLabel(t *testing.T) {
 	}
 }
 
-// A name made only of words that are true of every district identifies none.
 func TestIsVague(t *testing.T) {
 	noise := []string{"git", "libgit2"}
 	vague := []string{"Library", "Git Subsystem", "Core Module", "git library", "System"}

@@ -1,7 +1,3 @@
-// Package llm is the thin, bounded LLM layer. The model only ever picks one
-// item from a closed list already in its prompt; prompts carry no source or
-// repo-wide dumps, replies are capped by MaxTokens and validated against that
-// list, and every result is cached by content hash.
 package llm
 
 import (
@@ -29,8 +25,6 @@ type Client struct {
 	// Closed-set selection: a 1.5B model suffices once candidates are short
 	// and AST-verified, and beats a 12B one several times over on speed.
 	fastModel string
-	// On-demand building explanations only, where the prompt can afford real
-	// source context and one user waits for one answer.
 	richModel string
 
 	// Sent as reasoning_effort on every call. Every task here caps output at
@@ -130,7 +124,6 @@ func NewClient(cache *Cache) (*Client, error) {
 func (c *Client) Calls() int64     { return c.calls.Load() }
 func (c *Client) CacheHits() int64 { return c.cacheHits.Load() }
 
-// Retries counts calls repeated after a rate-limit or overload response.
 func (c *Client) Retries() int64 { return c.retries.Load() }
 
 type request struct {
@@ -153,7 +146,6 @@ func (r request) hash() string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// complete runs one bounded completion, returning cached output when available.
 func (c *Client) complete(ctx context.Context, r request) (string, error) {
 	r.effort = c.reasoningEffort
 	key := r.hash()
@@ -231,10 +223,9 @@ const maxAttempts = 6
 
 var retryDelayRe = regexp.MustCompile(`"retryDelay":\s*"(\d+(?:\.\d+)?)s"`)
 
-// retryAfter says whether a failed call is worth repeating and after how long.
-// Hosted APIs answer over-quota with 429 (Google's free tier allows 15
-// requests a minute per model); without a retry each one silently becomes a
-// rule or directory fallback. Google states the wait in the body.
+// Hosted APIs answer over-quota with 429 (Google's free tier allows 15 requests
+// a minute per model); without a retry each one silently becomes a rule or
+// directory fallback. Google states the wait in the body.
 func retryAfter(err error, attempt int) (time.Duration, bool) {
 	if err == nil || attempt >= maxAttempts {
 		return 0, false
@@ -260,8 +251,7 @@ func retryAfter(err error, attempt int) (time.Duration, bool) {
 	return time.Duration(1<<attempt) * time.Second, true
 }
 
-// runBatch runs fn for every index with bounded concurrency, preserving input
-// order, and reports progress as jobs finish.
+// Results keep input order; progress is reported as jobs finish.
 func runBatch[T any](ctx context.Context, concurrency, n int, progress func(done, total int), fn func(i int) T) []T {
 	results := make([]T, n)
 	sem := make(chan struct{}, max(concurrency, 1))
@@ -285,7 +275,6 @@ func runBatch[T any](ctx context.Context, concurrency, n int, progress func(done
 	return results
 }
 
-// stripThinking removes the <think> blocks reasoning-tuned models emit.
 func stripThinking(s string) string {
 	for {
 		start := strings.Index(s, "<think>")

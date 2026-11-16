@@ -8,16 +8,11 @@ interface Props {
   repoUrl: string;
   onClose: () => void;
   onPick: (nameOrId: string) => void;
-  /** Pin this building as the start of a path query. */
   onAnchor: (buildingId: string) => void;
-  /** Trace from the pinned start to this building. */
   onPath: (buildingId: string) => void;
-  /** Id of the currently pinned start, if any. */
   anchorId: string | null;
 }
 
-/** Pinned inspector: appears on click, stays until dismissed, so a long field
- * list or a dependency can be read and clicked. */
 export function InspectorPanel({
   selection,
   repoUrl,
@@ -133,8 +128,7 @@ function BuildingInspector({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // The larger model runs here and only here; nothing in the render path
-  // waits on it.
+  // The larger model runs only here; nothing in the render path waits on it.
   async function explain() {
     setLoading(true);
     setError(null);
