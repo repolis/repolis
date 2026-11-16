@@ -15,6 +15,18 @@ import init, {
   show_path_to,
 } from "@/wasm/engine";
 
+import {
+  buildCity,
+  hoverInfo,
+  pathInfo,
+  resolveSymbol,
+  selection as toSelection,
+  type City,
+  type EngineHover,
+  type EnginePath,
+  type EngineSelect,
+  type RawCity,
+} from "./city";
 import { InspectorPanel } from "./inspector-panel";
 import { Legend } from "./legend";
 import { PathBanner } from "./path-banner";
@@ -64,23 +76,38 @@ export default function RenderPage() {
   const restoreRef = useRef(decodeView(window.location.hash));
   const restoredRef = useRef(false);
   const selectedIdRef = useRef<string | null>(null);
+  // The engine reports ids; names and metrics come from here.
+  const cityRef = useRef<City | null>(null);
+  const loadCity = useCallback((raw: RawCity) => {
+    cityRef.current = buildCity(raw);
+    load_city_data(raw);
+  }, []);
 
   // Engine -> UI events.
   useEffect(() => {
     const onHover = (e: Event) =>
-      setHover((e as CustomEvent<HoverInfo | null>).detail ?? null);
+      setHover(
+        cityRef.current &&
+          hoverInfo(cityRef.current, (e as CustomEvent<EngineHover>).detail),
+      );
     const onSelect = (e: Event) => {
-      const payload = (e as CustomEvent<SelectPayload>).detail ?? {
-        type: "None",
-      };
+      const detail = (e as CustomEvent<EngineSelect | null>).detail;
+      const payload: SelectPayload =
+        cityRef.current && detail
+          ? toSelection(cityRef.current, detail)
+          : { type: "None" };
       setSelection(payload);
       selectedIdRef.current =
         payload.type === "Building" ? payload.data.id : null;
     };
     const onPathEvent = (e: Event) =>
-      setPath((e as CustomEvent<PathInfo | null>).detail ?? null);
-    const onCity = (e: Event) => {
-      const s = (e as CustomEvent<CitySummary>).detail;
+      setPath(
+        cityRef.current &&
+          pathInfo(cityRef.current, (e as CustomEvent<EnginePath>).detail),
+      );
+    const onCity = () => {
+      const s = cityRef.current?.summary;
+      if (!s) return;
       setSummary(s);
       setRefined(s.refined);
       setPhase("ready");
@@ -155,7 +182,7 @@ export default function RenderPage() {
 
         // A cached city comes straight back; otherwise we follow the job.
         if (data.cityData) {
-          load_city_data(data.cityData);
+          loadCity(data.cityData);
           setBusy(false);
           return;
         }
@@ -188,7 +215,7 @@ export default function RenderPage() {
               break;
             }
             case "city":
-              load_city_data(msg.city);
+              loadCity(msg.city);
               setStatus(msg.refined ? "Done" : "Refining with the model…");
               break;
             case "error":
@@ -213,7 +240,7 @@ export default function RenderPage() {
         setBusy(false);
       }
     },
-    [repoUrl],
+    [repoUrl, loadCity],
   );
 
   useEffect(() => {
@@ -294,10 +321,10 @@ export default function RenderPage() {
     set_timeline(d === null ? "" : String(d));
   }, []);
 
-  const handlePick = useCallback(
-    (nameOrId: string) => focus_symbol(nameOrId),
-    [],
-  );
+  const handlePick = useCallback((nameOrId: string) => {
+    const id = cityRef.current && resolveSymbol(cityRef.current, nameOrId);
+    if (id) focus_symbol(id);
+  }, []);
   const handleReset = useCallback(() => {
     reset_camera();
     setSelection({ type: "None" });

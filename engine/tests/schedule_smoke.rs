@@ -35,7 +35,10 @@ fn headless_app() -> App {
 }
 
 fn entity_count(app: &mut App) -> usize {
-    app.world_mut().query::<&Transform>().iter(app.world()).count()
+    app.world_mut()
+        .query::<&Transform>()
+        .iter(app.world())
+        .count()
 }
 
 #[test]
@@ -66,7 +69,11 @@ fn loading_a_city_spawns_and_respawns_cleanly() {
     app.update();
     app.update();
 
-    assert_eq!(count, entity_count(&mut app), "reloading the same city changed the entity count");
+    assert_eq!(
+        count,
+        entity_count(&mut app),
+        "reloading the same city changed the entity count"
+    );
 }
 
 fn sample_city() -> engine::CityMap {

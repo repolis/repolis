@@ -14,8 +14,6 @@ const DISTRICT_PADDING: f64 = 7.0;
 
 pub struct PlacedBuilding {
     pub id: String,
-    pub name: String,
-    pub kind: String,
     /// World-space centre of the footprint.
     pub center_x: f64,
     pub center_z: f64,
@@ -26,8 +24,7 @@ pub struct PlacedBuilding {
     pub height: f64,
     pub depth: f64,
     pub district_idx: usize,
-    pub churn_rank: f64,
-    pub age_days: u32,
+    pub building_idx: usize,
 }
 
 pub struct Street {
@@ -57,21 +54,15 @@ pub struct PlacedDistrict {
 }
 
 /// A dependency drawn as an elevated arc rather than a ground road.
+#[derive(Default)]
 pub struct Link {
     pub points: Vec<(f64, f64, f64)>,
     pub width: f64,
     pub weight: u32,
-    /// Weight each way. Reciprocal edges share geometry but keep direction,
-    /// so the inspector can still tell callers from callees.
-    pub fwd: u32,
-    pub rev: u32,
-    pub kind: String,
     /// Both ends sit in the same reported dependency cycle.
     pub in_cycle: bool,
     pub source: String,
     pub target: String,
-    pub source_name: String,
-    pub target_name: String,
     pub inter_district: bool,
 }
 
@@ -151,7 +142,17 @@ pub fn compute_layout(city: &CityMap) -> LayoutResult {
         let plot = raw_plot.inset(pad);
 
         let mine: Vec<&Sized> = sized.iter().filter(|s| s.district_idx == i).collect();
-        pack_district(&mine, &plot, rot, cx, cz, i, city, &mut buildings, &mut streets);
+        pack_district(
+            &mine,
+            &plot,
+            rot,
+            cx,
+            cz,
+            i,
+            city,
+            &mut buildings,
+            &mut streets,
+        );
 
         let (min_x, min_z, max_x, max_z) = polygon_bounds(&polygon);
         districts.push(PlacedDistrict {
@@ -175,7 +176,14 @@ pub fn compute_layout(city: &CityMap) -> LayoutResult {
 
     let (min_x, min_z, max_x, max_z) = districts.iter().fold(
         (f64::MAX, f64::MAX, f64::MIN, f64::MIN),
-        |(a, b, c, d), p| (a.min(p.min_x), b.min(p.min_z), c.max(p.max_x), d.max(p.max_z)),
+        |(a, b, c, d), p| {
+            (
+                a.min(p.min_x),
+                b.min(p.min_z),
+                c.max(p.max_x),
+                d.max(p.max_z),
+            )
+        },
     );
     let center_x = (min_x + max_x) * 0.5;
     let center_z = (min_z + max_z) * 0.5;
@@ -227,7 +235,11 @@ fn compute_dimensions(city: &CityMap) -> Vec<Sized> {
                 width: final_side * aspect,
                 depth: final_side / aspect,
                 height,
-                dir: if b.dir.is_empty() { "root".to_string() } else { b.dir.clone() },
+                dir: if b.dir.is_empty() {
+                    "root".to_string()
+                } else {
+                    b.dir.clone()
+                },
             });
         }
     }
@@ -332,7 +344,6 @@ fn fit_cells(cells: &mut [Vec<(f64, f64)>], needed: &[f64]) {
         }
     }
 }
-
 
 fn separate(seeds: &mut [(f64, f64)], radii: &[f64]) {
     let n = seeds.len();
@@ -517,8 +528,6 @@ fn pack_district(
 
             buildings.push(PlacedBuilding {
                 id: b.id.clone(),
-                name: b.name.clone(),
-                kind: b.kind.clone(),
                 center_x: wx,
                 center_z: wz,
                 local_x: lx,
@@ -527,8 +536,7 @@ fn pack_district(
                 height: s.height,
                 depth: d,
                 district_idx,
-                churn_rank: b.churn_rank,
-                age_days: b.age_days,
+                building_idx: s.idx_in_city,
             });
         }
     }
@@ -538,53 +546,36 @@ fn pack_district(
 /// centre to centre, so it starts under its source building, ends under its
 /// target and crosses everything between; an arc cannot intersect the city and
 /// leaves the ground plane to the street grid.
-fn build_links(city: &CityMap, buildings: &[PlacedBuilding], districts: &[PlacedDistrict]) -> Vec<Link> {
+fn build_links(
+    city: &CityMap,
+    buildings: &[PlacedBuilding],
+    districts: &[PlacedDistrict],
+) -> Vec<Link> {
     let mut index: HashMap<&str, usize> = HashMap::new();
     for (i, b) in buildings.iter().enumerate() {
         index.insert(b.id.as_str(), i);
     }
 
     // Collapse reciprocal edges; A->B and B->A would overlap exactly.
-    struct Merged {
-        fwd: u32,
-        rev: u32,
-        kind: String,
-        in_cycle: bool,
-    }
-    let mut merged: HashMap<(usize, usize), Merged> = HashMap::new();
+    let mut merged: HashMap<(usize, usize), (u32, bool)> = HashMap::new();
     for e in &city.dependencies {
-        let (Some(&a), Some(&b)) = (index.get(e.source.as_str()), index.get(e.target.as_str())) else {
+        let (Some(&a), Some(&b)) = (index.get(e.source.as_str()), index.get(e.target.as_str()))
+        else {
             continue;
         };
         if a == b {
             continue;
         }
-        let forward = a < b;
-        let key = if forward { (a, b) } else { (b, a) };
-        let slot = merged.entry(key).or_insert(Merged {
-            fwd: 0,
-            rev: 0,
-            kind: e.kind.clone(),
-            in_cycle: false,
-        });
-        slot.in_cycle |= e.in_cycle;
-        if forward {
-            slot.fwd += e.weight.max(1);
-        } else {
-            slot.rev += e.weight.max(1);
-        }
+        let slot = merged.entry((a.min(b), a.max(b))).or_default();
+        slot.0 += e.weight.max(1);
+        slot.1 |= e.in_cycle;
     }
 
-    let mut keys: Vec<(&(usize, usize), &Merged)> = merged.iter().collect();
-    keys.sort_by(|x, y| {
-        (y.1.fwd + y.1.rev)
-            .cmp(&(x.1.fwd + x.1.rev))
-            .then(x.0.cmp(y.0))
-    });
+    let mut keys: Vec<((usize, usize), (u32, bool))> = merged.into_iter().collect();
+    keys.sort_by(|x, y| y.1 .0.cmp(&x.1 .0).then(x.0.cmp(&y.0)));
 
     let mut links = Vec::with_capacity(keys.len());
-    for (&(a, b), m) in keys {
-        let weight = &(m.fwd + m.rev);
+    for ((a, b), (weight, in_cycle)) in keys {
         let src = &buildings[a];
         let tgt = &buildings[b];
         let inter = src.district_idx != tgt.district_idx;
@@ -606,9 +597,8 @@ fn build_links(city: &CityMap, buildings: &[PlacedBuilding], districts: &[Placed
             let inv = 1.0 - t;
             let x = inv * inv * sx + 2.0 * inv * t * ((sx + tx) * 0.5) + t * t * tx;
             let z = inv * inv * sz + 2.0 * inv * t * ((sz + tz) * 0.5) + t * t * tz;
-            let y = inv * inv * (src.height + 1.0)
-                + 2.0 * inv * t * lift
-                + t * t * (tgt.height + 1.0);
+            let y =
+                inv * inv * (src.height + 1.0) + 2.0 * inv * t * lift + t * t * (tgt.height + 1.0);
             points.push((x, y, z));
         }
 
@@ -616,16 +606,11 @@ fn build_links(city: &CityMap, buildings: &[PlacedBuilding], districts: &[Placed
         let d_tgt = districts.get(tgt.district_idx);
         links.push(Link {
             points,
-            width: (0.45 + (*weight as f64).ln_1p() * 0.5).min(3.0),
-            weight: *weight,
-            fwd: m.fwd,
-            rev: m.rev,
-            kind: m.kind.clone(),
-            in_cycle: m.in_cycle,
+            width: (0.45 + (weight as f64).ln_1p() * 0.5).min(3.0),
+            weight,
+            in_cycle,
             source: src.id.clone(),
             target: tgt.id.clone(),
-            source_name: src.name.clone(),
-            target_name: tgt.name.clone(),
             inter_district: inter
                 && d_src.map(|d| d.building_count).unwrap_or(0) > 0
                 && d_tgt.map(|d| d.building_count).unwrap_or(0) > 0,
@@ -801,7 +786,13 @@ mod tests {
     /// district sizes.
     #[test]
     fn no_building_overlaps_even_with_extreme_size_spread() {
-        let c = city(&[("huge", 221), ("mid", 40), ("tiny", 2), ("small", 7), ("m2", 60)]);
+        let c = city(&[
+            ("huge", 221),
+            ("mid", 40),
+            ("tiny", 2),
+            ("small", 7),
+            ("m2", 60),
+        ]);
         let r = compute_layout(&c);
         assert_eq!(r.buildings.len(), c.building_count());
 
@@ -818,7 +809,7 @@ mod tests {
                     let dz = (a.local_z - b.local_z).abs();
                     let overlap = dx < (a.width + b.width) * 0.5 - 1e-6
                         && dz < (a.depth + b.depth) * 0.5 - 1e-6;
-                    assert!(!overlap, "{} overlaps {}", a.name, b.name);
+                    assert!(!overlap, "{} overlaps {}", a.id, b.id);
                 }
             }
         }
@@ -833,7 +824,7 @@ mod tests {
             assert!(
                 point_in_convex(b.center_x, b.center_z, &d.polygon),
                 "{} escaped district {}",
-                b.name,
+                b.id,
                 d.name
             );
         }

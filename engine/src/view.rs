@@ -2,10 +2,10 @@
 //! what is highlighted.
 //!
 //! Colour is the strongest channel, and height, footprint and saturation are
-//! already taken - another simultaneous channel would be unreadable. Switching colour gives each metric a full-strength palette in
-//! turn instead.
+//! already taken - another simultaneous channel would be unreadable. Switching
+//! colour gives each metric a full-strength palette in turn instead.
 
-use crate::hover::BuildingInfo;
+use crate::data::Building;
 use serde::Deserialize;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -82,14 +82,14 @@ impl Filter {
             && !self.only_cycles
     }
 
-    pub fn matches(&self, b: &BuildingInfo) -> bool {
+    pub fn matches(&self, b: &Building, district: &str) -> bool {
         if !self.text.is_empty() && !b.name.to_lowercase().contains(&self.text.to_lowercase()) {
             return false;
         }
         if !self.language.is_empty() && b.language != self.language {
             return false;
         }
-        if !self.district.is_empty() && b.district_name != self.district {
+        if !self.district.is_empty() && district != self.district {
             return false;
         }
         if !self.kind.is_empty() && b.kind != self.kind {
@@ -161,12 +161,15 @@ pub struct Scales {
 
 impl Default for Scales {
     fn default() -> Self {
-        Scales { complexity: 20.0, fan_in: 20.0 }
+        Scales {
+            complexity: 20.0,
+            fan_in: 20.0,
+        }
     }
 }
 
 /// The colour a building takes in the current mode.
-pub fn color_for(mode: ColorMode, b: &BuildingInfo, typology_rgb: [f32; 3], s: Scales) -> [f32; 3] {
+pub fn color_for(mode: ColorMode, b: &Building, typology_rgb: [f32; 3], s: Scales) -> [f32; 3] {
     match mode {
         ColorMode::Typology => typology_rgb,
         ColorMode::Complexity => ramp(b.max_complexity as f32 / s.complexity.max(1.0)),
@@ -183,12 +186,11 @@ pub fn color_for(mode: ColorMode, b: &BuildingInfo, typology_rgb: [f32; 3], s: S
 mod tests {
     use super::*;
 
-    fn info() -> BuildingInfo {
-        BuildingInfo {
+    fn info() -> Building {
+        Building {
             name: "Widget".into(),
             kind: "type".into(),
             language: "C".into(),
-            district_name: "Core".into(),
             num_methods: 4,
             max_complexity: 9,
             fan_in: 3,
@@ -201,35 +203,48 @@ mod tests {
     fn empty_filter_matches_everything() {
         let f = Filter::default();
         assert!(f.is_empty());
-        assert!(f.matches(&info()));
+        assert!(f.matches(&info(), "Core"));
     }
 
     #[test]
     fn predicates_compose_with_and() {
-        let mut f = Filter { language: "C".into(), min_methods: 4, ..Default::default() };
-        assert!(f.matches(&info()));
+        let mut f = Filter {
+            language: "C".into(),
+            min_methods: 4,
+            ..Default::default()
+        };
+        assert!(f.matches(&info(), "Core"));
         f.min_methods = 5;
-        assert!(!f.matches(&info()), "min_methods should exclude");
+        assert!(!f.matches(&info(), "Core"), "min_methods should exclude");
         f.min_methods = 4;
         f.language = "Rust".into();
-        assert!(!f.matches(&info()), "language should exclude");
+        assert!(!f.matches(&info(), "Core"), "language should exclude");
     }
 
     #[test]
     fn text_match_is_case_insensitive_substring() {
-        let f = Filter { text: "wid".into(), ..Default::default() };
-        assert!(f.matches(&info()));
-        let f = Filter { text: "nope".into(), ..Default::default() };
-        assert!(!f.matches(&info()));
+        let f = Filter {
+            text: "wid".into(),
+            ..Default::default()
+        };
+        assert!(f.matches(&info(), "Core"));
+        let f = Filter {
+            text: "nope".into(),
+            ..Default::default()
+        };
+        assert!(!f.matches(&info(), "Core"));
     }
 
     #[test]
     fn no_callers_selects_only_unreferenced() {
-        let f = Filter { only_no_callers: true, ..Default::default() };
-        assert!(!f.matches(&info()));
+        let f = Filter {
+            only_no_callers: true,
+            ..Default::default()
+        };
+        assert!(!f.matches(&info(), "Core"));
         let mut b = info();
         b.fan_in = 0;
-        assert!(f.matches(&b));
+        assert!(f.matches(&b, "Core"));
     }
 
     #[test]

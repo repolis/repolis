@@ -7,7 +7,7 @@ use wasm_bindgen::prelude::*;
 
 mod camera;
 mod data;
-mod hover;
+mod events;
 mod layout;
 mod render;
 mod treemap;
@@ -20,9 +20,9 @@ pub fn queue_city_for_test(city: CityMap) {
     PENDING_DATA.with(|c| *c.borrow_mut() = Some(city));
 }
 
-use layout::LayoutResult;
 use camera::{camera_controls, CityCamera};
-use hover::*;
+use events::*;
+use layout::{LayoutResult, Link};
 use render::*;
 use view::{ColorMode, Filter, Scales};
 
@@ -43,13 +43,20 @@ struct HighlightLinkLayer;
 
 #[derive(Resource, Default)]
 struct CityIndex {
+    city: CityMap,
     districts: Vec<DistrictGeom>,
     by_id: HashMap<String, Entity>,
-    links: Vec<LinkRef>,
+    links: Vec<Link>,
     materials: HashMap<u32, MaterialSet>,
     faded: Option<Handle<StandardMaterial>>,
     radius: f32,
     center: Vec3,
+}
+
+impl CityIndex {
+    fn building(&self, p: &Pickable) -> &data::Building {
+        &self.city.districts[p.district_idx].buildings[p.building_idx]
+    }
 }
 
 // (normal, dimmed, highlighted) for one quantised building color
@@ -66,24 +73,17 @@ struct DistrictGeom {
     max: Vec2,
 }
 
-struct LinkRef {
-    source: String,
-    target: String,
-    index: usize,
-}
-
 #[cfg(test)]
 mod path_tests {
     use super::*;
 
-    fn links(pairs: &[(&str, &str)]) -> Vec<LinkRef> {
+    fn links(pairs: &[(&str, &str)]) -> Vec<Link> {
         pairs
             .iter()
-            .enumerate()
-            .map(|(i, (a, b))| LinkRef {
+            .map(|(a, b)| Link {
                 source: a.to_string(),
                 target: b.to_string(),
-                index: i,
+                ..Default::default()
             })
             .collect()
     }
@@ -143,11 +143,6 @@ struct ViewState {
     dirty: bool,
 }
 
-#[derive(Resource, Default)]
-struct LinkStore {
-    links: Vec<layout::Link>,
-}
-
 thread_local! {
     static CAMERA_OUT: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
     static PENDING_DATA: std::cell::RefCell<Option<CityMap>> = const { std::cell::RefCell::new(None) };
@@ -177,7 +172,6 @@ fn queue(cmd: Command) {
 pub fn add_city_systems(app: &mut App) {
     app.init_resource::<SelectionState>()
         .init_resource::<CityIndex>()
-        .init_resource::<LinkStore>()
         .init_resource::<ViewState>()
         .insert_resource(ClearColor(SKY_COLOR))
         .insert_resource(AmbientLight {
@@ -239,11 +233,10 @@ pub fn load_city_data(val: JsValue) {
         Ok(city) => {
             web_sys::console::log_1(
                 &format!(
-                    "[engine] city: {} districts, {} buildings, {} edges (refined: {})",
+                    "[engine] city: {} districts, {} buildings, {} edges",
                     city.districts.len(),
                     city.building_count(),
                     city.dependencies.len(),
-                    city.stats.refined
                 )
                 .into(),
             );
@@ -255,10 +248,10 @@ pub fn load_city_data(val: JsValue) {
     }
 }
 
-/// Focuses the camera on a building by id or exact name, and selects it.
+/// Focuses the camera on a building by id, and selects it.
 #[wasm_bindgen]
-pub fn focus_symbol(query: String) {
-    queue(Command::Focus(query));
+pub fn focus_symbol(building_id: String) {
+    queue(Command::Focus(building_id));
 }
 
 #[wasm_bindgen]
@@ -275,7 +268,9 @@ pub fn set_color_mode(mode: String) {
 /// Restricts the view. Everything not matching becomes translucent.
 #[wasm_bindgen]
 pub fn set_filter(json: String) {
-    queue(Command::Filter(serde_json::from_str(&json).unwrap_or_default()));
+    queue(Command::Filter(
+        serde_json::from_str(&json).unwrap_or_default(),
+    ));
 }
 
 /// Shows the city as it stood on the given day of its history, counted from
@@ -301,7 +296,9 @@ pub fn set_camera_state(state: String) {
 /// Pins the building a path query starts from. An empty id clears it.
 #[wasm_bindgen]
 pub fn set_path_anchor(building_id: String) {
-    queue(Command::Anchor(Some(building_id).filter(|id| !id.is_empty())));
+    queue(Command::Anchor(
+        Some(building_id).filter(|id| !id.is_empty()),
+    ));
 }
 
 /// Traces the shortest dependency path from the pinned anchor to this
@@ -395,7 +392,6 @@ fn process_city_data(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut index: ResMut<CityIndex>,
-    mut store: ResMut<LinkStore>,
     mut interaction: ResMut<SelectionState>,
     mut view_state: ResMut<ViewState>,
     mut camera_q: Query<(&mut Transform, &mut CityCamera)>,
@@ -419,14 +415,15 @@ fn process_city_data(
     dispatch_select(&SelectPayload::None);
 
     let result = layout::compute_layout(&city);
+    index.radius = result.radius as f32;
+    index.center = Vec3::new(result.center_x as f32, 0.0, result.center_z as f32);
 
     spawn_city(
         &mut commands,
         &mut meshes,
         &mut materials,
         &mut index,
-        &mut store,
-        &result,
+        result,
         &city,
     );
 
@@ -461,9 +458,6 @@ fn process_city_data(
         view_state.dirty = true;
     }
 
-    index.radius = result.radius as f32;
-    index.center = Vec3::new(result.center_x as f32, 0.0, result.center_z as f32);
-
     if !had_city {
         for (mut transform, mut cam) in camera_q.iter_mut() {
             cam.frame(index.center, index.radius * 2.35 + 60.0);
@@ -477,117 +471,18 @@ fn process_city_data(
             "drag: orbit | scroll: zoom | WASD: pan | click: select | Esc: clear | R: reset".into();
     }
 
-    dispatch_city(&build_summary(&city, &result));
+    index.city = city;
+    dispatch_city();
 }
 
-fn build_summary(city: &CityMap, result: &LayoutResult) -> CitySummary {
-    let mut districts = Vec::with_capacity(city.districts.len());
-    let mut index = Vec::with_capacity(city.building_count());
-
-    for d in &city.districts {
-        let mut names: Vec<(&str, u32)> = d
-            .buildings
-            .iter()
-            .map(|b| (b.name.as_str(), b.num_methods * 3 + b.num_fields))
-            .collect();
-        names.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
-
-        districts.push(DistrictInfo {
-            id: d.id.clone(),
-            name: d.name.clone(),
-            typology: d.typology.clone(),
-            summary: d.summary.clone(),
-            tags: d.tags.clone(),
-            building_count: d.buildings.len(),
-            total_lines_of_code: d.buildings.iter().map(|b| b.lines_of_code).sum(),
-            total_methods: d.buildings.iter().map(|b| b.num_methods).sum(),
-            top_buildings: names.iter().take(8).map(|(n, _)| n.to_string()).collect(),
-        });
-
-        for b in &d.buildings {
-            index.push(IndexEntry {
-                id: b.id.clone(),
-                name: b.name.clone(),
-                kind: b.kind.clone(),
-                district: d.name.clone(),
-            });
-        }
-    }
-
-    let _ = result;
-    let s = &city.stats;
-    CitySummary {
-        total_buildings: s.total_buildings,
-        total_types: s.total_types,
-        total_modules: s.total_modules,
-        total_methods: s.total_methods,
-        total_files: s.total_files,
-        total_loc: s.total_loc,
-        languages: {
-            let mut v: Vec<(String, u32)> =
-                s.languages.iter().map(|(k, n)| (k.clone(), *n)).collect();
-            v.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
-            v
-        },
-        methods_by_rule: s.methods_by_rule,
-        methods_by_llm: s.methods_by_llm,
-        orphans: s.orphans,
-        llm_calls: s.llm_calls,
-        refined: s.refined,
-        skipped_dirs: s.skipped_dirs.clone(),
-        history_days: s.history_days,
-        first_commit: s.first_commit.clone(),
-        last_commit: s.last_commit.clone(),
-        cycles: s
-            .cycles
-            .iter()
-            .filter(|c| c.reliable && c.namespaces > 1)
-            .map(|c| CycleInfo {
-                id: c.id,
-                size: c.size,
-                namespaces: c.namespaces,
-                members: c.members.clone(),
-            })
-            .collect(),
-        districts,
-        index,
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
 fn spawn_city(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
     index: &mut CityIndex,
-    store: &mut LinkStore,
-    result: &LayoutResult,
+    result: LayoutResult,
     city: &CityMap,
 ) {
-    // Dependency lookups for the inspector, by building id.
-    let mut calls: HashMap<&str, Vec<String>> = HashMap::new();
-    let mut called_by: HashMap<&str, Vec<String>> = HashMap::new();
-    let mut name_of: HashMap<&str, &str> = HashMap::new();
-    for d in &city.districts {
-        for b in &d.buildings {
-            name_of.insert(b.id.as_str(), b.name.as_str());
-        }
-    }
-    for e in &city.dependencies {
-        if let Some(t) = name_of.get(e.target.as_str()) {
-            calls
-                .entry(e.source.as_str())
-                .or_default()
-                .push((*t).to_string());
-        }
-        if let Some(s) = name_of.get(e.source.as_str()) {
-            called_by
-                .entry(e.target.as_str())
-                .or_default()
-                .push((*s).to_string());
-        }
-    }
-
     let ground_radius = result.radius as f32 * 1.9 + 160.0;
     commands.spawn((
         PbrBundle {
@@ -624,7 +519,6 @@ fn spawn_city(
             },
             CityElement,
             PickableDistrict {
-                info: Box::new(district_info(city, i)),
                 polygon: d.polygon.clone(),
                 district_idx: i,
             },
@@ -686,7 +580,6 @@ fn spawn_city(
             }),
             DistrictLabel {
                 world: Vec3::new(d.label_x as f32, BUILDING_BASE + 6.0, d.label_z as f32),
-                district_idx: i,
             },
             CityElement,
         ));
@@ -694,54 +587,11 @@ fn spawn_city(
 
     // One shared cube mesh and a few shared materials, so Bevy instances
     // them into a handful of draw calls.
-    let by_district: Vec<&data::District> = city.districts.iter().collect();
-    let mut raw: HashMap<&str, &data::Building> = HashMap::new();
-    for d in &city.districts {
-        for b in &d.buildings {
-            raw.insert(b.id.as_str(), b);
-        }
-    }
-
     for pb in &result.buildings {
-        let district = by_district.get(pb.district_idx).copied();
-        let typology = district.map(|d| d.typology.as_str()).unwrap_or("unknown");
-        let base = typology_rgb(typology);
-        let rgb = apply_age(base, pb.age_days);
+        let district = &city.districts[pb.district_idx];
+        let b = &district.buildings[pb.building_idx];
+        let rgb = apply_age(typology_rgb(&district.typology), b.age_days);
         let handles = material_set(materials, &mut index.materials, rgb);
-
-        let b = raw.get(pb.id.as_str()).copied();
-        let info = BuildingInfo {
-            id: pb.id.clone(),
-            name: pb.name.clone(),
-            kind: pb.kind.clone(),
-            source_file: b.map(|x| x.source_file.clone()).unwrap_or_default(),
-            dir: b.map(|x| x.dir.clone()).unwrap_or_default(),
-            language: b.map(|x| x.language.clone()).unwrap_or_default(),
-            district_name: district.map(|d| d.name.clone()).unwrap_or_default(),
-            typology: typology.to_string(),
-            num_fields: b.map(|x| x.num_fields).unwrap_or(0),
-            num_methods: b.map(|x| x.num_methods).unwrap_or(0),
-            lines_of_code: b.map(|x| x.lines_of_code).unwrap_or(0),
-            max_complexity: b.map(|x| x.max_complexity).unwrap_or(0),
-            sum_complexity: b.map(|x| x.sum_complexity).unwrap_or(0),
-            fan_in: b.map(|x| x.fan_in).unwrap_or(0),
-            fan_out: b.map(|x| x.fan_out).unwrap_or(0),
-            instability: b.map(|x| x.instability).unwrap_or(0.0),
-            hub: b.map(|x| x.hub).unwrap_or(false),
-            commit_churn: b.map(|x| x.commit_churn).unwrap_or(0),
-            churn_rank: pb.churn_rank,
-            last_modified: b.map(|x| x.last_modified.clone()).unwrap_or_default(),
-            age_days: pb.age_days,
-            born_day: b.map(|x| x.born_day).unwrap_or(0),
-            primary_author: b.map(|x| x.primary_author.clone()).unwrap_or_default(),
-            summary: b.map(|x| x.summary.clone()).unwrap_or_default(),
-            assoc_source: b.map(|x| x.assoc_source.clone()).unwrap_or_default(),
-            cycle_id: b.map(|x| x.cycle_id).unwrap_or(0),
-            fields: b.map(|x| x.fields.clone()).unwrap_or_default(),
-            methods: b.map(|x| x.methods.clone()).unwrap_or_default(),
-            calls: calls.get(pb.id.as_str()).cloned().unwrap_or_default(),
-            called_by: called_by.get(pb.id.as_str()).cloned().unwrap_or_default(),
-        };
 
         let half_w = (pb.width * 0.5) as f32;
         let half_d = (pb.depth * 0.5) as f32;
@@ -768,13 +618,12 @@ fn spawn_city(
                     ..default()
                 },
                 Pickable {
-                    info: Box::new(info),
                     district_idx: pb.district_idx,
+                    building_idx: pb.building_idx,
                     local_min: Vec2::new(pb.local_x as f32 - half_w, pb.local_z as f32 - half_d),
                     local_max: Vec2::new(pb.local_x as f32 + half_w, pb.local_z as f32 + half_d),
                     y_min: BUILDING_BASE,
                     y_max: BUILDING_BASE + height,
-                    typology_rgb: base,
                 },
                 CityElement,
             ))
@@ -784,32 +633,7 @@ fn spawn_city(
     }
 
     // One merged mesh for the overview, one reserved for the selection.
-    let links: Vec<layout::Link> = result
-        .links
-        .iter()
-        .map(|l| layout::Link {
-            points: l.points.clone(),
-            width: l.width,
-            weight: l.weight,
-            fwd: l.fwd,
-            rev: l.rev,
-            kind: l.kind.clone(),
-            in_cycle: l.in_cycle,
-            source: l.source.clone(),
-            target: l.target.clone(),
-            source_name: l.source_name.clone(),
-            target_name: l.target_name.clone(),
-            inter_district: l.inter_district,
-        })
-        .collect();
-
-    for (i, l) in links.iter().enumerate() {
-        index.links.push(LinkRef {
-            source: l.source.clone(),
-            target: l.target.clone(),
-            index: i,
-        });
-    }
+    let links = result.links;
 
     // Every dependency at once is unreadable: at rest show only the heaviest
     // cross-district links, and reveal a neighbourhood on selection.
@@ -873,30 +697,7 @@ fn spawn_city(
         CityElement,
     ));
 
-    store.links = links;
-}
-
-fn district_info(city: &CityMap, i: usize) -> DistrictInfo {
-    let Some(d) = city.districts.get(i) else {
-        return DistrictInfo::default();
-    };
-    let mut names: Vec<(&str, u32)> = d
-        .buildings
-        .iter()
-        .map(|b| (b.name.as_str(), b.num_methods * 3 + b.num_fields))
-        .collect();
-    names.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
-    DistrictInfo {
-        id: d.id.clone(),
-        name: d.name.clone(),
-        typology: d.typology.clone(),
-        summary: d.summary.clone(),
-        tags: d.tags.clone(),
-        building_count: d.buildings.len(),
-        total_lines_of_code: d.buildings.iter().map(|b| b.lines_of_code).sum(),
-        total_methods: d.buildings.iter().map(|b| b.num_methods).sum(),
-        top_buildings: names.iter().take(8).map(|(n, _)| n.to_string()).collect(),
-    }
+    index.links = links;
 }
 
 // ---------------------------------------------------------------------------
@@ -1077,31 +878,19 @@ fn picking_system(
     let hovered = best_building.or(best_district);
     if hovered != interaction.hovered {
         interaction.hovered = hovered;
-        let payload = match hovered {
-            Some(e) => {
-                if let Ok((_, p)) = buildings.get(e) {
-                    Some(HoverInfo {
-                        kind: "building".into(),
-                        name: p.info.name.clone(),
-                        detail: format!(
-                            "{} \u{00b7} {} fields \u{00b7} {} functions",
-                            p.info.kind, p.info.num_fields, p.info.num_methods
-                        ),
-                    })
-                } else if let Ok((_, d)) = districts.get(e) {
-                    Some(HoverInfo {
-                        kind: "district".into(),
-                        name: d.info.name.clone(),
-                        detail: format!(
-                            "{} entities \u{00b7} {}",
-                            d.info.building_count, d.info.typology
-                        ),
-                    })
-                } else {
-                    None
-                }
-            }
-            None => None,
+        let payload = if let Some(p) = hovered.and_then(|e| buildings.get(e).ok()) {
+            Some(Hover {
+                kind: "building",
+                id: index.building(p.1).id.clone(),
+            })
+        } else if let Some(d) = hovered.and_then(|e| districts.get(e).ok()) {
+            let id = index.city.districts[d.1.district_idx].id.clone();
+            Some(Hover {
+                kind: "district",
+                id,
+            })
+        } else {
+            None
         };
         dispatch_hover(&payload);
     }
@@ -1137,7 +926,7 @@ fn picking_system(
                 );
             }
 
-            dispatch_select(&SelectPayload::Building(p.info.clone()));
+            dispatch_select(&SelectPayload::Building(index.building(p).id.clone()));
         }
         Some(e) if districts.get(e).is_ok() => {
             let (_, d) = districts.get(e).unwrap();
@@ -1148,7 +937,8 @@ fn picking_system(
                 let span = (g.max - g.min).length().max(20.0);
                 cam.frame_object(Vec3::new(center.x, 0.0, center.y), span);
             }
-            dispatch_select(&SelectPayload::District(d.info.clone()));
+            let id = index.city.districts[d.district_idx].id.clone();
+            dispatch_select(&SelectPayload::District(id));
         }
         _ => {
             interaction.selected = None;
@@ -1204,13 +994,11 @@ fn material_set(
 /// context that makes a match meaningful.
 #[allow(clippy::too_many_arguments)]
 fn refresh_view(
-    mut commands: Commands,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut index: ResMut<CityIndex>,
     mut state: ResMut<ViewState>,
     interaction: Res<SelectionState>,
-    store: Res<LinkStore>,
     buildings: Query<(Entity, &Pickable)>,
     mut mats: Query<&mut Handle<StandardMaterial>>,
     highlight_q: Query<&Handle<Mesh>, With<HighlightLinkLayer>>,
@@ -1219,6 +1007,7 @@ fn refresh_view(
         return;
     }
     state.dirty = false;
+    let index = &mut *index;
 
     let faded = index.faded.clone().unwrap_or_else(|| {
         let h = materials.add(StandardMaterial {
@@ -1232,23 +1021,19 @@ fn refresh_view(
     });
 
     // Neighbours of the selection, and the highlighted path.
-    let mut related: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut chosen: Vec<&layout::Link> = Vec::new();
-    let mut selected_id = String::new();
-    if let Some(sel) = interaction.selected {
-        if let Ok((_, p)) = buildings.get(sel) {
-            selected_id = p.info.id.clone();
-            for lr in &index.links {
-                if lr.source == selected_id || lr.target == selected_id {
-                    if let Some(link) = store.links.get(lr.index) {
-                        chosen.push(link);
-                        related.insert(if lr.source == selected_id {
-                            lr.target.clone()
-                        } else {
-                            lr.source.clone()
-                        });
-                    }
-                }
+    let mut related: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    let mut chosen: Vec<&Link> = Vec::new();
+    let mut selected_id = "";
+    if let Some((_, p)) = interaction.selected.and_then(|e| buildings.get(e).ok()) {
+        selected_id = &index.city.districts[p.district_idx].buildings[p.building_idx].id;
+        for l in &index.links {
+            if l.source == selected_id || l.target == selected_id {
+                chosen.push(l);
+                related.insert(if l.source == selected_id {
+                    &l.target
+                } else {
+                    &l.source
+                });
             }
         }
     }
@@ -1257,21 +1042,20 @@ fn refresh_view(
     if !on_path.is_empty() {
         // Replaces the neighbour highlight; both at once hides the answer.
         chosen.clear();
-        let path_ids: Vec<String> = state
+        let path_ids: Vec<&str> = state
             .path
             .iter()
-            .filter_map(|e| buildings.get(*e).ok().map(|(_, p)| p.info.id.clone()))
+            .filter_map(|e| buildings.get(*e).ok())
+            .map(|(_, p)| {
+                index.city.districts[p.district_idx].buildings[p.building_idx]
+                    .id
+                    .as_str()
+            })
             .collect();
         for w in path_ids.windows(2) {
-            for lr in &index.links {
-                if (lr.source == w[0] && lr.target == w[1])
-                    || (lr.source == w[1] && lr.target == w[0])
-                {
-                    if let Some(link) = store.links.get(lr.index) {
-                        chosen.push(link);
-                    }
-                }
-            }
+            chosen.extend(index.links.iter().filter(|l| {
+                (l.source == w[0] && l.target == w[1]) || (l.source == w[1] && l.target == w[0])
+            }));
         }
     }
 
@@ -1280,16 +1064,23 @@ fn refresh_view(
 
     let mut pending: Vec<(Entity, Handle<StandardMaterial>)> = Vec::new();
     for (entity, p) in buildings.iter() {
+        let district = &index.city.districts[p.district_idx];
+        let b = &district.buildings[p.building_idx];
         // Absent rather than faded: the timeline is for watching it get built.
         if let Some(day) = state.timeline {
-            if p.info.born_day > day {
+            if b.born_day > day {
                 pending.push((entity, faded.clone()));
                 continue;
             }
         }
-        let matched = !filtering || state.filter.matches(&p.info);
-        let rgb = view::color_for(state.mode, &p.info, p.typology_rgb, state.scales);
-        let rgb = apply_age_if_typology(state.mode, rgb, p.info.age_days);
+        let matched = !filtering || state.filter.matches(b, &district.name);
+        let rgb = view::color_for(
+            state.mode,
+            b,
+            typology_rgb(&district.typology),
+            state.scales,
+        );
+        let rgb = apply_age_if_typology(state.mode, rgb, b.age_days);
         let set = material_set(&mut materials, &mut index.materials, rgb);
 
         let handle = if !matched {
@@ -1301,9 +1092,9 @@ fn refresh_view(
                 set.1.clone()
             }
         } else if focusing {
-            if p.info.id == selected_id {
+            if b.id == selected_id {
                 set.2.clone()
-            } else if related.contains(&p.info.id) {
+            } else if related.contains(b.id.as_str()) {
                 set.0.clone()
             } else {
                 set.1.clone()
@@ -1324,7 +1115,6 @@ fn refresh_view(
             *mesh = build_link_mesh(&chosen, 0.0);
         }
     }
-    let _ = &mut commands;
 }
 
 /// Typology view only: in a numeric mode the ramp carries the meaning, and
@@ -1368,7 +1158,7 @@ fn publish_camera(
 
 /// Shortest dependency path, by hop count: "three steps away" is actionable
 /// where a weighted cost is not.
-fn shortest_path(links: &[LinkRef], from: &str, to: &str) -> Vec<String> {
+fn shortest_path(links: &[Link], from: &str, to: &str) -> Vec<String> {
     if from == to {
         return vec![from.to_string()];
     }
@@ -1446,7 +1236,6 @@ fn update_labels(
         let width = text.sections[0].value.chars().count() as f32 * 7.0;
         style.left = Val::Px(screen.x - width * 0.5);
         style.top = Val::Px(screen.y);
-        let _ = label.district_idx;
     }
 }
 
@@ -1510,39 +1299,24 @@ fn consume_commands(
             }
             Command::Path(to_id) => {
                 state.path.clear();
-                let mut result = None;
-                if let Some(from_id) = state.path_anchor.clone() {
-                    let ids = shortest_path(&index.links, &from_id, &to_id);
-                    let mut hops = Vec::new();
-                    for id in &ids {
-                        if let Some(e) = index.by_id.get(id) {
-                            state.path.push(*e);
-                            if let Ok((_, p)) = buildings.get(*e) {
-                                hops.push(p.info.name.clone());
-                            }
-                        }
-                    }
-                    let name_of = |id: &str| -> String {
-                        index
-                            .by_id
-                            .get(id)
-                            .and_then(|e| buildings.get(*e).ok())
-                            .map(|(_, p)| p.info.name.clone())
-                            .unwrap_or_default()
-                    };
-                    result = Some(PathInfo {
-                        from_name: name_of(&from_id),
+                let result = state.path_anchor.clone().map(|from_id| {
+                    let hops: Vec<String> = shortest_path(&index.links, &from_id, &to_id)
+                        .into_iter()
+                        .filter(|id| index.by_id.contains_key(id))
+                        .collect();
+                    state.path = hops.iter().map(|id| index.by_id[id]).collect();
+                    PathResult {
                         from_id,
-                        to_name: name_of(&to_id),
                         to_id,
                         hops,
-                    });
-                }
+                    }
+                });
                 state.dirty = true;
                 dispatch_path(&result);
             }
-            Command::Focus(query) => {
-                let Some((entity, p)) = find_building(&buildings, &query) else {
+            Command::Focus(id) => {
+                let Some((entity, p)) = index.by_id.get(&id).and_then(|e| buildings.get(*e).ok())
+                else {
                     continue;
                 };
                 interaction.selected = Some(entity);
@@ -1569,36 +1343,8 @@ fn consume_commands(
                     );
                 }
 
-                dispatch_select(&SelectPayload::Building(p.info.clone()));
+                dispatch_select(&SelectPayload::Building(id));
             }
         }
     }
-}
-
-/// Exact id, then exact name, then prefix, then a case-insensitive substring.
-fn find_building<'a>(
-    buildings: &'a Query<(Entity, &Pickable)>,
-    query: &str,
-) -> Option<(Entity, &'a Pickable)> {
-    if let Some(hit) = buildings.iter().find(|(_, p)| p.info.id == query) {
-        return Some(hit);
-    }
-    let lower = query.to_lowercase();
-    buildings
-        .iter()
-        .filter_map(|(e, p)| {
-            let name = p.info.name.to_lowercase();
-            let score = if name == lower {
-                0
-            } else if name.starts_with(&lower) {
-                1
-            } else if name.contains(&lower) {
-                2
-            } else {
-                return None;
-            };
-            Some((score, e, p))
-        })
-        .min_by_key(|(score, _, _)| *score)
-        .map(|(_, e, p)| (e, p))
 }
