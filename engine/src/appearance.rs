@@ -119,8 +119,10 @@ pub(crate) fn apply_appearance(
 
     let pairs: HashSet<(usize, usize)> = look
         .links
-        .chunks_exact(2)
-        .map(|p| (p[0].min(p[1]) as usize, p[0].max(p[1]) as usize))
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|&[a, b]| (a.min(b) as usize, a.max(b) as usize))
         .collect();
     let chosen: Vec<&Link> = index
         .links
