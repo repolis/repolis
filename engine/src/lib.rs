@@ -32,9 +32,12 @@ use render::BuildingMaterials;
 use spawn::spawn_city;
 
 pub const SKY_COLOR: Color = Color::srgb(0.62, 0.71, 0.80);
+// Brighter than the sky because it gets tonemapped and the sky does not; the
+// two must match where the ground fades out, or the horizon shows a seam.
+const FOG_COLOR: Color = Color::srgb(0.72, 0.85, 1.0);
 const GROUND_Y: f32 = 0.0;
 const DISTRICT_TOP: f32 = 0.35;
-const STREET_Y: f32 = 0.40;
+const PAVEMENT_Y: f32 = 0.40;
 const BUILDING_BASE: f32 = 0.45;
 
 #[derive(Component)]
@@ -131,6 +134,8 @@ fn setup_scene(mut commands: Commands) {
             transform: Transform::from_xyz(60.0, 70.0, 100.0).looking_at(Vec3::ZERO, Vec3::Y),
             ..default()
         },
+        // The distances follow the city; see `city_fog`.
+        city_fog(200.0),
         CityCamera::default(),
     ));
 
@@ -140,10 +145,11 @@ fn setup_scene(mut commands: Commands) {
         directional_light: DirectionalLight {
             illuminance: 11000.0,
             shadows_enabled: true,
-            color: Color::srgb(1.0, 0.97, 0.92),
+            color: Color::srgb(1.0, 0.95, 0.87),
             ..default()
         },
-        transform: Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, -0.95, 0.6, 0.0)),
+        // Low afternoon sun: long shadows fall across the streets.
+        transform: Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, -0.6, 0.6, 0.0)),
         cascade_shadow_config: CascadeShadowConfigBuilder {
             num_cascades: 2,
             maximum_distance: 1600.0,
@@ -153,7 +159,26 @@ fn setup_scene(mut commands: Commands) {
         .build(),
         ..default()
     });
+}
 
+/// How far the overview camera sits from the centre of a city.
+fn home_distance(radius: f32) -> f32 {
+    radius * 2.35 + 60.0
+}
+
+/// Haze that starts just past the city's near half, as seen from the home
+/// view, and hides the ground's edge long before the camera can reach it.
+fn city_fog(radius: f32) -> FogSettings {
+    let home = home_distance(radius);
+    FogSettings {
+        color: FOG_COLOR,
+        directional_light_color: Color::srgba(1.0, 0.9, 0.7, 0.4),
+        falloff: FogFalloff::Linear {
+            start: home + radius * 0.5,
+            end: home + radius * 5.0,
+        },
+        ..default()
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -164,7 +189,7 @@ fn process_city_data(
     mut index: ResMut<CityIndex>,
     mut hovered: ResMut<Hovered>,
     mut look: ResMut<Appearance>,
-    mut camera_q: Query<(&mut Transform, &mut CityCamera)>,
+    mut camera_q: Query<(&mut Transform, &mut CityCamera, &mut FogSettings)>,
     existing: Query<Entity, With<CityElement>>,
 ) {
     let Some(city) = take_pending_city() else {
@@ -185,14 +210,21 @@ fn process_city_data(
 
     let result = layout::compute_layout(&city);
     index.radius = result.radius;
-    spawn_city(&mut commands, &mut meshes, &mut materials, &mut index, result);
+    spawn_city(
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        &mut index,
+        result,
+    );
 
     // The frontend sends the new appearance once it hears about the city.
     *look = Appearance::default();
 
-    if !had_city {
-        for (mut transform, mut cam) in camera_q.iter_mut() {
-            cam.frame(Vec3::ZERO, index.radius * 2.35 + 60.0);
+    for (mut transform, mut cam, mut fog) in camera_q.iter_mut() {
+        *fog = city_fog(index.radius);
+        if !had_city {
+            cam.frame(Vec3::ZERO, home_distance(index.radius));
             cam.apply(&mut transform);
         }
     }

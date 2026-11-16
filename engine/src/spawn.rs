@@ -9,7 +9,7 @@ use crate::layout::{LayoutResult, Link};
 use crate::picking::Pickable;
 use crate::render::*;
 use crate::{CityElement, CityIndex, HighlightLinkLayer, LinkLayer};
-use crate::{BUILDING_BASE, DISTRICT_TOP, GROUND_Y, STREET_Y};
+use crate::{BUILDING_BASE, DISTRICT_TOP, GROUND_Y, PAVEMENT_Y};
 
 /// The box over a ground rectangle between two heights, as (min, max).
 fn slab(r: Rect, y0: f32, y1: f32) -> (Vec3, Vec3) {
@@ -31,12 +31,14 @@ pub(crate) fn spawn_city(
     index: &mut CityIndex,
     result: LayoutResult,
 ) {
-    let ground_radius = result.radius * 1.9 + 160.0;
+    // Far past the city, so the fog swallows its edge.
+    let ground_radius = result.radius * 8.0 + 400.0;
     commands.spawn((
         PbrBundle {
             mesh: meshes.add(Circle::new(ground_radius).mesh().resolution(96)),
             material: materials.add(StandardMaterial {
-                base_color: Color::srgb(0.13, 0.14, 0.15),
+                // Asphalt: the avenues between districts.
+                base_color: Color::srgb(0.06, 0.065, 0.075),
                 perceptual_roughness: 1.0,
                 ..default()
             }),
@@ -50,17 +52,33 @@ pub(crate) fn spawn_city(
     // them into a handful of draw calls.
     let cube = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
 
-    let street_material = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.20, 0.21, 0.23),
+    let pavement = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.36, 0.36, 0.37),
         perceptual_roughness: 0.98,
         ..default()
     });
-    for &street in &result.streets {
+    let paint = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.78, 0.74, 0.62),
+        perceptual_roughness: 1.0,
+        ..default()
+    });
+    // Lines start at the ground so one height serves avenues and streets.
+    let slabs = result
+        .blocks
+        .iter()
+        .map(|&r| (r, DISTRICT_TOP, PAVEMENT_Y, &pavement))
+        .chain(
+            result
+                .lane_lines
+                .iter()
+                .map(|&r| (r, GROUND_Y, DISTRICT_TOP + 0.02, &paint)),
+        );
+    for (r, y0, y1, material) in slabs {
         commands.spawn((
             PbrBundle {
                 mesh: cube.clone(),
-                material: street_material.clone(),
-                transform: box_transform(slab(street, DISTRICT_TOP, STREET_Y)),
+                material: material.clone(),
+                transform: box_transform(slab(r, y0, y1)),
                 ..default()
             },
             CityElement,

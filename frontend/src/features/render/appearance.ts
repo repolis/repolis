@@ -79,7 +79,7 @@ export function applyAge(rgb: Rgb, ageDays: number): Rgb {
 
 const groundRgb = (typology: string): Rgb => {
   const [r, g, b] = TYPOLOGY_RGB[typology] ?? GREY;
-  return [r * 0.3 + 0.05, g * 0.3 + 0.05, b * 0.3 + 0.06];
+  return [r * 0.16 + 0.05, g * 0.16 + 0.05, b * 0.16 + 0.06];
 };
 
 /** Scale for the numeric modes, set once per city. Percentile, not maximum:

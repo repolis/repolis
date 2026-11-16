@@ -48,8 +48,10 @@ pub struct LayoutResult {
     /// Each district's ground, in city order.
     pub districts: Vec<Rect>,
     pub buildings: Vec<PlacedBuilding>,
-    /// One slab per directory block.
-    pub streets: Vec<Rect>,
+    /// One pavement slab per directory block; the gaps between are streets.
+    pub blocks: Vec<Rect>,
+    /// Thin strips down the middle of every street and avenue.
+    pub lane_lines: Vec<Rect>,
     pub links: Vec<Link>,
     pub radius: f32,
 }
@@ -118,7 +120,9 @@ pub fn compute_layout(city: &CityMap) -> LayoutResult {
 
     let mut districts = Vec::with_capacity(cells.len());
     let mut buildings = Vec::new();
-    let mut streets = Vec::new();
+    let mut blocks = Vec::new();
+    let mut lane_lines = Vec::new();
+    centre_lines(&cells, Rect::new(-half, -half, half, half), &mut lane_lines);
     for (i, &cell) in cells.iter().enumerate() {
         let ground = inset(
             cell,
@@ -130,7 +134,7 @@ pub fn compute_layout(city: &CityMap) -> LayoutResult {
             (ground.width().min(ground.height()) * 0.07).clamp(0.5, DISTRICT_PADDING),
         );
         let mine: Vec<&Sized> = sized.iter().filter(|s| s.district == i).collect();
-        pack_district(&mine, plot, &mut buildings, &mut streets);
+        pack_district(&mine, plot, &mut buildings, &mut blocks, &mut lane_lines);
         districts.push(ground);
     }
 
@@ -138,7 +142,8 @@ pub fn compute_layout(city: &CityMap) -> LayoutResult {
     LayoutResult {
         districts,
         buildings,
-        streets,
+        blocks,
+        lane_lines,
         links,
         radius: half.max(50.0),
     }
@@ -182,7 +187,8 @@ fn pack_district(
     mine: &[&Sized],
     plot: Rect,
     buildings: &mut Vec<PlacedBuilding>,
-    streets: &mut Vec<Rect>,
+    blocks: &mut Vec<Rect>,
+    lane_lines: &mut Vec<Rect>,
 ) {
     if mine.is_empty() || area(plot) <= 1.0 {
         return;
@@ -201,7 +207,9 @@ fn pack_district(
         .map(|in_dir| in_dir.iter().map(|s| s.lot_area()).sum::<f32>().max(1.0))
         .collect();
 
-    for (in_dir, block) in dirs.iter().zip(squarify(&dir_areas, plot)) {
+    let cells = squarify(&dir_areas, plot);
+    centre_lines(&cells, plot, lane_lines);
+    for (in_dir, block) in dirs.iter().zip(cells) {
         // The street between blocks, proportional so a block never disappears
         // into its own gutter.
         let inner = inset(
@@ -211,7 +219,7 @@ fn pack_district(
         if area(inner) <= 1e-6 {
             continue;
         }
-        streets.push(block);
+        blocks.push(inner);
 
         // One lot per building inside its directory's block.
         let lot_areas: Vec<f32> = in_dir.iter().map(|s| s.lot_area()).collect();
@@ -235,6 +243,29 @@ fn pack_district(
                     s.size.z.min(cell.height()).max(0.4),
                 ),
             });
+        }
+    }
+}
+
+/// Strips along the edges where treemap cells meet, which is the middle of
+/// the street between them. Edges on `bounds` face open ground and get none.
+fn centre_lines(cells: &[Rect], bounds: Rect, out: &mut Vec<Rect>) {
+    let on = |v: f32, a: f32, b: f32| (v - a).abs() < 0.01 || (v - b).abs() < 0.01;
+    for c in cells {
+        for (x0, y0, x1, y1) in [
+            (c.min.x, c.min.y, c.max.x, c.min.y),
+            (c.min.x, c.max.y, c.max.x, c.max.y),
+            (c.min.x, c.min.y, c.min.x, c.max.y),
+            (c.max.x, c.min.y, c.max.x, c.max.y),
+        ] {
+            let outer = if x0 == x1 {
+                on(x0, bounds.min.x, bounds.max.x)
+            } else {
+                on(y0, bounds.min.y, bounds.max.y)
+            };
+            if !outer {
+                out.push(Rect::new(x0, y0, x1, y1).inflate(0.09));
+            }
         }
     }
 }
