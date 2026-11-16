@@ -244,18 +244,3 @@ func parseFile(parser *sitter.Parser, l lang.Language, fullPath, relPath string)
 	}
 	return out, nil
 }
-
-func nodeContent(node *sitter.Node, content []byte) string {
-	if node == nil {
-		return ""
-	}
-	start, end := node.StartByte(), node.EndByte()
-	if start <= end && end <= uint32(len(content)) {
-		return string(content[start:end])
-	}
-	return ""
-}
-
-func collapseSpaces(s string) string {
-	return strings.Join(strings.Fields(strings.ReplaceAll(s, "\n", " ")), " ")
-}

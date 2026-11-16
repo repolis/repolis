@@ -43,7 +43,7 @@ func runRefine(path string, raw *analyzer.RawExtraction, history map[string]*git
 	tLabel := time.Since(t)
 
 	fmt.Printf("\n== LLM refinement ==\n")
-	fmt.Printf("calls       %d (%d cached)\n", client.Calls(), client.CacheHits())
+	fmt.Printf("calls       %d (%d cached, %d rate-limit retries)\n", client.Calls(), client.CacheHits(), client.Retries())
 	fmt.Printf("timing      adjudicate %6.0fms (%d applied) | label %6.0fms\n",
 		ms(tAssoc), applied, ms(tLabel))
 	fmt.Println("districts:")

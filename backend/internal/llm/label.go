@@ -80,26 +80,8 @@ func (c *Client) LabelClusters(ctx context.Context, clusters []analyzer.Cluster,
 	var done int
 	out := runBatch(ctx, c.concurrency, len(clusters), func(i int) *Label {
 		cl := clusters[i]
-
-		var b strings.Builder
-		fmt.Fprintf(&b, "Symbols: %s\n", strings.Join(stripNoise(cl.TopNames, noise), ", "))
-		if dirs := cl.DistinctDirs(common); len(dirs) > 0 {
-			fmt.Fprintf(&b, "Folders: %s\n", strings.Join(dirs, ", "))
-		}
-		fmt.Fprintf(&b, "Size: %d entities\n", len(cl.Buildings))
-		if len(noise) > 0 {
-			fmt.Fprintf(&b, "Banned words (true of every group here): %s\n",
-				strings.Join(noise, ", "))
-		}
-
-		resp, err := c.complete(ctx, request{
-			kind:      "label.v3",
-			model:     c.fastModel,
-			system:    fmt.Sprintf(labelSystemFmt, language),
-			user:      b.String(),
-			maxTokens: 48,
-			stop:      []string{"\n\n"},
-		})
+		req := c.labelRequest(language, stripNoise(cl.TopNames, noise), cl.DistinctDirs(common), len(cl.Buildings), noise)
+		resp, err := c.complete(ctx, req)
 		if progress != nil {
 			done++
 			progress(done, len(clusters))
@@ -172,6 +154,27 @@ func (c *Client) LabelClusters(ctx context.Context, clusters []analyzer.Cluster,
 
 	logger.Log(logger.InfoLevel, "Districts named: %d by model, %d by fallback", named, len(clusters)-named)
 	return labels
+}
+
+func (c *Client) labelRequest(language string, symbols, dirs []string, size int, noise []string) request {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Symbols: %s\n", strings.Join(symbols, ", "))
+	if len(dirs) > 0 {
+		fmt.Fprintf(&b, "Folders: %s\n", strings.Join(dirs, ", "))
+	}
+	fmt.Fprintf(&b, "Size: %d entities\n", size)
+	if len(noise) > 0 {
+		fmt.Fprintf(&b, "Banned words (true of every group here): %s\n",
+			strings.Join(noise, ", "))
+	}
+	return request{
+		kind:      "label.v3",
+		model:     c.fastModel,
+		system:    fmt.Sprintf(labelSystemFmt, language),
+		user:      b.String(),
+		maxTokens: 64,
+		stop:      []string{"\n\n"},
+	}
 }
 
 // Labels that describe every cluster equally and so identify none. A rejected
