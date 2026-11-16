@@ -36,12 +36,10 @@ pub struct PlacedDistrict {
 pub struct Link {
     pub points: Vec<(f64, f64, f64)>,
     pub width: f64,
-    pub weight: u32,
     /// Both ends sit in the same reported dependency cycle.
     pub in_cycle: bool,
     pub source: String,
     pub target: String,
-    pub inter_district: bool,
 }
 
 #[derive(Default)]
@@ -130,7 +128,7 @@ pub fn compute_layout(city: &CityMap) -> LayoutResult {
         });
     }
 
-    let links = build_links(city, &buildings, &districts);
+    let links = build_links(city, &buildings);
     LayoutResult {
         districts,
         buildings,
@@ -262,11 +260,7 @@ fn pack_district(
 /// centre to centre, so it starts under its source building, ends under its
 /// target and crosses everything between; an arc cannot intersect the city and
 /// leaves the ground plane to the street grid.
-fn build_links(
-    city: &CityMap,
-    buildings: &[PlacedBuilding],
-    districts: &[PlacedDistrict],
-) -> Vec<Link> {
+fn build_links(city: &CityMap, buildings: &[PlacedBuilding]) -> Vec<Link> {
     let id_of = |b: &PlacedBuilding| {
         city.districts[b.district_idx].buildings[b.building_idx]
             .id
@@ -324,13 +318,9 @@ fn build_links(
         links.push(Link {
             points,
             width: (0.45 + (weight as f64).ln_1p() * 0.5).min(3.0),
-            weight,
             in_cycle,
             source: id_of(src).to_string(),
             target: id_of(tgt).to_string(),
-            inter_district: inter
-                && districts[src.district_idx].building_count > 0
-                && districts[tgt.district_idx].building_count > 0,
         });
     }
     links

@@ -32,6 +32,7 @@ enum Command {
     Anchor(Option<String>),
     Path(String),
     Focus(String),
+    Links(bool),
 }
 
 fn queue(cmd: Command) {
@@ -123,6 +124,12 @@ pub fn show_path_to(building_id: String) {
     queue(Command::Path(building_id));
 }
 
+/// Shows or hides every dependency arc at once. Hidden by default.
+#[wasm_bindgen]
+pub fn set_show_links(show: bool) {
+    queue(Command::Links(show));
+}
+
 #[wasm_bindgen]
 pub fn clear_selection() {
     queue(Command::Clear);
@@ -183,6 +190,10 @@ pub(crate) fn consume_commands(
                 state.path.clear();
                 state.dirty = true;
                 dispatch_select(&SelectPayload::None);
+            }
+            Command::Links(show) => {
+                state.show_links = show;
+                state.dirty = true;
             }
             Command::Mode(mode) => {
                 state.mode = mode;

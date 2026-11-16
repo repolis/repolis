@@ -8,7 +8,7 @@ use crate::events::*;
 use crate::layout::Link;
 use crate::render::*;
 use crate::view;
-use crate::{CityIndex, HighlightLinkLayer, ViewState};
+use crate::{CityIndex, HighlightLinkLayer, LinkLayer, ViewState};
 
 /// Quantised, so lookalike buildings share a material and batch into one call.
 fn rgb_key(rgb: [f32; 3]) -> u32 {
@@ -41,6 +41,7 @@ pub(crate) fn refresh_view(
     buildings: Query<(Entity, &Pickable)>,
     mut mats: Query<&mut Handle<StandardMaterial>>,
     highlight_q: Query<&Handle<Mesh>, With<HighlightLinkLayer>>,
+    mut link_layers: Query<&mut Visibility, With<LinkLayer>>,
 ) {
     if !state.dirty {
         return;
@@ -143,6 +144,13 @@ pub(crate) fn refresh_view(
         }
     }
 
+    for mut vis in link_layers.iter_mut() {
+        *vis = if state.show_links {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
+    }
     if let Ok(mesh_handle) = highlight_q.get_single() {
         if let Some(mesh) = meshes.get_mut(mesh_handle) {
             *mesh = build_link_mesh(&chosen, 0.0);

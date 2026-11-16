@@ -160,18 +160,14 @@ pub(crate) fn spawn_city(
         index.by_id.insert(b.id.clone(), entity);
     }
 
-    // One merged mesh for the overview, one reserved for the selection.
+    // Every dependency at once is unreadable, so all arcs start hidden behind
+    // one toggle; a selection reveals its own neighbourhood regardless.
     let links = result.links;
-
-    // Every dependency at once is unreadable: at rest show only the heaviest
-    // cross-district links, and reveal a neighbourhood on selection.
-    let mut overview: Vec<&layout::Link> = links.iter().filter(|l| l.inter_district).collect();
-    overview.sort_by_key(|l| std::cmp::Reverse(l.weight));
-    overview.truncate(90);
-
+    let all: Vec<&layout::Link> = links.iter().collect();
     commands.spawn((
         PbrBundle {
-            mesh: meshes.add(build_link_mesh(&overview, 0.0)),
+            mesh: meshes.add(build_link_mesh(&all, 0.0)),
+            visibility: Visibility::Hidden,
             material: link_material(
                 materials,
                 Color::srgba(0.45, 0.78, 0.95, 0.30),
@@ -183,12 +179,13 @@ pub(crate) fn spawn_city(
         CityElement,
     ));
 
-    // Cycles are drawn permanently: they are rare, and they are the one thing
-    // here a file tree cannot show at all.
+    // Cycles in red on top: they are the one thing here a file tree cannot
+    // show at all.
     let cycle_links: Vec<&layout::Link> = links.iter().filter(|l| l.in_cycle).collect();
     commands.spawn((
         PbrBundle {
             mesh: meshes.add(build_link_mesh(&cycle_links, 0.6)),
+            visibility: Visibility::Hidden,
             material: link_material(
                 materials,
                 Color::srgb(1.0, 0.30, 0.34),
@@ -196,6 +193,7 @@ pub(crate) fn spawn_city(
             ),
             ..default()
         },
+        LinkLayer,
         CityElement,
     ));
 

@@ -11,6 +11,7 @@ import init, {
   set_color_mode,
   set_filter,
   set_path_anchor,
+  set_show_links,
   set_timeline,
   show_path_to,
 } from "@/wasm/engine";
@@ -65,6 +66,7 @@ export default function RenderPage() {
   const [summary, setSummary] = useState<CitySummary | null>(null);
   const [mode, setMode] = useState("typology");
   const [filter, setFilterState] = useState<FilterState>(EMPTY_FILTER);
+  const [links, setLinks] = useState(false);
   const [anchor, setAnchor] = useState<{ id: string; name: string } | null>(
     null,
   );
@@ -114,6 +116,7 @@ export default function RenderPage() {
       // A reload rebuilds the city, so the engine's view state resets too.
       setMode("typology");
       setFilterState(EMPTY_FILTER);
+      setLinks(false);
       setAnchor(null);
       setPath(null);
 
@@ -294,6 +297,11 @@ export default function RenderPage() {
     set_filter(JSON.stringify(f));
   }, []);
 
+  const handleLinks = useCallback((on: boolean) => {
+    setLinks(on);
+    set_show_links(on);
+  }, []);
+
   const handlePath = useCallback((id: string) => show_path_to(id), []);
 
   const handleAnchor = useCallback(
@@ -380,8 +388,10 @@ export default function RenderPage() {
             summary={summary}
             mode={mode}
             filter={filter}
+            links={links}
             onMode={handleMode}
             onFilter={handleFilter}
+            onLinks={handleLinks}
           />
           <Legend summary={summary} mode={mode} />
           <InspectorPanel

@@ -83,6 +83,7 @@ struct ViewState {
     // checked out. It shows when each part came into existence, not how it
     // grew - that would need per-commit metrics.
     timeline: Option<u32>,
+    show_links: bool,
     dirty: bool,
 }
 

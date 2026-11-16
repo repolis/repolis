@@ -80,14 +80,18 @@ export function ViewControls({
   summary,
   mode,
   filter,
+  links,
   onMode,
   onFilter,
+  onLinks,
 }: {
   summary: CitySummary | null;
   mode: string;
   filter: FilterState;
+  links: boolean;
   onMode: (m: string) => void;
   onFilter: (f: FilterState) => void;
+  onLinks: (on: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
   if (!summary) return null;
@@ -128,6 +132,7 @@ export function ViewControls({
             &times;
           </button>
         )}
+        <Chip on={links} label="Links" onClick={() => onLinks(!links)} />
       </div>
 
       {open && (
