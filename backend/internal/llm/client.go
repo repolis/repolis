@@ -260,22 +260,15 @@ func retryAfter(err error, attempt int) (time.Duration, bool) {
 	return time.Duration(1<<attempt) * time.Second, true
 }
 
-// runBatch executes jobs with bounded concurrency, preserving input order.
-func runBatch[T any](ctx context.Context, concurrency int, n int, fn func(i int) T) []T {
+// runBatch runs fn for every index with bounded concurrency, preserving input
+// order, and reports progress as jobs finish.
+func runBatch[T any](ctx context.Context, concurrency, n int, progress func(done, total int), fn func(i int) T) []T {
 	results := make([]T, n)
-	if n == 0 {
-		return results
-	}
-	if concurrency < 1 {
-		concurrency = 1
-	}
-
-	sem := make(chan struct{}, concurrency)
+	sem := make(chan struct{}, max(concurrency, 1))
 	var wg sync.WaitGroup
-	for i := 0; i < n; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
+	var done atomic.Int64
+	for i := range n {
+		wg.Go(func() {
 			select {
 			case sem <- struct{}{}:
 			case <-ctx.Done():
@@ -283,7 +276,10 @@ func runBatch[T any](ctx context.Context, concurrency int, n int, fn func(i int)
 			}
 			defer func() { <-sem }()
 			results[i] = fn(i)
-		}(i)
+			if progress != nil {
+				progress(int(done.Add(1)), n)
+			}
+		})
 	}
 	wg.Wait()
 	return results

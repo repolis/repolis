@@ -84,14 +84,9 @@ func (c *Client) AdjudicateAssociations(ctx context.Context, st *analyzer.Symbol
 		"Adjudicating %d ambiguous associations (%d settled confidently by rule, %d kept at rule default over budget)",
 		len(questions), len(st.Assocs)-len(questions)-skipped, skipped)
 
-	var done int
-	answers := runBatch(ctx, c.concurrency, len(questions), func(i int) string {
+	answers := runBatch(ctx, c.concurrency, len(questions), progress, func(i int) string {
 		q := questions[i]
 		out, err := c.complete(ctx, c.adjudicateRequest(st.Language(), q.assoc.Fn.Name, q.assoc.Fn.Signature, q.options))
-		if progress != nil {
-			done++
-			progress(done, len(questions))
-		}
 		if err != nil {
 			logger.Log(logger.DebugLevel, "Adjudication failed for %s: %v", q.assoc.Fn.Name, err)
 			return ""
@@ -108,24 +103,23 @@ func (c *Client) AdjudicateAssociations(ctx context.Context, st *analyzer.Symbol
 		case ans == "":
 			// No answer at all: keep the rule's tentative choice.
 		case ans == "NONE":
-			st.ClearTentative(questions[i].assoc)
+			questions[i].assoc.Detach()
 			detached++
 		default:
-			id, known := questions[i].nameToID[ans]
-			if !known {
-				rejected++
-				continue
-			}
-			if st.ApplyLLM(questions[i].assoc, id) {
+			// An unknown name is a rejection like any other.
+			switch st.ApplyLLM(questions[i].assoc, questions[i].nameToID[ans]) {
+			case analyzer.LLMApplied:
 				changed++
-			} else {
+			case analyzer.LLMUnchanged:
 				confirmed++
+			case analyzer.LLMRejected:
+				rejected++
 			}
 		}
 	}
 
 	logger.Log(logger.InfoLevel,
-		"Adjudication: %d reassigned, %d confirmed, %d detached, %d rejected by verifier",
+		"Adjudication: %d reassigned, %d confirmed, %d detached, %d rejected",
 		changed, confirmed, detached, rejected)
 	return changed
 }

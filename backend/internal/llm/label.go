@@ -77,15 +77,10 @@ func (c *Client) LabelClusters(ctx context.Context, clusters []analyzer.Cluster,
 		noise = append(noise, strings.ToLower(p))
 	}
 
-	var done int
-	out := runBatch(ctx, c.concurrency, len(clusters), func(i int) *Label {
+	out := runBatch(ctx, c.concurrency, len(clusters), progress, func(i int) *Label {
 		cl := clusters[i]
 		req := c.labelRequest(language, stripNoise(cl.TopNames, noise), cl.DistinctDirs(common), len(cl.Buildings), noise)
 		resp, err := c.complete(ctx, req)
-		if progress != nil {
-			done++
-			progress(done, len(clusters))
-		}
 		if err != nil {
 			logger.Log(logger.WarnLevel, "District %d labelling failed, keeping fallback name: %v", i+1, err)
 			return nil

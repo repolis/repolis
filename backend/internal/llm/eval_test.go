@@ -295,7 +295,7 @@ func evalAdjudicate(t *testing.T, c *Client) {
 		err      error
 	}
 	start := time.Now()
-	results := runBatch(ctx, c.concurrency, len(assocCases), func(i int) result {
+	results := runBatch(ctx, c.concurrency, len(assocCases), nil, func(i int) result {
 		k := assocCases[i]
 		pace()
 		t0 := time.Now()
@@ -359,7 +359,7 @@ func evalLabels(t *testing.T, c *Client) {
 	var lat latencies
 	var parsed, specific, onTopic, echo int
 	start := time.Now()
-	outs := runBatch(ctx, c.concurrency, len(labelCases), func(i int) string {
+	outs := runBatch(ctx, c.concurrency, len(labelCases), nil, func(i int) string {
 		k := labelCases[i]
 		pace()
 		t0 := time.Now()

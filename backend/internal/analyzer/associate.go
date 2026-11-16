@@ -2,6 +2,7 @@ package analyzer
 
 import (
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -518,28 +519,30 @@ func (st *SymbolTable) TypeName(id string) string {
 	return ""
 }
 
+// LLMResult is what an adjudicated answer did to an association.
+type LLMResult int
+
+const (
+	LLMRejected  LLMResult = iota // not a candidate, or no AST evidence for it
+	LLMUnchanged                  // confirmed the rule's choice
+	LLMApplied                    // replaced the rule's choice
+)
+
 // ApplyLLM records an adjudicated choice, after the same verification.
-func (st *SymbolTable) ApplyLLM(a *Assoc, chosenID string) bool {
-	if chosenID == "" {
-		return false
-	}
-	valid := false
-	for _, c := range a.Candidates {
-		if c == chosenID {
-			valid = true
-			break
-		}
-	}
-	if !valid || !st.verify(a.Fn, chosenID) {
-		return false
+func (st *SymbolTable) ApplyLLM(a *Assoc, chosenID string) LLMResult {
+	if !slices.Contains(a.Candidates, chosenID) || !st.verify(a.Fn, chosenID) {
+		return LLMRejected
 	}
 	changed := a.Chosen != chosenID
 	a.Chosen, a.Confidence, a.Source = chosenID, ConfMedium, SourceLLM
-	return changed
+	if changed {
+		return LLMApplied
+	}
+	return LLMUnchanged
 }
 
-// ClearTentative unattaches a function: the model answered NONE, which is an
-// answer rather than a failure.
-func (st *SymbolTable) ClearTentative(a *Assoc) {
+// Detach unattaches a function: the model answered NONE, which is an answer
+// rather than a failure.
+func (a *Assoc) Detach() {
 	a.Chosen, a.Confidence, a.Source = "", ConfNone, SourceNone
 }

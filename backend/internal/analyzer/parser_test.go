@@ -161,11 +161,11 @@ func TestVerifierRejectsUnsupportedAttribution(t *testing.T) {
 		t.Fatal("clamp not found")
 	}
 	// clamp mentions no type at all, so no attribution can be supported.
-	if st.ApplyLLM(clamp, typeID("widget.c", "Widget")) {
+	if st.ApplyLLM(clamp, typeID("widget.c", "Widget")) != LLMRejected {
 		t.Error("verifier accepted an attribution with no AST evidence")
 	}
 	// An id outside the candidate list must be refused too.
-	if st.ApplyLLM(clamp, "nonexistent.c::Ghost") {
+	if st.ApplyLLM(clamp, "nonexistent.c::Ghost") != LLMRejected {
 		t.Error("verifier accepted a type that is not a candidate")
 	}
 }
