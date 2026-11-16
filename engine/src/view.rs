@@ -5,7 +5,8 @@
 //! already taken - another simultaneous channel would be unreadable. Switching
 //! colour gives each metric a full-strength palette in turn instead.
 
-use crate::data::Building;
+use crate::data::{Building, CityMap};
+use crate::render::{apply_age, typology_rgb};
 use serde::Deserialize;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -44,7 +45,7 @@ impl ColorMode {
 
 /// Predicates the view is restricted to. Failures turn translucent rather than
 /// hidden, so matches are read in the context of the whole city.
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
 pub struct Filter {
     #[serde(default)]
     pub text: String,
@@ -70,16 +71,7 @@ pub struct Filter {
 
 impl Filter {
     pub fn is_empty(&self) -> bool {
-        self.text.is_empty()
-            && self.language.is_empty()
-            && self.district.is_empty()
-            && self.kind.is_empty()
-            && self.min_methods == 0
-            && self.min_complexity == 0
-            && self.min_churn_pct <= 0.0
-            && !self.only_no_callers
-            && !self.only_hubs
-            && !self.only_cycles
+        *self == Filter::default()
     }
 
     pub fn matches(&self, b: &Building, district: &str) -> bool {
@@ -159,6 +151,23 @@ pub struct Scales {
     pub fan_in: f32,
 }
 
+impl Scales {
+    /// Percentile, not maximum: libgit2's worst function is 129 and nearly
+    /// everything is under 15, which would flatten the whole ramp.
+    pub fn from_city(city: &CityMap) -> Scales {
+        let p95 = |f: fn(&Building) -> u32| {
+            let mut v: Vec<u32> = city.districts.iter().flat_map(|d| &d.buildings).map(f).collect();
+            v.sort_unstable();
+            v.get((v.len() * 95 / 100).min(v.len().saturating_sub(1)))
+                .map_or(20.0, |&x| (x as f32).max(1.0))
+        };
+        Scales {
+            complexity: p95(|b| b.max_complexity),
+            fan_in: p95(|b| b.fan_in),
+        }
+    }
+}
+
 impl Default for Scales {
     fn default() -> Self {
         Scales {
@@ -169,9 +178,11 @@ impl Default for Scales {
 }
 
 /// The colour a building takes in the current mode.
-pub fn color_for(mode: ColorMode, b: &Building, typology_rgb: [f32; 3], s: Scales) -> [f32; 3] {
+pub fn color_for(mode: ColorMode, b: &Building, typology: &str, s: Scales) -> [f32; 3] {
     match mode {
-        ColorMode::Typology => typology_rgb,
+        // Only here does age fade the colour: in a numeric mode the ramp
+        // carries the meaning, and fading it would corrupt it.
+        ColorMode::Typology => apply_age(typology_rgb(typology), b.age_days),
         ColorMode::Complexity => ramp(b.max_complexity as f32 / s.complexity.max(1.0)),
         // Recent is hot, old is pale: the same direction as every other mode.
         ColorMode::Age => ramp(1.0 - (b.age_days as f32 / 540.0).clamp(0.0, 1.0)),

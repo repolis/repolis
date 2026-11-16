@@ -1,3 +1,4 @@
+use bevy::math::bounding::{Aabb3d, RayCast3d};
 use bevy::pbr::CascadeShadowConfigBuilder;
 use bevy::prelude::*;
 use bevy::render::settings::{Backends, RenderCreation, WgpuSettings};
@@ -47,7 +48,7 @@ struct CityIndex {
     city: CityMap,
     by_id: HashMap<String, Entity>,
     links: Vec<Link>,
-    materials: HashMap<u32, MaterialSet>,
+    materials: HashMap<u32, BuildingMaterials>,
     faded: Option<Handle<StandardMaterial>>,
     radius: f32,
 }
@@ -58,12 +59,6 @@ impl CityIndex {
     }
 }
 
-// (normal, dimmed, highlighted) for one quantised building color
-type MaterialSet = (
-    Handle<StandardMaterial>,
-    Handle<StandardMaterial>,
-    Handle<StandardMaterial>,
-);
 
 #[cfg(test)]
 mod path_tests {
@@ -418,36 +413,11 @@ fn process_city_data(
         &city,
     );
 
-    // Percentile, not maximum: libgit2's worst function is 129 and nearly
-    // everything is under 15, which would flatten the whole ramp.
-    {
-        let mut cx: Vec<u32> = Vec::new();
-        let mut fi: Vec<u32> = Vec::new();
-        for d in &city.districts {
-            for b in &d.buildings {
-                cx.push(b.max_complexity);
-                fi.push(b.fan_in);
-            }
-        }
-        cx.sort_unstable();
-        fi.sort_unstable();
-        let p95 = |v: &Vec<u32>, fallback: f32| -> f32 {
-            if v.is_empty() {
-                return fallback;
-            }
-            (v[(v.len() * 95 / 100).min(v.len() - 1)] as f32).max(1.0)
-        };
-        view_state.scales = Scales {
-            complexity: p95(&cx, 20.0),
-            fan_in: p95(&fi, 20.0),
-        };
-        view_state.mode = ColorMode::Typology;
-        view_state.filter = Filter::default();
-        view_state.path.clear();
-        view_state.timeline = None;
-        view_state.path_anchor = None;
-        view_state.dirty = true;
-    }
+    *view_state = ViewState {
+        scales: Scales::from_city(&city),
+        dirty: true,
+        ..default()
+    };
 
     if !had_city {
         for (mut transform, mut cam) in camera_q.iter_mut() {
@@ -567,7 +537,7 @@ fn spawn_city(
     for pb in &result.buildings {
         let district = &city.districts[pb.district_idx];
         let b = &district.buildings[pb.building_idx];
-        let rgb = apply_age(typology_rgb(&district.typology), b.age_days);
+        let rgb = view::color_for(ColorMode::Typology, b, &district.typology, Scales::default());
         let handles = material_set(materials, &mut index.materials, rgb);
 
         let half = Vec3::new(pb.width as f32, 0.0, pb.depth as f32) * 0.5;
@@ -577,7 +547,7 @@ fn spawn_city(
             .spawn((
                 PbrBundle {
                     mesh: cube.clone(),
-                    material: handles.0.clone(),
+                    material: handles.normal,
                     transform: Transform::from_translation((min + max) * 0.5).with_scale(max - min),
                     ..default()
                 },
@@ -605,15 +575,7 @@ fn spawn_city(
     commands.spawn((
         PbrBundle {
             mesh: meshes.add(build_link_mesh(&overview, 0.0)),
-            material: materials.add(StandardMaterial {
-                base_color: Color::srgba(0.45, 0.78, 0.95, 0.30),
-                emissive: LinearRgba::new(0.10, 0.35, 0.55, 1.0),
-                alpha_mode: AlphaMode::Blend,
-                unlit: true,
-                double_sided: true,
-                cull_mode: None,
-                ..default()
-            }),
+            material: link_material(materials, Color::srgba(0.45, 0.78, 0.95, 0.30), LinearRgba::new(0.10, 0.35, 0.55, 1.0)),
             ..default()
         },
         LinkLayer,
@@ -626,15 +588,7 @@ fn spawn_city(
     commands.spawn((
         PbrBundle {
             mesh: meshes.add(build_link_mesh(&cycle_links, 0.6)),
-            material: materials.add(StandardMaterial {
-                base_color: Color::srgb(1.0, 0.30, 0.34),
-                emissive: LinearRgba::new(3.4, 0.35, 0.45, 1.0),
-                alpha_mode: AlphaMode::Blend,
-                unlit: true,
-                double_sided: true,
-                cull_mode: None,
-                ..default()
-            }),
+            material: link_material(materials, Color::srgb(1.0, 0.30, 0.34), LinearRgba::new(3.4, 0.35, 0.45, 1.0)),
             ..default()
         },
         CityElement,
@@ -643,15 +597,7 @@ fn spawn_city(
     commands.spawn((
         PbrBundle {
             mesh: meshes.add(build_link_mesh(&[], 0.0)),
-            material: materials.add(StandardMaterial {
-                base_color: Color::srgb(1.0, 0.82, 0.25),
-                emissive: LinearRgba::new(3.0, 2.0, 0.3, 1.0),
-                alpha_mode: AlphaMode::Blend,
-                unlit: true,
-                double_sided: true,
-                cull_mode: None,
-                ..default()
-            }),
+            material: link_material(materials, Color::srgb(1.0, 0.82, 0.25), LinearRgba::new(3.0, 2.0, 0.3, 1.0)),
             ..default()
         },
         HighlightLinkLayer,
@@ -664,38 +610,6 @@ fn spawn_city(
 // ---------------------------------------------------------------------------
 // Picking and selection
 // ---------------------------------------------------------------------------
-
-/// Ray/AABB slab test.
-fn ray_aabb(origin: Vec3, dir: Vec3, min: Vec3, max: Vec3) -> Option<f32> {
-    let mut tmin = f32::NEG_INFINITY;
-    let mut tmax = f32::INFINITY;
-    for axis in 0..3 {
-        let o = origin[axis];
-        let d = dir[axis];
-        let (lo, hi) = (min[axis], max[axis]);
-        if d.abs() < 1e-7 {
-            if o < lo || o > hi {
-                return None;
-            }
-            continue;
-        }
-        let inv = 1.0 / d;
-        let mut t1 = (lo - o) * inv;
-        let mut t2 = (hi - o) * inv;
-        if t1 > t2 {
-            std::mem::swap(&mut t1, &mut t2);
-        }
-        tmin = tmin.max(t1);
-        tmax = tmax.min(t2);
-        if tmin > tmax {
-            return None;
-        }
-    }
-    if tmax < 0.0 {
-        return None;
-    }
-    Some(if tmin > 0.0 { tmin } else { tmax })
-}
 
 #[allow(clippy::too_many_arguments)]
 fn picking_system(
@@ -749,31 +663,28 @@ fn picking_system(
     let Some(ray) = camera.viewport_to_world(cam_tf, cursor) else {
         return;
     };
-    let origin = ray.origin;
-    let dir = *ray.direction;
+    let cast = RayCast3d::from_ray(ray, f32::MAX);
+    let best_building = buildings
+        .iter()
+        .filter_map(|(e, p)| {
+            let aabb = Aabb3d { min: p.min.into(), max: p.max.into() };
+            cast.aabb_intersection_at(&aabb).map(|t| (t, e))
+        })
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, e)| e);
 
-    let mut best_t = f32::MAX;
-    let mut best_building: Option<Entity> = None;
-    for (entity, p) in buildings.iter() {
-        if let Some(t) = ray_aabb(origin, dir, p.min, p.max) {
-            if t < best_t {
-                best_t = t;
-                best_building = Some(entity);
-            }
-        }
-    }
-
-    let mut best_district: Option<Entity> = None;
-    if best_building.is_none() && dir.y.abs() > 1e-5 {
-        let t = (DISTRICT_TOP - origin.y) / dir.y;
-        if t > 0.0 {
-            let hit = (origin + dir * t).xz();
-            best_district = districts
+    let ground = InfinitePlane3d::new(Vec3::Y);
+    let best_district = best_building
+        .is_none()
+        .then(|| ray.intersect_plane(Vec3::Y * DISTRICT_TOP, ground))
+        .flatten()
+        .and_then(|t| {
+            let hit = ray.get_point(t).xz();
+            districts
                 .iter()
                 .find(|(_, d)| hit.cmpge(d.min).all() && hit.cmple(d.max).all())
-                .map(|(e, _)| e);
-        }
-    }
+        })
+        .map(|(e, _)| e);
 
     // Hover: lightweight tooltip only.
     let hovered = best_building.or(best_district);
@@ -845,15 +756,12 @@ fn rgb_key(rgb: [f32; 3]) -> u32 {
 
 fn material_set(
     materials: &mut Assets<StandardMaterial>,
-    cache: &mut HashMap<u32, MaterialSet>,
+    cache: &mut HashMap<u32, BuildingMaterials>,
     rgb: [f32; 3],
-) -> MaterialSet {
+) -> BuildingMaterials {
     cache
         .entry(rgb_key(rgb))
-        .or_insert_with(|| {
-            let m = make_building_materials(materials, rgb);
-            (m.normal, m.dim, m.bright)
-        })
+        .or_insert_with(|| make_building_materials(materials, rgb))
         .clone()
 }
 
@@ -943,33 +851,27 @@ fn refresh_view(
             }
         }
         let matched = !filtering || state.filter.matches(b, &district.name);
-        let rgb = view::color_for(
-            state.mode,
-            b,
-            typology_rgb(&district.typology),
-            state.scales,
-        );
-        let rgb = apply_age_if_typology(state.mode, rgb, b.age_days);
+        let rgb = view::color_for(state.mode, b, &district.typology, state.scales);
         let set = material_set(&mut materials, &mut index.materials, rgb);
 
         let handle = if !matched {
             faded.clone()
         } else if !on_path.is_empty() {
             if on_path.contains(&entity) {
-                set.2.clone()
+                set.bright
             } else {
-                set.1.clone()
+                set.dim
             }
         } else if focusing {
             if b.id == selected_id {
-                set.2.clone()
+                set.bright
             } else if related.contains(b.id.as_str()) {
-                set.0.clone()
+                set.normal
             } else {
-                set.1.clone()
+                set.dim
             }
         } else {
-            set.0.clone()
+            set.normal
         };
         pending.push((entity, handle));
     }
@@ -983,16 +885,6 @@ fn refresh_view(
         if let Some(mesh) = meshes.get_mut(mesh_handle) {
             *mesh = build_link_mesh(&chosen, 0.0);
         }
-    }
-}
-
-/// Typology view only: in a numeric mode the ramp carries the meaning, and
-/// fading it by age would corrupt it.
-fn apply_age_if_typology(mode: ColorMode, rgb: [f32; 3], age_days: u32) -> [f32; 3] {
-    if mode == ColorMode::Typology {
-        apply_age(rgb, age_days)
-    } else {
-        rgb
     }
 }
 

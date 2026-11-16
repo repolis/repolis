@@ -57,6 +57,8 @@ pub fn apply_age(rgb: [f32; 3], age_days: u32) -> [f32; 3] {
     ]
 }
 
+/// Normal, dimmed and highlighted variants of one quantised building colour.
+#[derive(Clone)]
 pub struct BuildingMaterials {
     pub normal: Handle<StandardMaterial>,
     pub dim: Handle<StandardMaterial>,
@@ -89,6 +91,23 @@ pub fn make_building_materials(
         ..default()
     });
     BuildingMaterials { normal, dim, bright }
+}
+
+/// Unlit and translucent, so arcs read as overlays rather than structure.
+pub fn link_material(
+    materials: &mut Assets<StandardMaterial>,
+    base_color: Color,
+    emissive: LinearRgba,
+) -> Handle<StandardMaterial> {
+    materials.add(StandardMaterial {
+        base_color,
+        emissive,
+        alpha_mode: AlphaMode::Blend,
+        unlit: true,
+        double_sided: true,
+        cull_mode: None,
+        ..default()
+    })
 }
 
 /// Builds one mesh containing every arc, so the whole dependency graph is a
