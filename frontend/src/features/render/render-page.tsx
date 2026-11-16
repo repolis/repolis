@@ -413,7 +413,11 @@ export default function RenderPage() {
             hover={selection.type === "None" ? hover : null}
             pos={cursor}
           />
-          <Timeline summary={summary} onChange={setTimelineDay} />
+          <Timeline
+            summary={summary}
+            day={timelineDay}
+            onChange={setTimelineDay}
+          />
           {(busy || !refined) && (
             <div className="absolute bottom-16 left-1/2 z-40 -translate-x-1/2 rounded border border-gray-700 bg-gray-900/95 px-3 py-1.5 text-xs text-gray-300">
               {status}
