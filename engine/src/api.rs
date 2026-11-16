@@ -3,12 +3,11 @@
 use bevy::prelude::*;
 use wasm_bindgen::prelude::*;
 
+use crate::appearance::Appearance;
 use crate::camera::CityCamera;
 use crate::events::*;
-use crate::path::shortest_path;
 use crate::picking::frame_building;
-use crate::view::{ColorMode, Filter};
-use crate::{CityIndex, CityMap, SelectionState, ViewState};
+use crate::{CityIndex, CityMap};
 
 // Test-only hook that feeds a city in without going through wasm bindings.
 pub fn queue_city_for_test(city: CityMap) {
@@ -25,15 +24,10 @@ thread_local! {
 
 enum Command {
     Reset,
-    Clear,
-    Mode(ColorMode),
-    Filter(Filter),
-    Timeline(Option<u32>),
     Camera(String),
-    Anchor(Option<String>),
-    Path(String),
     Focus(String),
     Links(bool),
+    Appearance(Appearance),
 }
 
 fn queue(cmd: Command) {
@@ -76,27 +70,6 @@ pub fn reset_camera() {
     queue(Command::Reset);
 }
 
-/// Switches which metric drives building colour.
-#[wasm_bindgen]
-pub fn set_color_mode(mode: String) {
-    queue(Command::Mode(ColorMode::parse(&mode)));
-}
-
-/// Restricts the view. Everything not matching becomes translucent.
-#[wasm_bindgen]
-pub fn set_filter(json: String) {
-    queue(Command::Filter(
-        serde_json::from_str(&json).unwrap_or_default(),
-    ));
-}
-
-/// Shows the city as it stood on the given day of its history, counted from
-/// the first commit. An empty string returns to the present.
-#[wasm_bindgen]
-pub fn set_timeline(day: String) {
-    queue(Command::Timeline(day.parse().ok()));
-}
-
 /// The current camera, as `focusX,focusZ,radius,alpha,beta`. Polled rather
 /// than pushed: it changes every frame during a drag.
 #[wasm_bindgen]
@@ -117,30 +90,24 @@ pub fn set_camera_state(state: String) {
     queue(Command::Camera(state));
 }
 
-/// Pins the building a path query starts from. An empty id clears it.
-#[wasm_bindgen]
-pub fn set_path_anchor(building_id: String) {
-    queue(Command::Anchor(
-        Some(building_id).filter(|id| !id.is_empty()),
-    ));
-}
-
-/// Traces the shortest dependency path from the pinned anchor to this
-/// building, by hop count.
-#[wasm_bindgen]
-pub fn show_path_to(building_id: String) {
-    queue(Command::Path(building_id));
-}
-
 /// Shows or hides every dependency arc at once. Hidden by default.
 #[wasm_bindgen]
 pub fn set_show_links(show: bool) {
     queue(Command::Links(show));
 }
 
+/// Sets what every building looks like; see `Appearance` for the layout of
+/// each array. The frontend decides colour mode, filter, timeline, selection
+/// and path, and sends only the result.
 #[wasm_bindgen]
-pub fn clear_selection() {
-    queue(Command::Clear);
+pub fn set_appearance(colors: Vec<f32>, states: Vec<u8>, grounds: Vec<f32>, links: Vec<String>) {
+    queue(Command::Appearance(Appearance {
+        colors,
+        states,
+        grounds,
+        links,
+        ..default()
+    }));
 }
 
 /// Publishes the camera once still, so the URL records where the user stopped
@@ -199,10 +166,9 @@ pub(crate) fn publish_labels(
 }
 
 pub(crate) fn consume_commands(
-    mut interaction: ResMut<SelectionState>,
-    mut state: ResMut<ViewState>,
+    mut look: ResMut<Appearance>,
     mut cam_q: Query<&mut CityCamera>,
-    buildings: Query<(Entity, &Pickable)>,
+    buildings: Query<&Pickable>,
     index: Res<CityIndex>,
 ) {
     let cmds = PENDING_COMMANDS.with(|c| std::mem::take(&mut *c.borrow_mut()));
@@ -212,30 +178,17 @@ pub(crate) fn consume_commands(
                 if let Ok(mut cam) = cam_q.get_single_mut() {
                     cam.go_home();
                 }
-                interaction.selected = None;
-                state.path.clear();
-                state.path_anchor = None;
-                state.dirty = true;
-                dispatch_select(&SelectPayload::None);
-                dispatch_path(&None);
-            }
-            Command::Clear => {
-                interaction.selected = None;
-                state.path.clear();
-                state.dirty = true;
-                dispatch_select(&SelectPayload::None);
             }
             Command::Links(show) => {
-                state.show_links = show;
-                state.dirty = true;
+                look.show_links = show;
+                look.dirty = true;
             }
-            Command::Mode(mode) => {
-                state.mode = mode;
-                state.dirty = true;
-            }
-            Command::Filter(filter) => {
-                state.filter = filter;
-                state.dirty = true;
+            Command::Appearance(next) => {
+                *look = Appearance {
+                    show_links: look.show_links,
+                    dirty: true,
+                    ..next
+                };
             }
             Command::Camera(arg) => {
                 if let Ok(mut cam) = cam_q.get_single_mut() {
@@ -250,46 +203,13 @@ pub(crate) fn consume_commands(
                     }
                 }
             }
-            Command::Timeline(day) => {
-                state.timeline = day;
-                state.dirty = true;
-            }
-            Command::Anchor(id) => {
-                state.path_anchor = id;
-                state.path.clear();
-                state.dirty = true;
-                dispatch_path(&None);
-            }
-            Command::Path(to_id) => {
-                state.path.clear();
-                let result = state.path_anchor.clone().map(|from_id| {
-                    let hops: Vec<String> = shortest_path(&index.links, &from_id, &to_id)
-                        .into_iter()
-                        .filter(|id| index.by_id.contains_key(id))
-                        .collect();
-                    state.path = hops.iter().map(|id| index.by_id[id]).collect();
-                    PathResult {
-                        from_id,
-                        to_id,
-                        hops,
-                    }
-                });
-                state.dirty = true;
-                dispatch_path(&result);
-            }
             Command::Focus(id) => {
-                let Some((entity, p)) = index.by_id.get(&id).and_then(|e| buildings.get(*e).ok())
-                else {
+                let Some(p) = index.by_id.get(&id).and_then(|e| buildings.get(*e).ok()) else {
                     continue;
                 };
-                interaction.selected = Some(entity);
-                state.path.clear();
-                state.dirty = true;
-
                 if let Ok(mut cam) = cam_q.get_single_mut() {
                     frame_building(&mut cam, p);
                 }
-
                 dispatch_select(&SelectPayload::Building(id));
             }
         }

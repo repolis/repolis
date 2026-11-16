@@ -104,25 +104,3 @@ export type SelectPayload =
   | { type: "Building"; data: BuildingInfo }
   | { type: "District"; data: DistrictInfo }
   | { type: "None" };
-
-/** Matches the Rust `typology_rgb` table so the legend cannot drift from the scene. */
-export const TYPOLOGY_COLORS: Record<string, string> = {
-  core: "rgb(117,140,184)",
-  data: "rgb(77,158,107)",
-  network: "rgb(71,133,199)",
-  security: "rgb(199,89,84)",
-  interface: "rgb(217,168,77)",
-  utility: "rgb(173,158,128)",
-  config: "rgb(133,138,158)",
-  test: "rgb(148,102,189)",
-  example: "rgb(97,173,184)",
-  unknown: "rgb(158,158,163)",
-};
-
-/** Matches the Rust `language_rgb` table so the legend cannot drift from the scene. */
-export const LANGUAGE_COLORS: Record<string, string> = {
-  C: "rgb(97,140,199)",
-  Rust: "rgb(204,120,71)",
-  Go: "rgb(89,184,194)",
-  unknown: "rgb(158,158,163)",
-};

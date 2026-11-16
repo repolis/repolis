@@ -1,6 +1,7 @@
 import { useState } from "react";
 
-import { LANGUAGE_COLORS, TYPOLOGY_COLORS, type CitySummary } from "./types";
+import { LANGUAGE_COLORS, RAMP_CSS, TYPOLOGY_COLORS } from "./appearance";
+import type { CitySummary } from "./types";
 
 /** Five visual channels are in use at once, and an encoding nobody can decode
  * is decoration. */
@@ -108,7 +109,10 @@ export function Legend({
                   Colour
                 </div>
                 <div className="text-gray-300">{MODE_HELP[mode]}</div>
-                <div className="mt-0.5 h-2 w-full rounded-sm bg-gradient-to-r from-[rgb(219,217,199)] via-[rgb(217,112,56)] to-[rgb(184,41,43)]" />
+                <div
+                  className="mt-0.5 h-2 w-full rounded-sm"
+                  style={{ background: RAMP_CSS }}
+                />
                 {RAMP_ENDS[mode] && (
                   <div className="flex justify-between text-[10px] text-gray-500">
                     <span>{RAMP_ENDS[mode][0]}</span>

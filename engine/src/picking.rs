@@ -6,7 +6,7 @@ use bevy::prelude::*;
 
 use crate::camera::CityCamera;
 use crate::events::*;
-use crate::{CityIndex, ViewState, DISTRICT_TOP};
+use crate::{CityIndex, DISTRICT_TOP};
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn picking_system(
@@ -16,17 +16,11 @@ pub(crate) fn picking_system(
     buildings: Query<(Entity, &Pickable)>,
     districts: Query<(Entity, &PickableDistrict)>,
     mut interaction: ResMut<SelectionState>,
-    mut state: ResMut<ViewState>,
     index: Res<CityIndex>,
     mouse: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
 ) {
-    if keys.just_pressed(KeyCode::Escape)
-        && (interaction.selected.is_some() || !state.path.is_empty())
-    {
-        interaction.selected = None;
-        state.path.clear();
-        state.dirty = true;
+    if keys.just_pressed(KeyCode::Escape) {
         dispatch_select(&SelectPayload::None);
     }
 
@@ -111,14 +105,9 @@ pub(crate) fn picking_system(
         return;
     }
 
-    state.path.clear();
-    state.dirty = true;
-
     match hovered {
         Some(e) if buildings.get(e).is_ok() => {
             let (_, p) = buildings.get(e).unwrap();
-            interaction.selected = Some(e);
-
             if let Ok(mut cam) = cam_focus_q.get_single_mut() {
                 frame_building(&mut cam, p);
             }
@@ -127,7 +116,6 @@ pub(crate) fn picking_system(
         }
         Some(e) if districts.get(e).is_ok() => {
             let (_, d) = districts.get(e).unwrap();
-            interaction.selected = None;
             if let Ok(mut cam) = cam_focus_q.get_single_mut() {
                 let center = (d.min + d.max) * 0.5;
                 let span = (d.max - d.min).length().max(20.0);
@@ -136,10 +124,7 @@ pub(crate) fn picking_system(
             let id = index.city.districts[d.district_idx].id.clone();
             dispatch_select(&SelectPayload::District(id));
         }
-        _ => {
-            interaction.selected = None;
-            dispatch_select(&SelectPayload::None);
-        }
+        _ => dispatch_select(&SelectPayload::None),
     }
 }
 

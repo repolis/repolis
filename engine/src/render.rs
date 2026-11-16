@@ -6,57 +6,6 @@ use bevy::render::render_asset::RenderAssetUsages;
 
 use crate::layout::Link;
 
-/// Hue carries the district's typology. The channels the city uses are
-/// documented in the on-screen legend: height = methods, footprint = fields,
-/// hue = typology, saturation = age.
-pub fn typology_rgb(typology: &str) -> [f32; 3] {
-    match typology {
-        "core" => [0.46, 0.55, 0.72],
-        "data" => [0.30, 0.62, 0.42],
-        "network" => [0.28, 0.52, 0.78],
-        "security" => [0.78, 0.35, 0.33],
-        "interface" => [0.85, 0.66, 0.30],
-        "utility" => [0.68, 0.62, 0.50],
-        "config" => [0.52, 0.54, 0.62],
-        "test" => [0.58, 0.40, 0.74],
-        "example" => [0.38, 0.68, 0.72],
-        _ => [0.62, 0.62, 0.64],
-    }
-}
-
-pub fn district_ground_rgb(typology: &str) -> [f32; 3] {
-    let c = typology_rgb(typology);
-    [c[0] * 0.30 + 0.05, c[1] * 0.30 + 0.05, c[2] * 0.30 + 0.06]
-}
-
-/// Age buckets, in days. Five distinguishable shades compare better across a
-/// city than a smooth ramp, and keep materials bounded: a continuous ramp
-/// produced 131 of them on libgit2.
-const AGE_BUCKETS: [u32; 4] = [45, 180, 400, 900];
-
-pub fn age_bucket(age_days: u32) -> u32 {
-    let mut b = 0;
-    for &edge in AGE_BUCKETS.iter() {
-        if age_days >= edge {
-            b += 1;
-        }
-    }
-    b
-}
-
-/// Age desaturates toward concrete grey: code untouched for years is fully
-/// weathered, recent code keeps its district's hue.
-pub fn apply_age(rgb: [f32; 3], age_days: u32) -> [f32; 3] {
-    let t = age_bucket(age_days) as f32 / AGE_BUCKETS.len() as f32;
-    let grey = (rgb[0] + rgb[1] + rgb[2]) / 3.0;
-    let mix = 0.55 * t;
-    [
-        rgb[0] * (1.0 - mix) + grey * mix,
-        rgb[1] * (1.0 - mix) + grey * mix,
-        rgb[2] * (1.0 - mix) + grey * mix,
-    ]
-}
-
 /// Normal, dimmed and highlighted variants of one quantised building colour.
 #[derive(Clone)]
 pub struct BuildingMaterials {

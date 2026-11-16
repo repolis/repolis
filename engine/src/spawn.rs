@@ -8,7 +8,6 @@ use crate::data::CityMap;
 use crate::events::*;
 use crate::layout::{self, LayoutResult};
 use crate::render::*;
-use crate::view::{self, ColorMode, Scales};
 use crate::{treemap, CityElement, CityIndex, HighlightLinkLayer, LinkLayer};
 use crate::{BUILDING_BASE, DISTRICT_TOP, GROUND_Y, STREET_Y};
 
@@ -64,14 +63,16 @@ pub(crate) fn spawn_city(
         ));
     }
 
+    // Neutral until the frontend's first appearance arrives, a frame later.
+    let neutral = material_set(materials, &mut index.materials, [0.62, 0.62, 0.64]).normal;
+
     for (i, &g) in result.districts.iter().enumerate() {
-        let district = &city.districts[i];
-        let rgb = district_ground_rgb(&district.typology);
         commands.spawn((
             PbrBundle {
                 mesh: cube.clone(),
+                // Its own material: the ground colour is set in place.
                 material: materials.add(StandardMaterial {
-                    base_color: Color::srgb(rgb[0], rgb[1], rgb[2]),
+                    base_color: Color::srgb(0.2, 0.2, 0.21),
                     perceptual_roughness: 0.95,
                     ..default()
                 }),
@@ -90,16 +91,19 @@ pub(crate) fn spawn_city(
         index.labels.push(Vec3::new(x as f32, BUILDING_BASE + 6.0, z as f32));
     }
 
+    // Each district's first building in city order.
+    let offsets: Vec<usize> = city
+        .districts
+        .iter()
+        .scan(0, |n, d| {
+            let start = *n;
+            *n += d.buildings.len();
+            Some(start)
+        })
+        .collect();
+
     for pb in &result.buildings {
-        let district = &city.districts[pb.district_idx];
-        let b = &district.buildings[pb.building_idx];
-        let rgb = view::color_for(
-            ColorMode::Typology,
-            b,
-            &district.typology,
-            Scales::default(),
-        );
-        let handles = material_set(materials, &mut index.materials, rgb);
+        let b = &city.districts[pb.district_idx].buildings[pb.building_idx];
 
         let half = Vec3::new(pb.width as f32, 0.0, pb.depth as f32) * 0.5;
         let base = Vec3::new(pb.center_x as f32, BUILDING_BASE, pb.center_z as f32);
@@ -108,13 +112,14 @@ pub(crate) fn spawn_city(
             .spawn((
                 PbrBundle {
                     mesh: cube.clone(),
-                    material: handles.normal,
+                    material: neutral.clone(),
                     transform: Transform::from_translation((min + max) * 0.5).with_scale(max - min),
                     ..default()
                 },
                 Pickable {
                     district_idx: pb.district_idx,
                     building_idx: pb.building_idx,
+                    order: offsets[pb.district_idx] + pb.building_idx,
                     min,
                     max,
                 },

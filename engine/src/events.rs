@@ -18,19 +18,13 @@ pub enum SelectPayload {
     District(String),
 }
 
-/// A path query's result; `hops` is empty when no path exists.
-#[derive(Serialize)]
-pub struct PathResult {
-    pub from_id: String,
-    pub to_id: String,
-    pub hops: Vec<String>,
-}
-
 /// Marks a building entity and carries everything picking and selection need.
 #[derive(Component)]
 pub struct Pickable {
     pub district_idx: usize,
     pub building_idx: usize,
+    /// Position in city order, the order the frontend's appearance arrays use.
+    pub order: usize,
     /// World-space bounding box.
     pub min: Vec3,
     pub max: Vec3,
@@ -47,7 +41,6 @@ pub struct PickableDistrict {
 #[derive(Resource, Default)]
 pub struct SelectionState {
     pub hovered: Option<Entity>,
-    pub selected: Option<Entity>,
     pub last_cursor: Option<Vec2>,
     pub last_camera: Option<(Vec3, Quat)>,
 }
@@ -81,7 +74,4 @@ pub fn dispatch_select(p: &SelectPayload) {
 /// The city finished loading.
 pub fn dispatch_city() {
     dispatch("repolis:city", &());
-}
-pub fn dispatch_path(p: &Option<PathResult>) {
-    dispatch("repolis:path", p);
 }

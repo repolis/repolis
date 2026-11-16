@@ -1,11 +1,7 @@
 import { useState } from "react";
 
-import {
-  TYPOLOGY_COLORS,
-  type BuildingInfo,
-  type DistrictInfo,
-  type SelectPayload,
-} from "./types";
+import { TYPOLOGY_COLORS } from "./appearance";
+import type { BuildingInfo, DistrictInfo, SelectPayload } from "./types";
 
 interface Props {
   selection: SelectPayload;

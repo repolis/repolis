@@ -3,19 +3,15 @@ import { useParams } from "@tanstack/react-router";
 
 import init, {
   camera_state,
-  clear_selection,
   focus_symbol,
   load_city_data,
   reset_camera,
+  set_appearance,
   set_camera_state,
-  set_color_mode,
-  set_filter,
-  set_path_anchor,
   set_show_links,
-  set_timeline,
-  show_path_to,
 } from "@/wasm/engine";
 
+import { computeAppearance, shortestPath } from "./appearance";
 import {
   buildCity,
   hoverInfo,
@@ -24,7 +20,6 @@ import {
   selection as toSelection,
   type City,
   type EngineHover,
-  type EnginePath,
   type EngineSelect,
   type RawCity,
 } from "./city";
@@ -71,14 +66,17 @@ export default function RenderPage() {
   const [anchor, setAnchor] = useState<{ id: string; name: string } | null>(
     null,
   );
-  const [path, setPath] = useState<PathInfo | null>(null);
+  // The traced path: building ids for the highlight, names for the banner.
+  const [path, setPath] = useState<{ ids: string[]; info: PathInfo } | null>(
+    null,
+  );
+  const [timelineDay, setTimelineDay] = useState<number | null>(null);
 
   const startedRef = useRef(false);
   const sourceRef = useRef<EventSource | null>(null);
   // Captured once, before anything can overwrite the fragment.
   const restoreRef = useRef(decodeView(window.location.hash));
   const restoredRef = useRef(false);
-  const selectedIdRef = useRef<string | null>(null);
   // The engine reports ids; names and metrics come from here.
   const cityRef = useRef<City | null>(null);
   const loadCity = useCallback((raw: RawCity) => {
@@ -100,24 +98,16 @@ export default function RenderPage() {
           ? toSelection(cityRef.current, detail)
           : { type: "None" };
       setSelection(payload);
-      selectedIdRef.current =
-        payload.type === "Building" ? payload.data.id : null;
+      // A new selection ends the path view; the anchor stays pinned.
+      setPath(null);
     };
-    const onPathEvent = (e: Event) =>
-      setPath(
-        cityRef.current &&
-          pathInfo(cityRef.current, (e as CustomEvent<EnginePath>).detail),
-      );
     const onCity = () => {
       const s = cityRef.current?.summary;
       if (!s) return;
       setSummary(s);
       setRefined(s.refined);
       setPhase("ready");
-      // A reload rebuilds the city, so the engine's view state resets too.
-      setMode("typology");
-      setFilterState(EMPTY_FILTER);
-      setLinks(false);
+      // Colour, filter and timeline carry over a reload; ids may not.
       setAnchor(null);
       setPath(null);
 
@@ -127,15 +117,9 @@ export default function RenderPage() {
         restoredRef.current = true;
         const v = restoreRef.current;
         if (!isDefaultView(v)) {
-          if (v.mode !== "typology") {
-            setMode(v.mode);
-            set_color_mode(v.mode);
-          }
-          if (v.filter) {
-            setFilterState(v.filter);
-            set_filter(JSON.stringify(v.filter));
-          }
-          if (v.timeline !== null) set_timeline(String(v.timeline));
+          setMode(v.mode);
+          setFilterState(v.filter);
+          setTimelineDay(v.timeline);
           if (v.selected) focus_symbol(v.selected);
           // After focus_symbol, which moves the camera itself.
           if (v.camera)
@@ -148,13 +132,11 @@ export default function RenderPage() {
     window.addEventListener("repolis:hover", onHover);
     window.addEventListener("repolis:select", onSelect);
     window.addEventListener("repolis:city", onCity);
-    window.addEventListener("repolis:path", onPathEvent);
     window.addEventListener("mousemove", onMove);
     return () => {
       window.removeEventListener("repolis:hover", onHover);
       window.removeEventListener("repolis:select", onSelect);
       window.removeEventListener("repolis:city", onCity);
-      window.removeEventListener("repolis:path", onPathEvent);
       window.removeEventListener("mousemove", onMove);
     };
   }, []);
@@ -281,33 +263,33 @@ export default function RenderPage() {
 
   const handleRegenerate = useCallback(
     (level: string) => {
-      clear_selection();
       setSelection({ type: "None" });
       void startAnalysis(level);
     },
     [startAnalysis],
   );
 
-  const handleMode = useCallback((m: string) => {
-    setMode(m);
-    set_color_mode(m);
-  }, []);
-
-  const handleFilter = useCallback((f: FilterState) => {
-    setFilterState(f);
-    set_filter(JSON.stringify(f));
-  }, []);
-
   const handleLinks = useCallback((on: boolean) => {
     setLinks(on);
     set_show_links(on);
   }, []);
 
-  const handlePath = useCallback((id: string) => show_path_to(id), []);
+  const handlePath = useCallback(
+    (to: string) => {
+      const city = cityRef.current;
+      if (!city || !anchor) return;
+      const query = {
+        from_id: anchor.id,
+        to_id: to,
+        hops: shortestPath(city.adj, anchor.id, to),
+      };
+      setPath({ ids: query.hops, info: pathInfo(city, query) });
+    },
+    [anchor],
+  );
 
   const handleAnchor = useCallback(
     (id: string) => {
-      set_path_anchor(id);
       setPath(null);
       if (!id) {
         setAnchor(null);
@@ -319,15 +301,8 @@ export default function RenderPage() {
   );
 
   const handleClearPath = useCallback(() => {
-    set_path_anchor("");
     setAnchor(null);
     setPath(null);
-  }, []);
-
-  const [timelineDay, setTimelineDay] = useState<number | null>(null);
-  const handleTimeline = useCallback((d: number | null) => {
-    setTimelineDay(d);
-    set_timeline(d === null ? "" : String(d));
   }, []);
 
   const handlePick = useCallback((nameOrId: string) => {
@@ -337,11 +312,29 @@ export default function RenderPage() {
   const handleReset = useCallback(() => {
     reset_camera();
     setSelection({ type: "None" });
+    setAnchor(null);
+    setPath(null);
   }, []);
   const handleClose = useCallback(() => {
-    clear_selection();
     setSelection({ type: "None" });
+    setPath(null);
   }, []);
+
+  const selectedId = selection.type === "Building" ? selection.data.id : null;
+
+  // Everything visible is decided here; the engine only applies it.
+  useEffect(() => {
+    const city = cityRef.current;
+    if (phase !== "ready" || !city) return;
+    const a = computeAppearance(city, {
+      mode,
+      filter,
+      timeline: timelineDay,
+      selectedId,
+      path: path?.ids ?? [],
+    });
+    set_appearance(a.colors, a.states, a.grounds, a.links);
+  }, [phase, summary, mode, filter, timelineDay, selectedId, path]);
 
   // replaceState, and only while idle, so orbiting does not bury the back
   // button in history entries.
@@ -351,7 +344,7 @@ export default function RenderPage() {
       const hash = encodeView({
         mode,
         filter,
-        selected: selectedIdRef.current,
+        selected: selectedId,
         timeline: timelineDay,
         camera: camera_state() || null,
       });
@@ -366,7 +359,7 @@ export default function RenderPage() {
     const id = window.setInterval(write, 700);
     write();
     return () => window.clearInterval(id);
-  }, [phase, mode, filter, timelineDay, selection]);
+  }, [phase, mode, filter, timelineDay, selectedId]);
 
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-black">
@@ -395,8 +388,8 @@ export default function RenderPage() {
             mode={mode}
             filter={filter}
             links={links}
-            onMode={handleMode}
-            onFilter={handleFilter}
+            onMode={setMode}
+            onFilter={setFilterState}
             onLinks={handleLinks}
           />
           <Legend summary={summary} mode={mode} />
@@ -411,14 +404,14 @@ export default function RenderPage() {
           />
           <PathBanner
             anchorName={anchor?.name ?? null}
-            path={path}
+            path={path?.info ?? null}
             onClear={handleClearPath}
           />
           <Tooltip
             hover={selection.type === "None" ? hover : null}
             pos={cursor}
           />
-          <Timeline summary={summary} onChange={handleTimeline} />
+          <Timeline summary={summary} onChange={setTimelineDay} />
           {(busy || !refined) && (
             <div className="absolute bottom-16 left-1/2 z-40 -translate-x-1/2 rounded border border-gray-700 bg-gray-900/95 px-3 py-1.5 text-xs text-gray-300">
               {status}

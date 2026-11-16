@@ -14,25 +14,22 @@ mod camera;
 mod data;
 mod events;
 mod layout;
-mod path;
 mod picking;
 mod render;
 mod spawn;
 mod treemap;
-mod view;
 
 pub use api::queue_city_for_test;
 pub use data::CityMap;
 
 use api::{consume_commands, publish_camera, publish_labels, take_pending_city};
-use appearance::refresh_view;
+use appearance::{apply_appearance, Appearance};
 use camera::{camera_controls, CityCamera};
 use events::*;
 use layout::Link;
 use picking::picking_system;
 use render::BuildingMaterials;
 use spawn::spawn_city;
-use view::{ColorMode, Filter, Scales};
 
 pub const SKY_COLOR: Color = Color::srgb(0.62, 0.71, 0.80);
 const GROUND_Y: f32 = 0.0;
@@ -67,35 +64,13 @@ impl CityIndex {
     }
 }
 
-// Everything the view is showing. One resource, so mode, filter, selection
-// and path settle in a single pass instead of fighting over material handles.
-#[derive(Resource, Default)]
-struct ViewState {
-    mode: ColorMode,
-    filter: Filter,
-    scales: Scales,
-    // Buildings on the highlighted dependency path, in order.
-    path: Vec<Entity>,
-    // Where a path query starts. Separate from the selection: clicking the
-    // second building replaces it, so "from the selection" would only ever
-    // ask for a path from a building to itself.
-    path_anchor: Option<String>,
-    // Day of history to show the city as of, None for the present. Birth
-    // dates come from the `git log` pass that already runs, so no commit is
-    // checked out. It shows when each part came into existence, not how it
-    // grew - that would need per-commit metrics.
-    timeline: Option<u32>,
-    show_links: bool,
-    dirty: bool,
-}
-
 // Registers every resource and system the city needs. Split out from
 // `run_bevy_app` so a headless test can build the same schedule: Bevy only
 // validates system parameters on the first run, not at compile time.
 pub fn add_city_systems(app: &mut App) {
     app.init_resource::<SelectionState>()
         .init_resource::<CityIndex>()
-        .init_resource::<ViewState>()
+        .init_resource::<Appearance>()
         .insert_resource(ClearColor(SKY_COLOR))
         .insert_resource(AmbientLight {
             color: Color::srgb(0.80, 0.86, 0.96),
@@ -111,7 +86,7 @@ pub fn add_city_systems(app: &mut App) {
                 consume_commands,
                 camera_controls,
                 picking_system,
-                refresh_view,
+                apply_appearance,
                 publish_labels,
                 publish_camera,
             )
@@ -194,7 +169,7 @@ fn process_city_data(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut index: ResMut<CityIndex>,
     mut interaction: ResMut<SelectionState>,
-    mut view_state: ResMut<ViewState>,
+    mut look: ResMut<Appearance>,
     mut camera_q: Query<(&mut Transform, &mut CityCamera)>,
     existing: Query<Entity, With<CityElement>>,
 ) {
@@ -226,9 +201,9 @@ fn process_city_data(
         &city,
     );
 
-    *view_state = ViewState {
-        scales: Scales::from_city(&city),
-        dirty: true,
+    // The frontend sends the new appearance once it hears about the city.
+    *look = Appearance {
+        show_links: look.show_links,
         ..default()
     };
 

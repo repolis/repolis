@@ -1,3 +1,4 @@
+import { scalesFor, type Scales } from "./appearance";
 import type {
   BuildingInfo,
   CitySummary,
@@ -48,16 +49,22 @@ export type EngineSelect =
   | { type: "Building"; id: string }
   | { type: "District"; id: string }
   | { type: "None" };
-export type EnginePath = {
+/** A path query's answer, as building ids; `hops` is empty when unreachable. */
+export interface PathQuery {
   from_id: string;
   to_id: string;
   hops: string[];
-} | null;
+}
 
 export interface City {
   summary: CitySummary;
   buildings: Map<string, BuildingInfo>;
   districts: Map<string, DistrictInfo>;
+  /** Every building in city order, the order the engine's arrays use. */
+  list: BuildingInfo[];
+  /** Dependency neighbours, ignoring direction. */
+  adj: Map<string, Set<string>>;
+  scales: Scales;
 }
 
 const byCountThenName = (a: [string, number], b: [string, number]) =>
@@ -71,21 +78,29 @@ export function buildCity(raw: RawCity): City {
   // Dependency lookups for the inspector, by building id.
   const calls = new Map<string, string[]>();
   const calledBy = new Map<string, string[]>();
+  const adj = new Map<string, Set<string>>();
   const push = (m: Map<string, string[]>, k: string, v: string) =>
     m.has(k) ? m.get(k)!.push(v) : m.set(k, [v]);
+  const link = (a: string, b: string) =>
+    adj.has(a) ? adj.get(a)!.add(b) : adj.set(a, new Set([b]));
   for (const e of raw.dependencies ?? []) {
     const t = name.get(e.target);
     const s = name.get(e.source);
     if (t !== undefined) push(calls, e.source, t);
     if (s !== undefined) push(calledBy, e.target, s);
+    if (t !== undefined && s !== undefined && e.source !== e.target) {
+      link(e.source, e.target);
+      link(e.target, e.source);
+    }
   }
 
   const buildings = new Map<string, BuildingInfo>();
   const districts = new Map<string, DistrictInfo>();
+  const all: BuildingInfo[] = [];
   for (const d of raw.districts) {
     const list = d.buildings ?? [];
     for (const b of list) {
-      buildings.set(b.id, {
+      const info = {
         ...b,
         fields: b.fields ?? [],
         methods: b.methods ?? [],
@@ -93,7 +108,9 @@ export function buildCity(raw: RawCity): City {
         typology: d.typology,
         calls: calls.get(b.id) ?? [],
         called_by: calledBy.get(b.id) ?? [],
-      });
+      };
+      buildings.set(b.id, info);
+      all.push(info);
     }
     districts.set(d.id, {
       id: d.id,
@@ -137,7 +154,14 @@ export function buildCity(raw: RawCity): City {
     })),
   };
 
-  return { summary, buildings, districts };
+  return {
+    summary,
+    buildings,
+    districts,
+    list: all,
+    adj,
+    scales: scalesFor(all),
+  };
 }
 
 export function hoverInfo(city: City, h: EngineHover): HoverInfo | null {
@@ -174,8 +198,7 @@ export function selection(city: City, s: EngineSelect): SelectPayload {
   return { type: "None" };
 }
 
-export function pathInfo(city: City, p: EnginePath): PathInfo | null {
-  if (!p) return null;
+export function pathInfo(city: City, p: PathQuery): PathInfo {
   const nameOf = (id: string) => city.buildings.get(id)?.name ?? "";
   return {
     from_id: p.from_id,

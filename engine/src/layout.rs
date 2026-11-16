@@ -329,20 +329,15 @@ mod tests {
         for (di, (name, n)) in sizes.iter().enumerate() {
             let mut d = District {
                 id: format!("d{di}"),
-                name: name.to_string(),
-                typology: "core".into(),
                 ..Default::default()
             };
             for i in 0..*n {
                 d.buildings.push(Building {
                     id: format!("{name}/f{}.c::T{i}", i % 4),
-                    name: format!("T{i}"),
-                    kind: "type".into(),
                     dir: format!("{name}/sub{}", i % 3),
                     num_fields: (i % 17) as u32,
                     num_methods: (i % 11) as u32,
                     lines_of_code: 10 + i as u32,
-                    ..Default::default()
                 });
             }
             c.districts.push(d);
