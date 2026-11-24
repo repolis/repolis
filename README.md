@@ -44,8 +44,9 @@ cd backend && go run ./cmd/analyze /path/to/a/checkout
 go run ./cmd/analyze -llm /path/to/a/checkout
 
 # Tests
-cd backend && go test ./...
-cd engine  && cargo test --release
+cd backend  && go test ./...
+cd engine   && cargo test --release
+cd frontend && npm test
 ```
 
 ## Adding a language
@@ -57,39 +58,39 @@ tree-sitter node type.
 To add one, implement `lang.Language` in a new file and call `Register` from
 its `init`. Nine methods:
 
-| Method | Answers |
-|---|---|
-| `Name`, `Extensions`, `Grammar` | which files, which tree-sitter grammar |
-| `Namespace(path)` | which module a file's symbols belong to |
-| `Separator` | how qualified names are written (`::`, `.`) |
-| `SyntacticMethods` | does the grammar state method ownership? |
-| `ImportTargets` | what namespaces one import makes visible |
-| `Parse` | types, functions, calls and imports from one file |
+| Method                          | Answers                                           |
+| ------------------------------- | ------------------------------------------------- |
+| `Name`, `Extensions`, `Grammar` | which files, which tree-sitter grammar            |
+| `Namespace(path)`               | which module a file's symbols belong to           |
+| `Separator`                     | how qualified names are written (`::`, `.`)       |
+| `SyntacticMethods`              | does the grammar state method ownership?          |
+| `ImportTargets`                 | what namespaces one import makes visible          |
+| `Parse`                         | types, functions, calls and imports from one file |
 
 `SyntacticMethods` is the important one. Rust's `impl` block, a Go receiver
-and a method inside a class body all *state* the owning type, so `Receiver` is
+and a method inside a class body all _state_ the owning type, so `Receiver` is
 read straight from the tree and nothing is inferred. C cannot express the idea
 at all, which is why it alone needs the heuristic ladder and the model that
 adjudicates it. Measured:
 
-| | association | LLM calls |
-|---|---|---|
-| gin (Go, 99 files) | 430 by syntax, 0 guessed | **8**, all district naming |
-| ripgrep (Rust, 110 files) | 1443 by syntax, 0 guessed | **13**, all district naming |
-| libgit2 (C, 1032 files) | 7124 by rule, 2549 ambiguous | **616** |
+|                           | association                  | LLM calls                   |
+| ------------------------- | ---------------------------- | --------------------------- |
+| gin (Go, 99 files)        | 430 by syntax, 0 guessed     | **8**, all district naming  |
+| ripgrep (Rust, 110 files) | 1443 by syntax, 0 guessed    | **13**, all district naming |
+| libgit2 (C, 1032 files)   | 7124 by rule, 2549 ambiguous | **616**                     |
 
 A repository may mix languages; each file is parsed by whichever language
 claims its extension, and they share one call graph.
 
 ## How it reads
 
-| Channel | Meaning |
-|---|---|
-| Height | number of functions |
-| Footprint | number of fields |
-| Hue | district purpose (core, data, network, security, …) |
-| Saturation | recency — old code fades toward grey |
-| District ground area | amount of code in that district |
+| Channel              | Meaning                                                |
+| -------------------- | ------------------------------------------------------ |
+| Height               | number of functions                                    |
+| Footprint            | number of fields                                       |
+| Hue                  | district purpose (core, data, network, security, etc.) |
+| Saturation           | recency (old code fades toward grey)                   |
+| District ground area | amount of code in that district                        |
 
 Drag to orbit, scroll to zoom, WASD to pan, click to select, Esc to clear,
 `R` to reset. The legend in the bottom right repeats all of
@@ -101,11 +102,11 @@ A finished city is cached by repository and commit, so re-opening it is
 instant. The **Regenerate** button next to the search box forces the work to
 happen again. Three levels, each including the ones above it:
 
-| Level | Redoes | Use it when |
-|---|---|---|
-| Re-analyse | parsing, association, call graph, clustering, layout | you changed extraction or layout code |
-| Re-ask the model | the above, plus every model answer | you changed a prompt or switched models |
-| Re-clone | the above, plus deleting and re-downloading the checkout | the working copy is stale or damaged |
+| Level            | Redoes                                                   | Use it when                             |
+| ---------------- | -------------------------------------------------------- | --------------------------------------- |
+| Re-analyse       | parsing, association, call graph, clustering, layout     | you changed extraction or layout code   |
+| Re-ask the model | the above, plus every model answer                       | you changed a prompt or switched models |
+| Re-clone         | the above, plus deleting and re-downloading the checkout | the working copy is stale or damaged    |
 
 The same thing over HTTP:
 
