@@ -24,7 +24,7 @@ export function PathBanner({
             <div className="flex flex-wrap items-center gap-1 font-mono text-[10px] text-gray-300">
               {path.hops.map((h, i) => (
                 <span key={i} className="flex items-center gap-1">
-                  {i > 0 && <span className="text-gray-600">&rarr;</span>}
+                  {i > 0 && <span className="text-gray-600">{"->"}</span>}
                   <span className="rounded bg-gray-800 px-1 py-0.5">{h}</span>
                 </span>
               ))}
@@ -39,11 +39,9 @@ export function PathBanner({
         )
       ) : (
         <div className="text-gray-400">
-          Path start: <span className="text-gray-200">{anchorName}</span>{" "}
-          &middot;{" "}
+          Path start: <span className="text-gray-200">{anchorName}</span>;{" "}
           <span className="text-gray-500">
-            now select another building and press &ldquo;trace path to
-            here&rdquo;
+            now select another building and press "trace path to here"
           </span>
         </div>
       )}
@@ -52,7 +50,7 @@ export function PathBanner({
         className="absolute top-1.5 right-2 text-gray-500 hover:text-gray-200"
         title="Clear path"
       >
-        &times;
+        x
       </button>
     </div>
   );

@@ -31,7 +31,7 @@ export function InspectorPanel({
         className="absolute top-3 right-3 text-gray-500 hover:text-gray-200"
         title="Close (Esc)"
       >
-        &times;
+        x
       </button>
       {selection.type === "Building" && (
         <BuildingInspector
@@ -346,7 +346,7 @@ function DistrictInspector({
                 TYPOLOGY_COLORS[info.typology] ?? TYPOLOGY_COLORS.unknown,
             }}
           />
-          <span>District &middot; {info.typology}</span>
+          <span>District, {info.typology}</span>
         </div>
         <div className="mt-1 text-sm font-bold break-all text-white">
           {info.name}

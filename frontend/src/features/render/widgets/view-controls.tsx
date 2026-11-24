@@ -85,7 +85,7 @@ export function ViewControls({
             className="text-gray-500 hover:text-gray-200"
             title="Clear all filters"
           >
-            &times;
+            x
           </button>
         )}
         <Chip on={links} label="Links" onClick={() => onLinks(!links)} />
