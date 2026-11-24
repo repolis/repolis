@@ -8,6 +8,7 @@ import {
   matches,
   ramp,
   shortestPath,
+  smell,
 } from "../utils/appearance";
 
 const widget = {
@@ -22,6 +23,14 @@ const widget = {
   hub: false,
   cycle_id: 0,
 } as BuildingInfo;
+
+const SCALES = {
+  complexity: 1,
+  fanIn: 1,
+  sumComplexity: 1,
+  fanOut: 1,
+  born: 1,
+};
 
 const graph = (pairs: [string, string][]) => {
   const adj = new Map<string, Set<string>>();
@@ -73,7 +82,7 @@ describe("colour", () => {
 
 describe("birth mode", () => {
   const born = colorMode("born");
-  const scales = { complexity: 1, fanIn: 1, born: 300 };
+  const scales = { ...SCALES, born: 300 };
 
   it("puts the newest file at the hot end", () => {
     const b = { ...widget, commit_churn: 2, born_day: 300 };
@@ -83,6 +92,52 @@ describe("birth mode", () => {
   it("does not paint files without history as the oldest", () => {
     const b = { ...widget, commit_churn: 0, born_day: 0 };
     expect(born.color(b, scales)).not.toEqual(ramp(0));
+  });
+});
+
+describe("smells", () => {
+  const plain = {
+    ...widget,
+    num_fields: 2,
+    num_methods: 4,
+    max_complexity: 3,
+    sum_complexity: 10,
+    fan_out: 2,
+  };
+
+  it("flags a god class", () => {
+    const b = { ...plain, num_methods: 20, sum_complexity: 90, fan_out: 9 };
+    expect(smell(b, SCALES)).toBe("god");
+  });
+
+  it("can flag a module as god", () => {
+    const b = {
+      ...plain,
+      kind: "module",
+      num_methods: 60,
+      sum_complexity: 300,
+      fan_out: 12,
+    };
+    expect(smell(b, SCALES)).toBe("god");
+  });
+
+  it("flags a very complex function", () => {
+    expect(smell({ ...plain, max_complexity: 30 }, SCALES)).toBe("brain");
+  });
+
+  it("flags a data-only struct but not a module", () => {
+    const b = { ...plain, num_fields: 10, num_methods: 0 };
+    expect(smell(b, SCALES)).toBe("data");
+    expect(smell({ ...b, kind: "module" }, SCALES)).toBeNull();
+  });
+
+  it("flags nothing in a small repo", () => {
+    expect(smell(plain, SCALES)).toBeNull();
+  });
+
+  it("raises thresholds to the repo's p95", () => {
+    const b = { ...plain, max_complexity: 30 };
+    expect(smell(b, { ...SCALES, complexity: 40 })).toBeNull();
   });
 });
 

@@ -1,12 +1,7 @@
 import { useState } from "react";
 
 import type { CitySummary } from "../types";
-import {
-  colorMode,
-  LANGUAGE_COLORS,
-  RAMP_CSS,
-  TYPOLOGY_COLORS,
-} from "../utils/appearance";
+import { colorMode, RAMP_CSS } from "../utils/appearance";
 
 function Swatch({ color, label }: { color: string; label: string }) {
   return (
@@ -30,8 +25,7 @@ export function Legend({
   const [open, setOpen] = useState(false);
   if (!summary) return null;
 
-  const used = new Set(summary.districts.map((d) => d.typology));
-  const { help, ends } = colorMode(mode);
+  const { help, ends, swatches } = colorMode(mode);
 
   return (
     <div className="absolute right-4 bottom-4 z-40 w-64 rounded border border-gray-700 bg-gray-900/95 text-xs text-gray-200">
@@ -59,31 +53,15 @@ export function Legend({
           </div>
 
           <div className="flex flex-col gap-1">
-            {mode === "typology" ? (
+            {swatches ? (
               <>
                 <div className="text-[10px] tracking-wide text-gray-500 uppercase">
-                  Colour = district purpose
+                  Colour
                 </div>
+                <div className="text-gray-300">{help}</div>
                 <div className="flex flex-wrap gap-1">
-                  {Object.entries(TYPOLOGY_COLORS)
-                    .filter(([t]) => used.has(t))
-                    .map(([t, c]) => (
-                      <Swatch key={t} color={c} label={t} />
-                    ))}
-                </div>
-              </>
-            ) : mode === "language" ? (
-              <>
-                <div className="text-[10px] tracking-wide text-gray-500 uppercase">
-                  Colour = source language
-                </div>
-                <div className="flex flex-wrap gap-1">
-                  {(summary.languages ?? []).map(([name, n]) => (
-                    <Swatch
-                      key={name}
-                      color={LANGUAGE_COLORS[name] ?? LANGUAGE_COLORS.unknown}
-                      label={`${name} ${n}`}
-                    />
+                  {swatches(summary).map(([label, color]) => (
+                    <Swatch key={label} color={color} label={label} />
                   ))}
                 </div>
               </>
@@ -113,23 +91,23 @@ export function Legend({
               {summary.total_modules} modules)
             </div>
             <div>
-              {summary.total_files} files &middot;{" "}
-              {summary.total_loc.toLocaleString()} lines
+              {summary.total_files} files, {summary.total_loc.toLocaleString()}{" "}
+              lines
             </div>
             {summary.languages?.length > 0 && (
               <div>
                 {summary.languages
                   .map(([name, n]) => `${name} ${n}`)
-                  .join(" \u00b7 ")}
+                  .join(", ")}
               </div>
             )}
             <div>
-              {summary.total_methods} functions attributed &middot;{" "}
-              {summary.orphans} unattached
+              {summary.total_methods} functions attributed, {summary.orphans}{" "}
+              unattached
             </div>
             <div>
-              by rule {summary.methods_by_rule} &middot; by model{" "}
-              {summary.methods_by_llm} &middot; {summary.llm_calls} LLM calls
+              by rule {summary.methods_by_rule}, by model{" "}
+              {summary.methods_by_llm}, {summary.llm_calls} LLM calls
             </div>
             {summary.cycles?.length > 0 && (
               <div className="text-red-400">

@@ -1,4 +1,4 @@
-import type { BuildingInfo, FilterState } from "../types";
+import type { BuildingInfo, CitySummary, FilterState } from "../types";
 import type { City } from "./city";
 
 type Rgb = [number, number, number];
@@ -26,6 +26,22 @@ export const LANGUAGE_RGB: Record<string, Rgb> = {
   unknown: GREY,
 };
 
+export type Smell = "god" | "brain" | "data";
+
+export const SMELL_RGB: Record<Smell, Rgb> = {
+  god: [0.82, 0.2, 0.22],
+  brain: [0.9, 0.6, 0.2],
+  data: [0.35, 0.55, 0.85],
+};
+
+const SMELL_LABELS: Record<Smell, string> = {
+  god: "god class",
+  brain: "very complex function",
+  data: "data-only struct",
+};
+
+const NO_SMELL: Rgb = [0.3, 0.3, 0.32];
+
 export const RAMP_STOPS: Rgb[] = [
   [0.86, 0.85, 0.78],
   [0.88, 0.72, 0.36],
@@ -41,6 +57,7 @@ const cssTable = (t: Record<string, Rgb>) =>
 
 export const TYPOLOGY_COLORS = cssTable(TYPOLOGY_RGB);
 export const LANGUAGE_COLORS = cssTable(LANGUAGE_RGB);
+const SMELL_COLORS = cssTable(SMELL_RGB);
 export const RAMP_CSS = `linear-gradient(to right, ${RAMP_STOPS.map(css).join(", ")})`;
 
 export function ramp(t: number): Rgb {
@@ -71,6 +88,8 @@ const groundRgb = (typology: string): Rgb => {
 export interface Scales {
   complexity: number;
   fanIn: number;
+  sumComplexity: number;
+  fanOut: number;
   born: number;
 }
 
@@ -86,8 +105,27 @@ export function scalesFor(buildings: BuildingInfo[]): Scales {
   return {
     complexity: p95((b) => b.max_complexity),
     fanIn: p95((b) => b.fan_in),
+    sumComplexity: p95((b) => b.sum_complexity),
+    fanOut: p95((b) => b.fan_out),
     born: Math.max(1, ...buildings.map((b) => b.born_day)),
   };
+}
+
+/**
+ * Rough stand-ins for Lanza & Marinescu's detection strategies, which need
+ * metrics we do not collect. Floors keep small repos from flagging anything.
+ */
+export function smell(b: BuildingInfo, s: Scales): Smell | null {
+  if (
+    b.sum_complexity >= Math.max(40, s.sumComplexity) &&
+    b.fan_out >= Math.max(5, s.fanOut) &&
+    b.num_methods >= 8
+  )
+    return "god";
+  if (b.max_complexity >= Math.max(15, s.complexity)) return "brain";
+  if (b.kind === "type" && b.num_fields >= 8 && b.num_methods === 0)
+    return "data";
+  return null;
 }
 
 export interface ColorMode {
@@ -95,6 +133,7 @@ export interface ColorMode {
   label: string;
   help?: string;
   ends?: [string, string];
+  swatches?: (s: CitySummary) => [label: string, color: string][];
   color: (b: BuildingInfo, s: Scales) => Rgb;
 }
 
@@ -102,6 +141,11 @@ export const COLOR_MODES: ColorMode[] = [
   {
     id: "typology",
     label: "Purpose",
+    help: "Colour = district purpose.",
+    swatches: (s) => {
+      const used = new Set(s.districts.map((d) => d.typology));
+      return Object.entries(TYPOLOGY_COLORS).filter(([t]) => used.has(t));
+    },
     // Only here does age fade: in a numeric mode it would corrupt the ramp.
     color: (b) => applyAge(TYPOLOGY_RGB[b.typology] ?? GREY, b.age_days),
   },
@@ -144,7 +188,27 @@ export const COLOR_MODES: ColorMode[] = [
   {
     id: "language",
     label: "Language",
+    help: "Colour = source language.",
+    swatches: (s) =>
+      s.languages.map(([name, n]) => [
+        `${name} ${n}`,
+        LANGUAGE_COLORS[name] ?? LANGUAGE_COLORS.unknown,
+      ]),
     color: (b) => LANGUAGE_RGB[b.language] ?? GREY,
+  },
+  {
+    id: "smells",
+    label: "Smells",
+    help: "Colour = approximate design smell. Dark grey has none.",
+    swatches: () =>
+      Object.entries(SMELL_LABELS).map(([k, label]) => [
+        label,
+        SMELL_COLORS[k],
+      ]),
+    color: (b, s) => {
+      const k = smell(b, s);
+      return k ? SMELL_RGB[k] : NO_SMELL;
+    },
   },
   {
     id: "born",
