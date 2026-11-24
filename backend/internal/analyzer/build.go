@@ -1,7 +1,6 @@
 package analyzer
 
 import (
-	"fmt"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -291,93 +290,4 @@ func (d *Draft) computeCoupling() {
 	for i := range d.Buildings {
 		d.Buildings[i].Hub = d.Buildings[i].FanIn >= cutoff
 	}
-}
-
-// This name shows before the model answers, without a model, and after a vague
-// answer, so it has to be good. The dominant directory locates the code, the
-// largest symbol names it.
-func (c Cluster) FallbackName() string {
-	banned := make(map[string]bool, len(c.Noise))
-	for _, w := range c.Noise {
-		banned[w] = true
-	}
-	clean := func(s string) string {
-		s = strings.TrimSuffix(strings.TrimSuffix(s, ".c"), ".h")
-		kept := make([]string, 0, 4)
-		for _, w := range SplitIdentifier(s) {
-			if !banned[w] || len(kept) > 0 {
-				kept = append(kept, w)
-			}
-		}
-		if len(kept) == 0 {
-			return ""
-		}
-		return titleize(strings.Join(kept, " "))
-	}
-
-	dir := ""
-	for _, d := range c.TopDirs {
-		if d == "root" {
-			continue
-		}
-		if v := clean(filepath.Base(d)); v != "" {
-			dir = v
-			break
-		}
-	}
-	sym := ""
-	for _, n := range c.TopNames {
-		if v := clean(n); v != "" {
-			sym = v
-			break
-		}
-	}
-
-	// The directory reads as a place name on its own; pairing it with an
-	// unrelated symbol produced labels like "Cli / Str".
-	switch {
-	case dir != "":
-		return dir
-	case sym != "":
-		return sym
-	default:
-		return "District"
-	}
-}
-
-func titleize(s string) string {
-	s = strings.ReplaceAll(strings.ReplaceAll(s, "_", " "), "-", " ")
-	parts := strings.Fields(s)
-	for i, p := range parts {
-		r := []rune(p)
-		if len(r) > 0 {
-			r[0] = []rune(strings.ToUpper(string(r[0])))[0]
-			parts[i] = string(r)
-		}
-	}
-	if len(parts) > 3 {
-		parts = parts[:3]
-	}
-	return strings.Join(parts, " ")
-}
-
-func (c Cluster) FallbackTypology() string {
-	joined := ""
-	for _, d := range c.TopDirs {
-		joined += " " + d
-	}
-	for i, n := range c.TopNames {
-		if i > 5 {
-			break
-		}
-		joined += " " + n
-	}
-	return GuessTypology(joined)
-}
-
-func (c Cluster) FallbackSummary() string {
-	if len(c.TopDirs) > 0 {
-		return fmt.Sprintf("%d entities, mostly in %s", len(c.Buildings), c.TopDirs[0])
-	}
-	return fmt.Sprintf("%d related code entities", len(c.Buildings))
 }

@@ -51,20 +51,6 @@ func TestStripProjectToken(t *testing.T) {
 	}
 }
 
-func TestCleanAnswer(t *testing.T) {
-	cases := map[string]string{
-		"  Widget  ":                     "Widget",
-		"`Rect`.":                        "Rect",
-		"<think>reasoning</think>\nVdbe": "Vdbe",
-		"NONE\nextra chatter":            "NONE",
-	}
-	for in, want := range cases {
-		if got := cleanAnswer(in); got != want {
-			t.Errorf("cleanAnswer(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
 // An unsure model sometimes echoes the worked example from the system prompt.
 func TestExampleEchoIsRejected(t *testing.T) {
 	l := parseLabel("NAME: Object Database\nDESC: Reads and writes packed object storage")

@@ -274,19 +274,3 @@ func runBatch[T any](ctx context.Context, concurrency, n int, progress func(done
 	wg.Wait()
 	return results
 }
-
-func stripThinking(s string) string {
-	for {
-		start := strings.Index(s, "<think>")
-		if start == -1 {
-			break
-		}
-		end := strings.Index(s, "</think>")
-		if end == -1 || end < start {
-			s = s[:start]
-			break
-		}
-		s = s[:start] + s[end+len("</think>"):]
-	}
-	return strings.TrimSpace(s)
-}

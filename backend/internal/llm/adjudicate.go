@@ -133,19 +133,3 @@ func (c *Client) adjudicateRequest(language, fn, signature string, options []str
 		stop:      []string{"\n"},
 	}
 }
-
-func cleanAnswer(s string) string {
-	s = stripThinking(s)
-	if i := strings.IndexAny(s, "\n\r"); i != -1 {
-		s = s[:i]
-	}
-	return strings.Trim(strings.TrimSpace(s), " .,;:`\"'*")
-}
-
-func truncate(s string, n int) string {
-	s = strings.TrimSpace(s)
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "..."
-}

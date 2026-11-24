@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS explanations (
 );
 `
 
-func InitDB() error {
+func Init() error {
 	dbPath := os.Getenv("DB_PATH")
 	if dbPath == "" {
 		dbPath = "./data/sqlite.db"
