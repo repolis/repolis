@@ -2,7 +2,7 @@ import { useEffect, useEffectEvent, useRef, useState } from "react";
 
 import init from "@/wasm/engine";
 
-import type { RawCity } from "./city";
+import type { RawCity } from "../utils/city";
 
 const STAGE_LABELS: Record<string, string> = {
   cloning: "Cloning repository",
@@ -24,7 +24,7 @@ interface StreamMessage {
 export function useCityLoader(repoUrl: string, onCity: (raw: RawCity) => void) {
   // Separate from "is a city shown": a regeneration keeps the city on screen.
   const [busy, setBusy] = useState(false);
-  const [status, setStatus] = useState("Booting engine…");
+  const [status, setStatus] = useState("Booting engine...");
   const [error, setError] = useState<string | null>(null);
   const source = useRef<EventSource | null>(null);
 
@@ -38,7 +38,7 @@ export function useCityLoader(repoUrl: string, onCity: (raw: RawCity) => void) {
     source.current?.close();
     setBusy(true);
     setError(null);
-    setStatus(refresh ? "Regenerating…" : "Contacting server…");
+    setStatus(refresh ? "Regenerating..." : "Contacting server...");
     try {
       const res = await fetch("/api/analyze", {
         method: "POST",
@@ -71,11 +71,11 @@ export function useCityLoader(repoUrl: string, onCity: (raw: RawCity) => void) {
           setStatus(
             msg.stage.total > 0
               ? `${label} ${msg.stage.done}/${msg.stage.total}`
-              : `${label}…`,
+              : `${label}...`,
           );
         } else if (msg.type === "city" && msg.city) {
           onCity(msg.city);
-          setStatus(msg.refined ? "Done" : "Refining with the model…");
+          setStatus(msg.refined ? "Done" : "Refining with the model...");
         } else if (msg.type === "error") {
           fail(msg.error ?? "Analysis failed");
         } else if (msg.type === "done") {

@@ -6,7 +6,6 @@ const GITHUB_REPO = /^https?:\/\/(www\.)?github\.com\/([^/]+)\/([^/]+)/;
 export default function HomePage() {
   const navigate = useNavigate();
 
-  // Returns the value too, since a form action resets its inputs.
   const [state, submit] = useActionState(
     (_: unknown, form: FormData) => {
       const repoUrl = String(form.get("repoUrl") ?? "").trim();

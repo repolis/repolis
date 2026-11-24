@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 
 import { label_positions } from "@/wasm/engine";
 
-import type { DistrictInfo } from "./types";
+import type { DistrictInfo } from "../types";
 
 export function DistrictLabels({ districts }: { districts: DistrictInfo[] }) {
   const refs = useRef<(HTMLDivElement | null)[]>([]);

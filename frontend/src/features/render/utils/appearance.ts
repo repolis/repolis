@@ -1,6 +1,5 @@
+import type { BuildingInfo, FilterState } from "../types";
 import type { City } from "./city";
-import type { BuildingInfo } from "./types";
-import type { FilterState } from "./view-controls";
 
 type Rgb = [number, number, number];
 
@@ -149,6 +148,19 @@ export const COLOR_MODES: ColorMode[] = [
 
 export const colorMode = (id: string) =>
   COLOR_MODES.find((m) => m.id === id) ?? COLOR_MODES[0];
+
+export const EMPTY_FILTER: FilterState = {
+  text: "",
+  language: "",
+  district: "",
+  kind: "",
+  min_methods: 0,
+  min_complexity: 0,
+  min_churn_pct: 0,
+  only_no_callers: false,
+  only_hubs: false,
+  only_cycles: false,
+};
 
 export function matches(f: FilterState, b: BuildingInfo): boolean {
   return (

@@ -1,12 +1,12 @@
 import { useState } from "react";
 
+import type { CitySummary } from "../types";
 import {
   colorMode,
   LANGUAGE_COLORS,
   RAMP_CSS,
   TYPOLOGY_COLORS,
-} from "./appearance";
-import type { CitySummary } from "./types";
+} from "../utils/appearance";
 
 function Swatch({ color, label }: { color: string; label: string }) {
   return (
@@ -40,7 +40,7 @@ export function Legend({
         onClick={() => setOpen(!open)}
       >
         <span>Legend &amp; stats</span>
-        <span className="text-gray-500">{open ? "−" : "+"}</span>
+        <span className="text-gray-500">{open ? "-" : "+"}</span>
       </button>
 
       {open && (

@@ -1,7 +1,7 @@
 import { useState } from "react";
 
-import { TYPOLOGY_COLORS } from "./appearance";
-import type { BuildingInfo, DistrictInfo, SelectPayload } from "./types";
+import type { BuildingInfo, DistrictInfo, SelectPayload } from "../types";
+import { TYPOLOGY_COLORS } from "../utils/appearance";
 
 interface Props {
   selection: SelectPayload;
@@ -253,7 +253,7 @@ function BuildingInspector({
             disabled={loading}
             className="rounded border border-gray-700 px-2 py-1.5 text-gray-300 hover:border-gray-500 disabled:opacity-50"
           >
-            {loading ? "Asking the model…" : "Explain this"}
+            {loading ? "Asking the model..." : "Explain this"}
           </button>
         )}
         {error && <div className="text-[11px] text-red-400">{error}</div>}

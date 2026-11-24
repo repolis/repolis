@@ -10,7 +10,14 @@ import {
   set_show_links,
 } from "@/wasm/engine";
 
-import { computeAppearance, shortestPath } from "./appearance";
+import { PathBanner } from "./components/path-banner";
+import { SearchBar } from "./components/search-bar";
+import { Tooltip } from "./components/tooltip";
+import { useCityLoader } from "./hooks/use-city-loader";
+import { useEngineEvents } from "./hooks/use-engine-events";
+import { useUrlSync } from "./hooks/use-url-sync";
+import type { CitySummary, HoverInfo, PathInfo, SelectPayload } from "./types";
+import { computeAppearance, shortestPath } from "./utils/appearance";
 import {
   buildCity,
   hoverInfo,
@@ -19,20 +26,13 @@ import {
   selection as toSelection,
   type City,
   type RawCity,
-} from "./city";
-import { DistrictLabels } from "./district-labels";
-import { InspectorPanel } from "./inspector-panel";
-import { Legend } from "./legend";
-import { PathBanner } from "./path-banner";
-import { SearchBar } from "./search-bar";
-import { Timeline } from "./timeline";
-import { Tooltip } from "./tooltip";
-import type { CitySummary, HoverInfo, PathInfo, SelectPayload } from "./types";
-import { decodeView } from "./url-state";
-import { useCityLoader } from "./use-city-loader";
-import { useEngineEvents } from "./use-engine-events";
-import { useUrlSync } from "./use-url-sync";
-import { ViewControls } from "./view-controls";
+} from "./utils/city";
+import { decodeView } from "./utils/url-state";
+import { DistrictLabels } from "./widgets/district-labels";
+import { InspectorPanel } from "./widgets/inspector-panel";
+import { Legend } from "./widgets/legend";
+import { Timeline } from "./widgets/timeline";
+import { ViewControls } from "./widgets/view-controls";
 
 const NOTHING: SelectPayload = { type: "None" };
 
@@ -40,7 +40,6 @@ export default function RenderPage() {
   const { owner, repo } = useParams({ from: "/city/$owner/$repo" });
   const repoUrl = `https://github.com/${owner}/${repo}`;
 
-  // Selection and camera from the link wait for the city.
   const [initial] = useState(() => decodeView(window.location.hash));
   const [mode, setMode] = useState(initial.mode);
   const [filter, setFilter] = useState(initial.filter);
@@ -78,14 +77,12 @@ export default function RenderPage() {
     city: () => {
       if (!city.current) return;
       setSummary(city.current.summary);
-      // Ids may not survive a reload; colour, filter and timeline do.
       setAnchor(null);
       setPath(null);
-      // Once only: the refinement pass sends a second city, which must not yank the camera back.
+
       if (!restored.current) {
         restored.current = true;
         if (initial.selected) focus(initial.selected);
-        // Queued after the focus, which moves the camera itself.
         if (initial.camera) set_camera_state(initial.camera);
       }
     },
@@ -151,8 +148,8 @@ export default function RenderPage() {
         <>
           <DistrictLabels districts={summary.districts} />
           <div className="pointer-events-none absolute bottom-2.5 left-3 z-30 font-mono text-[11px] text-white/80">
-            drag: orbit · scroll: zoom · WASD: pan · click: select · Esc: clear
-            · R: reset
+            drag: orbit; scroll: zoom; WASD: pan; click: select; Esc: clear; R:
+            reset
           </div>
           <SearchBar
             summary={summary}

@@ -1,4 +1,3 @@
-import { scalesFor, type Scales } from "./appearance";
 import type {
   BuildingInfo,
   CitySummary,
@@ -6,7 +5,8 @@ import type {
   HoverInfo,
   PathInfo,
   SelectPayload,
-} from "./types";
+} from "../types";
+import { scalesFor, type Scales } from "./appearance";
 
 export interface RawCity {
   districts: RawDistrict[];
@@ -172,13 +172,13 @@ export function hoverInfo(city: City, t: EngineTarget): HoverInfo | null {
     return {
       kind: "building",
       name: s.data.name,
-      detail: `${s.data.kind} · ${s.data.num_fields} fields · ${s.data.num_methods} functions`,
+      detail: `${s.data.kind}, ${s.data.num_fields} fields, ${s.data.num_methods} functions`,
     };
   if (s.type === "District")
     return {
       kind: "district",
       name: s.data.name,
-      detail: `${s.data.building_count} entities · ${s.data.typology}`,
+      detail: `${s.data.building_count} entities, ${s.data.typology}`,
     };
   return null;
 }

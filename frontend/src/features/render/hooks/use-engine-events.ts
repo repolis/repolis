@@ -1,6 +1,6 @@
 import { useEffect, useEffectEvent } from "react";
 
-import type { EngineTarget } from "./city";
+import type { EngineTarget } from "../utils/city";
 
 export function useEngineEvents(handlers: {
   hover: (target: EngineTarget) => void;

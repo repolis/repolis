@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import type { CitySummary } from "./types";
+import type { CitySummary } from "../types";
 
 export function Timeline({
   summary,

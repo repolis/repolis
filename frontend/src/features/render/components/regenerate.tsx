@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 /** Mirrors the Refresh* constants in backend/internal/models/api.go. */
-export const REFRESH_LEVELS = [
+const REFRESH_LEVELS = [
   {
     level: "city",
     label: "Re-analyse",
@@ -53,7 +53,7 @@ export function Regenerate({
         title="Regenerate this city"
         className="rounded border border-gray-700 bg-gray-900/95 px-2 py-1.5 text-gray-300 hover:border-gray-500 disabled:opacity-50"
       >
-        {busy ? "Working…" : "Regenerate"}
+        {busy ? "Working..." : "Regenerate"}
       </button>
 
       {open && (

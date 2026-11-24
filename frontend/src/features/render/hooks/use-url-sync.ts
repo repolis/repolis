@@ -2,10 +2,9 @@ import { useEffect } from "react";
 
 import { camera_state } from "@/wasm/engine";
 
-import { encodeView } from "./url-state";
-import type { FilterState } from "./view-controls";
+import type { FilterState } from "../types";
+import { encodeView } from "../utils/url-state";
 
-// replaceState and a polled camera, so orbiting does not flood history.
 export function useUrlSync(
   active: boolean,
   mode: string,

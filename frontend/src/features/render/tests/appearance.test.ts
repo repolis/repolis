@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { applyAge, matches, ramp, shortestPath } from "./appearance";
-import type { BuildingInfo } from "./types";
-import { EMPTY_FILTER } from "./view-controls";
+import type { BuildingInfo } from "../types";
+import {
+  applyAge,
+  EMPTY_FILTER,
+  matches,
+  ramp,
+  shortestPath,
+} from "../utils/appearance";
 
 const widget = {
   name: "Widget",

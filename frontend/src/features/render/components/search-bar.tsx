@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 
+import type { CitySummary, IndexEntry } from "../types";
 import { Regenerate } from "./regenerate";
-import type { CitySummary, IndexEntry } from "./types";
 
 export function SearchBar({
   summary,
@@ -53,7 +53,7 @@ export function SearchBar({
             }
             if (e.key === "Escape") setOpen(false);
           }}
-          placeholder="Search symbols…"
+          placeholder="Search symbols..."
           className="flex-1 rounded border border-gray-700 bg-gray-900/95 px-2 py-1.5 text-gray-200 outline-none placeholder:text-gray-500 focus:border-gray-500"
         />
         <button

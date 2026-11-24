@@ -1,4 +1,4 @@
-import type { PathInfo } from "./types";
+import type { PathInfo } from "../types";
 
 export function PathBanner({
   anchorName,

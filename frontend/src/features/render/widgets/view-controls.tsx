@@ -1,33 +1,7 @@
 import { useState } from "react";
 
-import { COLOR_MODES } from "./appearance";
-import type { CitySummary } from "./types";
-
-export interface FilterState {
-  text: string;
-  language: string;
-  district: string;
-  kind: string;
-  min_methods: number;
-  min_complexity: number;
-  min_churn_pct: number;
-  only_no_callers: boolean;
-  only_hubs: boolean;
-  only_cycles: boolean;
-}
-
-export const EMPTY_FILTER: FilterState = {
-  text: "",
-  language: "",
-  district: "",
-  kind: "",
-  min_methods: 0,
-  min_complexity: 0,
-  min_churn_pct: 0,
-  only_no_callers: false,
-  only_hubs: false,
-  only_cycles: false,
-};
+import type { CitySummary, FilterState } from "../types";
+import { COLOR_MODES, EMPTY_FILTER } from "../utils/appearance";
 
 function activeCount(f: FilterState): number {
   return (Object.keys(EMPTY_FILTER) as (keyof FilterState)[]).filter(
@@ -183,7 +157,7 @@ export function ViewControls({
               className="flex-1"
             />
             <span className="w-10 text-right text-gray-400">
-              {filter.min_complexity > 0 ? `≥${filter.min_complexity}` : "any"}
+              {filter.min_complexity > 0 ? `>=${filter.min_complexity}` : "any"}
             </span>
           </div>
 
@@ -215,7 +189,7 @@ export function ViewControls({
               className="flex-1"
             />
             <span className="w-10 text-right text-gray-400">
-              {filter.min_methods > 0 ? `≥${filter.min_methods}` : "any"}
+              {filter.min_methods > 0 ? `>=${filter.min_methods}` : "any"}
             </span>
           </div>
 

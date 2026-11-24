@@ -1,4 +1,5 @@
-import { EMPTY_FILTER, type FilterState } from "./view-controls";
+import type { FilterState } from "../types";
+import { EMPTY_FILTER } from "./appearance";
 
 // In the fragment so it never reaches the server.
 export interface ViewURL {

@@ -101,3 +101,16 @@ export type SelectPayload =
   | { type: "Building"; data: BuildingInfo }
   | { type: "District"; data: DistrictInfo }
   | { type: "None" };
+
+export interface FilterState {
+  text: string;
+  language: string;
+  district: string;
+  kind: string;
+  min_methods: number;
+  min_complexity: number;
+  min_churn_pct: number;
+  only_no_callers: boolean;
+  only_hubs: boolean;
+  only_cycles: boolean;
+}
