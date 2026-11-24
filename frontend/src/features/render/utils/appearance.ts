@@ -71,6 +71,7 @@ const groundRgb = (typology: string): Rgb => {
 export interface Scales {
   complexity: number;
   fanIn: number;
+  born: number;
 }
 
 export function scalesFor(buildings: BuildingInfo[]): Scales {
@@ -85,6 +86,7 @@ export function scalesFor(buildings: BuildingInfo[]): Scales {
   return {
     complexity: p95((b) => b.max_complexity),
     fanIn: p95((b) => b.fan_in),
+    born: Math.max(1, ...buildings.map((b) => b.born_day)),
   };
 }
 
@@ -143,6 +145,14 @@ export const COLOR_MODES: ColorMode[] = [
     id: "language",
     label: "Language",
     color: (b) => LANGUAGE_RGB[b.language] ?? GREY,
+  },
+  {
+    id: "born",
+    label: "Birth",
+    help: "Colour = when the file first appeared. Pale is original code, red was added recently, grey has no git history.",
+    ends: ["original", "added recently"],
+    color: (b, s) =>
+      b.commit_churn === 0 ? GREY : ramp(b.born_day / Math.max(s.born, 1)),
   },
 ];
 

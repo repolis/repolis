@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { BuildingInfo } from "../types";
 import {
   applyAge,
+  colorMode,
   EMPTY_FILTER,
   matches,
   ramp,
@@ -67,6 +68,21 @@ describe("colour", () => {
     expect(applyAge([0.8, 0.2, 0.2], 10)).toEqual([0.8, 0.2, 0.2]);
     const old = applyAge([0.8, 0.2, 0.2], 2000);
     expect(old[0] - old[1]).toBeLessThan(0.6);
+  });
+});
+
+describe("birth mode", () => {
+  const born = colorMode("born");
+  const scales = { complexity: 1, fanIn: 1, born: 300 };
+
+  it("puts the newest file at the hot end", () => {
+    const b = { ...widget, commit_churn: 2, born_day: 300 };
+    expect(born.color(b, scales)).toEqual(ramp(1));
+  });
+
+  it("does not paint files without history as the oldest", () => {
+    const b = { ...widget, commit_churn: 0, born_day: 0 };
+    expect(born.color(b, scales)).not.toEqual(ramp(0));
   });
 });
 
