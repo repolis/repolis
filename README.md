@@ -28,8 +28,8 @@ npm install
 npm run dev                   # http://localhost:5173
 ```
 
-Then open `http://localhost:5173/city/<owner>/<repo>`, for example
-`/city/tsoding/nothing`.
+Then open `http://localhost:5173/city/<host>/<owner>/<repo>`, for example
+`/city/github.com/tsoding/nothing`.
 
 The LLM is optional. Without one configured the backend still serves a complete
 city; districts are named after their dominant directory instead of by a model.

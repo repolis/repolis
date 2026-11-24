@@ -37,8 +37,8 @@ import { ViewControls } from "./widgets/view-controls";
 const NOTHING: SelectPayload = { type: "None" };
 
 export default function RenderPage() {
-  const { owner, repo } = useParams({ from: "/city/$owner/$repo" });
-  const repoUrl = `https://github.com/${owner}/${repo}`;
+  const { host, owner, repo } = useParams({ from: "/city/$host/$owner/$repo" });
+  const repoUrl = `https://${host}/${owner}/${repo}`;
 
   const [initial] = useState(() => decodeView(window.location.hash));
   const [mode, setMode] = useState(initial.mode);

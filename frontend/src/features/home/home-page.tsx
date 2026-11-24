@@ -1,7 +1,7 @@
 import { useActionState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 
-const GITHUB_REPO = /^https?:\/\/(www\.)?github\.com\/([^/]+)\/([^/]+)/;
+import { parseRepoUrl } from "./utils/repo-url";
 
 export default function HomePage() {
   const navigate = useNavigate();
@@ -9,12 +9,9 @@ export default function HomePage() {
   const [state, submit] = useActionState(
     (_: unknown, form: FormData) => {
       const repoUrl = String(form.get("repoUrl") ?? "").trim();
-      const match = GITHUB_REPO.exec(repoUrl);
-      if (!match) return { error: "Must be a valid GitHub URL", repoUrl };
-      navigate({
-        to: "/city/$owner/$repo",
-        params: { owner: match[2], repo: match[3] },
-      });
+      const ref = parseRepoUrl(repoUrl);
+      if ("error" in ref) return { error: ref.error, repoUrl };
+      navigate({ to: "/city/$host/$owner/$repo", params: ref });
       return { error: null, repoUrl };
     },
     { error: null as string | null, repoUrl: "" },
@@ -34,7 +31,7 @@ export default function HomePage() {
               type="url"
               required
               defaultValue={state.repoUrl}
-              placeholder="https://github.com/username/repo"
+              placeholder="https://github.com/owner/repo"
               className="flex-1 rounded-md border-2 border-gray-200 px-4 py-2 text-white transition-colors outline-none focus:border-blue-500"
             />
             <button

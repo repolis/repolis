@@ -10,43 +10,43 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as CityOwnerRepoRouteImport } from './routes/city.$owner.$repo'
+import { Route as CityHostOwnerRepoRouteImport } from './routes/city.$host.$owner.$repo'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const CityOwnerRepoRoute = CityOwnerRepoRouteImport.update({
-  id: '/city/$owner/$repo',
-  path: '/city/$owner/$repo',
+const CityHostOwnerRepoRoute = CityHostOwnerRepoRouteImport.update({
+  id: '/city/$host/$owner/$repo',
+  path: '/city/$host/$owner/$repo',
   getParentRoute: () => rootRouteImport,
 } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/city/$owner/$repo': typeof CityOwnerRepoRoute
+  '/city/$host/$owner/$repo': typeof CityHostOwnerRepoRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/city/$owner/$repo': typeof CityOwnerRepoRoute
+  '/city/$host/$owner/$repo': typeof CityHostOwnerRepoRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/city/$owner/$repo': typeof CityOwnerRepoRoute
+  '/city/$host/$owner/$repo': typeof CityHostOwnerRepoRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/city/$owner/$repo'
+  fullPaths: '/' | '/city/$host/$owner/$repo'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/city/$owner/$repo'
-  id: '__root__' | '/' | '/city/$owner/$repo'
+  to: '/' | '/city/$host/$owner/$repo'
+  id: '__root__' | '/' | '/city/$host/$owner/$repo'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  CityOwnerRepoRoute: typeof CityOwnerRepoRoute
+  CityHostOwnerRepoRoute: typeof CityHostOwnerRepoRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -58,11 +58,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/city/$owner/$repo': {
-      id: '/city/$owner/$repo'
-      path: '/city/$owner/$repo'
-      fullPath: '/city/$owner/$repo'
-      preLoaderRoute: typeof CityOwnerRepoRouteImport
+    '/city/$host/$owner/$repo': {
+      id: '/city/$host/$owner/$repo'
+      path: '/city/$host/$owner/$repo'
+      fullPath: '/city/$host/$owner/$repo'
+      preLoaderRoute: typeof CityHostOwnerRepoRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
@@ -70,7 +70,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  CityOwnerRepoRoute: CityOwnerRepoRoute,
+  CityHostOwnerRepoRoute: CityHostOwnerRepoRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
