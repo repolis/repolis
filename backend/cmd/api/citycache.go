@@ -32,17 +32,34 @@ func readCachedCity(key string) *models.CityMap {
 	return &city
 }
 
-// Atomic: a plain WriteFile can be read half-written by a concurrent request.
 func writeCachedCity(key string, city *models.CityMap) {
-	b, err := json.Marshal(city)
-	if err != nil {
-		return
+	if b, err := json.Marshal(city); err == nil {
+		writeAtomic(cachePath(key), b)
 	}
-	tmp := cachePath(key) + ".tmp"
+}
+
+func lastCommitPath(repoURL string) string {
+	return filepath.Join("data", "cities", fmt.Sprintf("%x", sha256.Sum256([]byte(repoURL)))+".last")
+}
+
+func rememberCommit(repoURL, commit string) {
+	writeAtomic(lastCommitPath(repoURL), []byte(commit))
+}
+
+func lastCachedCommit(repoURL string) (string, bool) {
+	b, err := os.ReadFile(lastCommitPath(repoURL))
+	if err != nil || len(b) == 0 {
+		return "", false
+	}
+	return string(b), true
+}
+
+func writeAtomic(path string, b []byte) {
+	tmp := path + ".tmp"
 	if os.WriteFile(tmp, b, 0o644) != nil {
 		return
 	}
-	if err := os.Rename(tmp, cachePath(key)); err != nil {
+	if err := os.Rename(tmp, path); err != nil {
 		_ = os.Remove(tmp)
 	}
 }

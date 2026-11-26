@@ -40,7 +40,7 @@ func (s *server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 	userID, _ := r.Context().Value(userIDKey).(string)
 	logger.Log(logger.InfoLevel, "Analyze request from %s: %s", userID, repoURL)
 
-	commit, err := git.GetRemoteCommitHash(repoURL)
+	commit, err := resolveCommit(repoURL)
 	if err != nil {
 		logger.Log(logger.ErrorLevel, "ls-remote failed for %s: %v", repoURL, err)
 		sendError(w, "Could not reach that repository. Is it public?", http.StatusBadRequest)
@@ -52,6 +52,7 @@ func (s *server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 
 	if level == models.RefreshNone {
 		if city := readCachedCity(key); city != nil {
+			rememberCommit(repoURL, commit)
 			logger.Log(logger.InfoLevel, "Serving cached city for %s@%s", repoURL, commit[:8])
 			writeJSON(w, http.StatusOK, models.AnalyzeResponse{Status: "success", CityData: city})
 			return
@@ -129,6 +130,7 @@ func (s *server) runAnalysis(j *jobs.Job, key, level string) {
 	// Navigable on its own and ready in a fraction of the LLM pass's time.
 	j.Emit(jobs.Event{Type: jobs.EventCity, City: draft, Refined: false})
 	writeCachedCity(key, draft)
+	rememberCommit(j.RepoURL, j.Commit)
 	logger.Log(logger.InfoLevel, "Draft city published: %d districts, %d buildings, %d edges",
 		len(draft.Districts), draft.Stats.TotalBuildings, len(draft.Dependencies))
 
@@ -225,7 +227,7 @@ func (s *server) handleExplain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	commit, err := git.GetRemoteCommitHash(repoURL)
+	commit, err := resolveCommit(repoURL)
 	if err != nil {
 		sendError(w, "Could not reach that repository", http.StatusBadRequest)
 		return
@@ -315,4 +317,16 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func sendError(w http.ResponseWriter, message string, status int) {
 	writeJSON(w, status, models.AnalyzeResponse{Status: "error", Error: message})
+}
+
+func resolveCommit(repoURL string) (string, error) {
+	commit, err := git.GetRemoteCommitHash(repoURL)
+	if err == nil {
+		return commit, nil
+	}
+	if last, ok := lastCachedCommit(repoURL); ok {
+		logger.Log(logger.WarnLevel, "ls-remote failed for %s (%v); using last cached commit %s", repoURL, err, last[:min(8, len(last))])
+		return last, nil
+	}
+	return "", err
 }
