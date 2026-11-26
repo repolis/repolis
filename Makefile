@@ -1,14 +1,6 @@
-.PHONY: setup dev dev-backend dev-frontend wasm check check-backend check-engine check-frontend
+.PHONY: dev dev-backend dev-frontend wasm check check-backend check-engine check-frontend
 
 AIR = github.com/air-verse/air@v1.67.4
-
-setup:
-	@command -v go >/dev/null 2>&1 || { echo >&2 "Go is not installed."; exit 1; }
-	@command -v node >/dev/null 2>&1 || { echo >&2 "Node is not installed."; exit 1; }
-	@command -v cargo >/dev/null 2>&1 || { echo >&2 "Cargo is not installed."; exit 1; }
-	@command -v wasm-pack >/dev/null 2>&1 || { echo >&2 "wasm-pack is not installed."; exit 1; }
-	cd backend && go mod download
-	cd frontend && npm ci
 
 dev-backend:
 	cd backend && go run $(AIR)
