@@ -54,10 +54,10 @@ export interface City {
   summary: CitySummary;
   buildings: Map<string, BuildingInfo>;
   districts: Map<string, DistrictInfo>;
-  /** City order, matching the engine's arrays. */
   list: BuildingInfo[];
   indexOf: Map<string, number>;
   adj: Map<string, Set<string>>;
+  out: Map<string, Set<string>>;
   scales: Scales;
 }
 
@@ -72,18 +72,20 @@ export function buildCity(raw: RawCity): City {
   const calls = new Map<string, string[]>();
   const calledBy = new Map<string, string[]>();
   const adj = new Map<string, Set<string>>();
+  const out = new Map<string, Set<string>>();
   const push = (m: Map<string, string[]>, k: string, v: string) =>
     m.has(k) ? m.get(k)!.push(v) : m.set(k, [v]);
-  const link = (a: string, b: string) =>
-    adj.has(a) ? adj.get(a)!.add(b) : adj.set(a, new Set([b]));
+  const link = (m: Map<string, Set<string>>, a: string, b: string) =>
+    m.has(a) ? m.get(a)!.add(b) : m.set(a, new Set([b]));
   for (const e of raw.dependencies ?? []) {
     const t = name.get(e.target);
     const s = name.get(e.source);
     if (t !== undefined) push(calls, e.source, t);
     if (s !== undefined) push(calledBy, e.target, s);
     if (t !== undefined && s !== undefined && e.source !== e.target) {
-      link(e.source, e.target);
-      link(e.target, e.source);
+      link(adj, e.source, e.target);
+      link(adj, e.target, e.source);
+      link(out, e.source, e.target);
     }
   }
 
@@ -154,6 +156,7 @@ export function buildCity(raw: RawCity): City {
     list: all,
     indexOf: new Map(all.map((b, i) => [b.id, i])),
     adj,
+    out,
     scales: scalesFor(all),
   };
 }

@@ -19,11 +19,20 @@ pub struct PlacedBuilding {
     pub size: Vec3,
 }
 
+#[derive(Default, Clone, Copy, PartialEq, Debug)]
+pub enum Direction {
+    #[default]
+    Forward,
+    Backward,
+    Both,
+}
+
 #[derive(Default)]
 pub struct Link {
     pub points: Vec<Vec3>,
     pub width: f32,
     pub in_cycle: bool,
+    pub direction: Direction,
     /// Building indices, in city order.
     pub source: usize,
     pub target: usize,
@@ -257,7 +266,7 @@ fn build_links(city: &CityMap, buildings: &[PlacedBuilding]) -> Vec<Link> {
         buildings.iter().map(|b| (ids[b.order], b)).collect();
 
     // Collapse reciprocal edges; A->B and B->A would overlap exactly.
-    let mut merged: HashMap<(usize, usize), (u32, bool)> = HashMap::new();
+    let mut merged: HashMap<(usize, usize), (u32, bool, bool, bool)> = HashMap::new();
     for e in &city.dependencies {
         let (Some(a), Some(b)) = (placed.get(e.source.as_str()), placed.get(e.target.as_str()))
         else {
@@ -271,16 +280,26 @@ fn build_links(city: &CityMap, buildings: &[PlacedBuilding]) -> Vec<Link> {
             .or_default();
         slot.0 += e.weight.max(1);
         slot.1 |= e.in_cycle;
+        if a.order < b.order {
+            slot.2 = true;
+        } else {
+            slot.3 = true;
+        }
     }
 
     let by_order: HashMap<usize, &PlacedBuilding> =
         buildings.iter().map(|b| (b.order, b)).collect();
     let mut links: Vec<Link> = merged
         .into_iter()
-        .map(|((a, b), (weight, in_cycle))| Link {
+        .map(|((a, b), (weight, in_cycle, forward, backward))| Link {
             points: arc(by_order[&a], by_order[&b]),
             width: (0.45 + (weight as f32).ln_1p() * 0.5).min(3.0),
             in_cycle,
+            direction: match (forward, backward) {
+                (true, true) => Direction::Both,
+                (false, true) => Direction::Backward,
+                _ => Direction::Forward,
+            },
             source: a,
             target: b,
         })
@@ -388,5 +407,30 @@ mod tests {
     fn handles_degenerate_input() {
         assert!(compute_layout(&CityMap::default()).buildings.is_empty());
         assert_eq!(compute_layout(&city(&[("solo", 1)])).buildings.len(), 1);
+    }
+
+    #[test]
+    fn links_keep_their_direction() {
+        let mut c = city(&[("a", 3)]);
+        let edge = |s: usize, t: usize| crate::data::DependencyEdge {
+            source: format!("a/f{s}.c::T{s}"),
+            target: format!("a/f{t}.c::T{t}"),
+            weight: 1,
+            ..Default::default()
+        };
+        c.dependencies = vec![edge(0, 1), edge(2, 0), edge(1, 2), edge(2, 1)];
+        let dirs: Vec<_> = compute_layout(&c)
+            .links
+            .iter()
+            .map(|l| (l.source, l.target, l.direction))
+            .collect();
+        assert_eq!(
+            dirs,
+            [
+                (0, 1, Direction::Forward),
+                (0, 2, Direction::Backward),
+                (1, 2, Direction::Both),
+            ]
+        );
     }
 }

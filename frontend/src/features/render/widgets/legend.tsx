@@ -46,6 +46,9 @@ export function Legend({
             <div className="text-gray-300">Height = functions</div>
             <div className="text-gray-300">Footprint = fields</div>
             <div className="text-gray-300">Pale = not edited recently</div>
+            <div className="text-gray-300">
+              Arcs darken and narrow toward the code being called
+            </div>
             <div className="flex items-center gap-1.5 text-gray-300">
               <span className="inline-block h-0.5 w-3.5 rounded-sm bg-red-500" />
               Red arc = dependency cycle

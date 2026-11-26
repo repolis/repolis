@@ -40,7 +40,9 @@ struct CityElement;
 struct LinkLayer;
 
 #[derive(Component)]
-struct HighlightLinkLayer;
+struct HighlightLinkLayer {
+    cycles: bool,
+}
 
 #[derive(Resource, Default)]
 struct CityIndex {

@@ -58,7 +58,7 @@ pub(crate) fn apply_appearance(
     show: Res<ShowLinks>,
     mut buildings: Query<(&Pickable, &mut Handle<FacadeMaterial>)>,
     grounds: Query<(&Pickable, &Handle<StandardMaterial>)>,
-    highlight_q: Query<&Handle<Mesh>, With<HighlightLinkLayer>>,
+    highlight_q: Query<(&HighlightLinkLayer, &Handle<Mesh>)>,
     mut link_layers: Query<&mut Visibility, With<LinkLayer>>,
 ) {
     if show.is_changed() {
@@ -120,14 +120,18 @@ pub(crate) fn apply_appearance(
         .iter()
         .map(|&[a, b]| (a.min(b) as usize, a.max(b) as usize))
         .collect();
-    let chosen: Vec<&Link> = index
-        .links
-        .iter()
-        .filter(|l| pairs.contains(&(l.source, l.target)))
-        .collect();
-    if let Ok(mesh_handle) = highlight_q.get_single() {
+    for (layer, mesh_handle) in &highlight_q {
+        let chosen: Vec<&Link> = index
+            .links
+            .iter()
+            .filter(|l| l.in_cycle == layer.cycles && pairs.contains(&(l.source, l.target)))
+            .collect();
         if let Some(mesh) = meshes.get_mut(mesh_handle) {
-            *mesh = build_link_mesh(&chosen, 0.0);
+            *mesh = if layer.cycles {
+                build_link_mesh(&chosen, 0.6, &CYCLE_LINKS)
+            } else {
+                build_link_mesh(&chosen, 0.0, &HIGHLIGHT_LINKS)
+            };
         }
     }
 }

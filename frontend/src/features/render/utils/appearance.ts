@@ -277,6 +277,39 @@ export function shortestPath(
   return [];
 }
 
+export function loopsOf(
+  out: Map<string, Set<string>>,
+  members: string[],
+): string[][] {
+  const inside = new Set(members);
+  const loops = new Map<string, string[]>();
+  for (const start of members) {
+    const prev = new Map<string, string>();
+    const queue = [start];
+    let last: string | undefined;
+    for (let head = 0; head < queue.length && !last; head++) {
+      for (const next of out.get(queue[head]) ?? []) {
+        if (next === start) {
+          last = queue[head];
+          break;
+        }
+        if (inside.has(next) && !prev.has(next)) {
+          prev.set(next, queue[head]);
+          queue.push(next);
+        }
+      }
+    }
+    if (!last) continue;
+    const loop = [last];
+    while (loop[0] !== start) loop.unshift(prev.get(loop[0]) ?? start);
+    // Rotated to its smallest id so the same loop found from two members dedupes.
+    const at = loop.indexOf([...loop].sort()[0]);
+    const key = [...loop.slice(at), ...loop.slice(0, at)];
+    loops.set(key.join("\n"), key);
+  }
+  return [...loops.values()].sort((a, b) => a.length - b.length);
+}
+
 const NORMAL = 0;
 const DIM = 1;
 const BRIGHT = 2;
@@ -288,6 +321,22 @@ export interface View {
   timeline: number | null;
   selectedId: string | null;
   path: string[];
+}
+
+function cyclePairs(city: City, states: Uint8Array): string[][] {
+  const visible = (id: string) => states[city.indexOf.get(id) ?? 0] !== FADED;
+  return city.list.flatMap((b) =>
+    b.cycle_id === 0 || !visible(b.id)
+      ? []
+      : [...(city.adj.get(b.id) ?? [])]
+          .filter(
+            (n) =>
+              n > b.id &&
+              visible(n) &&
+              city.buildings.get(n)?.cycle_id === b.cycle_id,
+          )
+          .map((n) => [b.id, n]),
+  );
 }
 
 export function computeAppearance(city: City, v: View) {
@@ -322,7 +371,9 @@ export function computeAppearance(city: City, v: View) {
       ? v.path.slice(1).map((id, i) => [v.path[i], id])
       : v.selectedId
         ? [...related].map((id) => [v.selectedId!, id])
-        : [];
+        : v.filter.only_cycles
+          ? cyclePairs(city, states)
+          : [];
   const links = new Uint32Array(
     pairs.flat().map((id) => city.indexOf.get(id) ?? 0),
   );

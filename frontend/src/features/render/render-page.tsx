@@ -17,7 +17,7 @@ import { useCityLoader } from "./hooks/use-city-loader";
 import { useEngineEvents } from "./hooks/use-engine-events";
 import { useUrlSync } from "./hooks/use-url-sync";
 import type { CitySummary, HoverInfo, PathInfo, SelectPayload } from "./types";
-import { computeAppearance, shortestPath } from "./utils/appearance";
+import { computeAppearance, loopsOf, shortestPath } from "./utils/appearance";
 import {
   buildCity,
   hoverInfo,
@@ -28,6 +28,7 @@ import {
   type RawCity,
 } from "./utils/city";
 import { decodeView } from "./utils/url-state";
+import { CycleList } from "./widgets/cycle-list";
 import { DistrictLabels } from "./widgets/district-labels";
 import { InspectorPanel } from "./widgets/inspector-panel";
 import { Legend } from "./widgets/legend";
@@ -35,6 +36,12 @@ import { Timeline } from "./widgets/timeline";
 import { ViewControls } from "./widgets/view-controls";
 
 const NOTHING: SelectPayload = { type: "None" };
+
+interface Cycle {
+  id: number;
+  loops: string[][];
+  loop: string[];
+}
 
 export default function RenderPage() {
   const { host, owner, repo } = useParams({ from: "/city/$host/$owner/$repo" });
@@ -45,6 +52,7 @@ export default function RenderPage() {
   const [filter, setFilter] = useState(initial.filter);
   const [timelineDay, setTimelineDay] = useState(initial.timeline);
   const [links, setLinks] = useState(false);
+  const [cycle, setCycle] = useState<Cycle | null>(null);
 
   const [summary, setSummary] = useState<CitySummary | null>(null);
   const [hover, setHover] = useState<HoverInfo | null>(null);
@@ -90,6 +98,7 @@ export default function RenderPage() {
 
   const selectedId = selection.type === "Building" ? selection.data.id : null;
   useUrlSync(summary !== null, mode, filter, selectedId, timelineDay);
+  const focused = filter.only_cycles ? cycle : null;
 
   useEffect(() => {
     if (!summary || !city.current) return;
@@ -98,10 +107,10 @@ export default function RenderPage() {
       filter,
       timeline: timelineDay,
       selectedId,
-      path: path?.ids ?? [],
+      path: path?.ids ?? (focused ? [...focused.loop, focused.loop[0]] : []),
     });
     set_appearance(a.colors, a.states, a.grounds, a.links);
-  }, [summary, mode, filter, timelineDay, selectedId, path]);
+  }, [summary, mode, filter, timelineDay, selectedId, path, focused]);
 
   function pick(nameOrId: string) {
     const id = city.current && resolveSymbol(city.current, nameOrId);
@@ -133,7 +142,20 @@ export default function RenderPage() {
   function reset() {
     reset_camera();
     setSelection(NOTHING);
+    setCycle(null);
     clearPath();
+  }
+
+  function pickCycle(id: number) {
+    setSelection(NOTHING);
+    clearPath();
+    const members = summary?.cycles.find((c) => c.id === id)?.members ?? [];
+    const loops = city.current ? loopsOf(city.current.out, members) : [];
+    setCycle(
+      id === cycle?.id || loops.length === 0
+        ? null
+        : { id, loops, loop: loops[0] },
+    );
   }
 
   return (
@@ -174,6 +196,21 @@ export default function RenderPage() {
             }}
           />
           <Legend summary={summary} mode={mode} />
+          {filter.only_cycles && (
+            <CycleList
+              cycles={summary.cycles}
+              active={focused?.id ?? null}
+              loops={focused?.loops ?? []}
+              loop={focused?.loop ?? null}
+              nameOf={(id) => city.current?.buildings.get(id)?.name ?? id}
+              onCycle={pickCycle}
+              onLoop={(loop) => {
+                setSelection(NOTHING);
+                clearPath();
+                setCycle(cycle && { ...cycle, loop });
+              }}
+            />
+          )}
           <InspectorPanel
             selection={selection}
             repoUrl={repoUrl}

@@ -133,13 +133,9 @@ pub(crate) fn spawn_city(
     let all: Vec<&Link> = links.iter().collect();
     commands.spawn((
         PbrBundle {
-            mesh: meshes.add(build_link_mesh(&all, 0.0)),
+            mesh: meshes.add(build_link_mesh(&all, 0.0, &ALL_LINKS)),
             visibility: Visibility::Hidden,
-            material: link_material(
-                materials,
-                Color::srgba(0.45, 0.78, 0.95, 0.30),
-                LinearRgba::new(0.10, 0.35, 0.55, 1.0),
-            ),
+            material: link_material(materials, 0.30),
             ..default()
         },
         LinkLayer,
@@ -150,32 +146,26 @@ pub(crate) fn spawn_city(
     let cycle_links: Vec<&Link> = links.iter().filter(|l| l.in_cycle).collect();
     commands.spawn((
         PbrBundle {
-            mesh: meshes.add(build_link_mesh(&cycle_links, 0.6)),
+            mesh: meshes.add(build_link_mesh(&cycle_links, 0.6, &CYCLE_LINKS)),
             visibility: Visibility::Hidden,
-            material: link_material(
-                materials,
-                Color::srgb(1.0, 0.30, 0.34),
-                LinearRgba::new(3.4, 0.35, 0.45, 1.0),
-            ),
+            material: link_material(materials, 1.0),
             ..default()
         },
         LinkLayer,
         CityElement,
     ));
 
-    commands.spawn((
-        PbrBundle {
-            mesh: meshes.add(build_link_mesh(&[], 0.0)),
-            material: link_material(
-                materials,
-                Color::srgb(1.0, 0.82, 0.25),
-                LinearRgba::new(3.0, 2.0, 0.3, 1.0),
-            ),
-            ..default()
-        },
-        HighlightLinkLayer,
-        CityElement,
-    ));
+    for cycles in [false, true] {
+        commands.spawn((
+            PbrBundle {
+                mesh: meshes.add(build_link_mesh(&[], 0.0, &HIGHLIGHT_LINKS)),
+                material: link_material(materials, 1.0),
+                ..default()
+            },
+            HighlightLinkLayer { cycles },
+            CityElement,
+        ));
+    }
 
     index.links = links;
 }

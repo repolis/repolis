@@ -4,12 +4,15 @@ import type { BuildingInfo } from "../types";
 import {
   applyAge,
   colorMode,
+  computeAppearance,
   EMPTY_FILTER,
+  loopsOf,
   matches,
   ramp,
   shortestPath,
   smell,
 } from "../utils/appearance";
+import type { City } from "../utils/city";
 
 const widget = {
   name: "Widget",
@@ -138,6 +141,75 @@ describe("smells", () => {
   it("raises thresholds to the repo's p95", () => {
     const b = { ...plain, max_complexity: 30 };
     expect(smell(b, { ...SCALES, complexity: 40 })).toBeNull();
+  });
+});
+
+describe("cycle filter", () => {
+  it("highlights only edges inside a cycle", () => {
+    const list = [
+      { ...widget, id: "a", cycle_id: 1 },
+      { ...widget, id: "b", cycle_id: 1 },
+      { ...widget, id: "c", cycle_id: 0 },
+    ];
+    const city = {
+      list,
+      indexOf: new Map(list.map((b, i) => [b.id, i])),
+      buildings: new Map(list.map((b) => [b.id, b])),
+      adj: graph([
+        ["a", "b"],
+        ["a", "c"],
+      ]),
+      scales: SCALES,
+      summary: { districts: [] },
+    } as unknown as City;
+    const { links } = computeAppearance(city, {
+      mode: "typology",
+      filter: { ...EMPTY_FILTER, only_cycles: true },
+      timeline: null,
+      selectedId: null,
+      path: [],
+    });
+    expect([...links]).toEqual([0, 1]);
+  });
+});
+
+describe("loops", () => {
+  const out = (pairs: [string, string][]) => {
+    const m = new Map<string, Set<string>>();
+    for (const [a, b] of pairs) m.set(a, (m.get(a) ?? new Set()).add(b));
+    return m;
+  };
+
+  it("reads a cycle in call order", () => {
+    const g = out([
+      ["b", "c"],
+      ["c", "a"],
+      ["a", "b"],
+    ]);
+    expect(loopsOf(g, ["c", "a", "b"])).toEqual([["a", "b", "c"]]);
+  });
+
+  it("splits a tangle into its shortest loops", () => {
+    const g = out([
+      ["a", "b"],
+      ["b", "a"],
+      ["b", "c"],
+      ["c", "b"],
+    ]);
+    expect(loopsOf(g, ["a", "b", "c"])).toEqual([
+      ["a", "b"],
+      ["b", "c"],
+    ]);
+  });
+
+  it("ignores edges that leave the cycle", () => {
+    const g = out([
+      ["a", "b"],
+      ["b", "x"],
+      ["x", "a"],
+      ["b", "a"],
+    ]);
+    expect(loopsOf(g, ["a", "b"])).toEqual([["a", "b"]]);
   });
 });
 

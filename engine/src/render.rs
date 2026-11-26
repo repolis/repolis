@@ -4,7 +4,7 @@ use bevy::render::mesh::{Indices, PrimitiveTopology};
 use bevy::render::render_asset::RenderAssetUsages;
 use bevy::render::render_resource::{AsBindGroup, ShaderRef};
 
-use crate::layout::Link;
+use crate::layout::{Direction, Link};
 
 pub const FACADE_SHADER: Handle<Shader> =
     Handle::weak_from_u128(0x5e1f_a3ad_e000_4b1d_9c3a_7f02_b11d_0001);
@@ -108,15 +108,21 @@ pub fn make_building_materials(
     }
 }
 
-/// Unlit and translucent so arcs read as overlays, not structure.
+pub struct LinkColors(pub Color, pub Color);
+
+pub const ALL_LINKS: LinkColors =
+    LinkColors(Color::srgb(0.45, 0.78, 0.95), Color::srgb(0.12, 0.30, 0.80));
+pub const CYCLE_LINKS: LinkColors =
+    LinkColors(Color::srgb(1.0, 0.55, 0.58), Color::srgb(0.85, 0.08, 0.14));
+pub const HIGHLIGHT_LINKS: LinkColors =
+    LinkColors(Color::srgb(1.0, 0.90, 0.45), Color::srgb(0.95, 0.32, 0.08));
+
 pub fn link_material(
     materials: &mut Assets<StandardMaterial>,
-    base_color: Color,
-    emissive: LinearRgba,
+    alpha: f32,
 ) -> Handle<StandardMaterial> {
     materials.add(StandardMaterial {
-        base_color,
-        emissive,
+        base_color: Color::WHITE.with_alpha(alpha),
         alpha_mode: AlphaMode::Blend,
         unlit: true,
         double_sided: true,
@@ -125,11 +131,20 @@ pub fn link_material(
     })
 }
 
-/// One mesh for every arc: a single draw call instead of an entity per link.
-pub fn build_link_mesh(links: &[&Link], vertical: f32) -> Mesh {
+fn toward_callee(direction: Direction, t: f32) -> f32 {
+    match direction {
+        Direction::Forward => t,
+        Direction::Backward => 1.0 - t,
+        Direction::Both => 0.5,
+    }
+}
+
+pub fn build_link_mesh(links: &[&Link], vertical: f32, colors: &LinkColors) -> Mesh {
+    let (from, to) = (LinearRgba::from(colors.0), LinearRgba::from(colors.1));
     let mut positions: Vec<[f32; 3]> = Vec::new();
     let mut normals: Vec<[f32; 3]> = Vec::new();
     let mut uvs: Vec<[f32; 2]> = Vec::new();
+    let mut vertex_colors: Vec<[f32; 4]> = Vec::new();
     let mut indices: Vec<u32> = Vec::new();
 
     for link in links {
@@ -139,14 +154,22 @@ pub fn build_link_mesh(links: &[&Link], vertical: f32) -> Mesh {
         }
         let base = positions.len() as u32;
         for (i, &p) in pts.iter().enumerate() {
+            let t = i as f32 / (pts.len() - 1) as f32;
             let along = pts[(i + 1).min(pts.len() - 1)] - pts[i.saturating_sub(1)];
-            let side = along.xz().normalize_or_zero().perp() * (link.width * 0.5);
+            let d = toward_callee(link.direction, t);
+            let taper = if link.direction == Direction::Both {
+                1.0
+            } else {
+                1.0 - 0.8 * d
+            };
+            let half = link.width * 0.5 * taper;
+            let side = along.xz().normalize_or_zero().perp() * half;
             let side = Vec3::new(side.x, 0.0, side.y);
             let p = p + Vec3::Y * vertical;
             positions.extend([(p + side).to_array(), (p - side).to_array()]);
             normals.extend([[0.0, 1.0, 0.0]; 2]);
-            let t = i as f32 / (pts.len() - 1) as f32;
             uvs.extend([[0.0, t], [1.0, t]]);
+            vertex_colors.extend([from.mix(&to, d).to_f32_array(); 2]);
             if i + 1 < pts.len() {
                 let a = base + (i as u32) * 2;
                 indices.extend([a, a + 1, a + 3, a, a + 3, a + 2]);
@@ -161,6 +184,7 @@ pub fn build_link_mesh(links: &[&Link], vertical: f32) -> Mesh {
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, vertex_colors);
     mesh.insert_indices(Indices::U32(indices));
     mesh
 }
