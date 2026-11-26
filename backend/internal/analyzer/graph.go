@@ -216,7 +216,12 @@ func BuildDependencies(raw *RawExtraction, st *SymbolTable, ownerOf map[string]s
 
 func keepStrongest(edges []models.DependencyEdge, perSource int) []models.DependencyEdge {
 	slices.SortFunc(edges, func(a, b models.DependencyEdge) int {
-		return cmp.Or(strings.Compare(a.Source, b.Source), cmp.Compare(b.Weight, a.Weight), strings.Compare(a.Target, b.Target))
+		return cmp.Or(
+			strings.Compare(a.Source, b.Source),
+			cmp.Compare(b.Weight, a.Weight),
+			strings.Compare(a.Target, b.Target),
+			strings.Compare(a.Kind, b.Kind),
+		)
 	})
 
 	out := make([]models.DependencyEdge, 0, len(edges))
