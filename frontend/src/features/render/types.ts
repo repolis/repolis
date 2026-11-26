@@ -1,5 +1,11 @@
 export type Smell = "god" | "brain" | "data";
 
+export interface BuildingRef {
+  id: string;
+  name: string;
+  file: string;
+}
+
 export interface BuildingInfo {
   id: string;
   name: string;
@@ -34,8 +40,8 @@ export interface BuildingInfo {
   smell?: Smell;
   fields: string[];
   methods: string[];
-  calls: string[];
-  called_by: string[];
+  calls: BuildingRef[];
+  called_by: BuildingRef[];
 }
 
 export interface DistrictInfo {
@@ -47,7 +53,7 @@ export interface DistrictInfo {
   building_count: number;
   total_lines_of_code: number;
   total_methods: number;
-  top_buildings: string[];
+  top_buildings: BuildingRef[];
 }
 
 export interface IndexEntry {

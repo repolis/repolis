@@ -3,6 +3,7 @@ import { useState } from "react";
 import type { BuildingInfo } from "../../../types";
 import { TYPOLOGY_COLORS } from "../../../utils/colors";
 import { Chips } from "./chips";
+import { FileGroups } from "./file-groups";
 import { Metric } from "./metric";
 import { Section } from "./section";
 
@@ -213,12 +214,12 @@ export function BuildingInspector({
       )}
       {info.calls.length > 0 && (
         <Section title={`Depends on (${info.calls.length})`}>
-          <Chips items={info.calls} limit={8} onPick={onPick} />
+          <FileGroups refs={info.calls} onPick={onPick} />
         </Section>
       )}
       {info.called_by.length > 0 && (
         <Section title={`Used by (${info.called_by.length})`}>
-          <Chips items={info.called_by} limit={8} onPick={onPick} />
+          <FileGroups refs={info.called_by} onPick={onPick} />
         </Section>
       )}
     </div>

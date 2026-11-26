@@ -1,5 +1,6 @@
 import type { DistrictInfo } from "../../../types";
 import { TYPOLOGY_COLORS } from "../../../utils/colors";
+import { BuildingChips } from "./building-chips";
 import { Chips } from "./chips";
 import { Metric } from "./metric";
 import { Section } from "./section";
@@ -47,7 +48,7 @@ export function DistrictInspector({ info, onPick }: Props) {
       )}
       {info.top_buildings.length > 0 && (
         <Section title="Largest entities">
-          <Chips items={info.top_buildings} limit={8} onPick={onPick} />
+          <BuildingChips refs={info.top_buildings} limit={8} onPick={onPick} />
         </Section>
       )}
     </div>

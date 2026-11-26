@@ -1,5 +1,6 @@
 import type {
   BuildingInfo,
+  BuildingRef,
   CitySummary,
   DistrictInfo,
   HoverInfo,
@@ -63,13 +64,19 @@ export interface City {
 
 const buildingSize = (b: RawBuilding) => b.num_methods * 3 + b.num_fields;
 
+const refOf = (b: RawBuilding): BuildingRef => ({
+  id: b.id,
+  name: b.name,
+  file: b.source_file,
+});
+
 const byCountThenName = (a: [string, number], b: [string, number]) =>
   b[1] - a[1] || a[0].localeCompare(b[0]);
 
 export function buildCity(raw: RawCity): City {
-  const name = new Map<string, string>();
+  const refs = new Map<string, BuildingRef>();
   for (const d of raw.districts)
-    for (const b of d.buildings ?? []) name.set(b.id, b.name);
+    for (const b of d.buildings ?? []) refs.set(b.id, refOf(b));
 
   const callees = new Map<string, string[]>();
   const callers = new Map<string, string[]>();
@@ -80,15 +87,15 @@ export function buildCity(raw: RawCity): City {
     m.has(key) ? m.get(key)!.add(value) : m.set(key, new Set([value]));
 
   for (const e of raw.dependencies ?? []) {
-    if (!name.has(e.source) || !name.has(e.target)) continue;
+    if (!refs.has(e.source) || !refs.has(e.target)) continue;
     append(callees, e.source, e.target);
     append(callers, e.target, e.source);
     if (e.source === e.target) continue;
     addTo(adj, e.source, e.target);
     addTo(adj, e.target, e.source);
   }
-  const namesOf = (ids: string[] | undefined) =>
-    (ids ?? []).map((id) => name.get(id)!);
+  const refsOf = (ids: string[] | undefined) =>
+    (ids ?? []).map((id) => refs.get(id)!);
 
   const buildings = new Map<string, BuildingInfo>();
   const districts = new Map<string, DistrictInfo>();
@@ -102,8 +109,8 @@ export function buildCity(raw: RawCity): City {
         methods: b.methods ?? [],
         district_name: d.name,
         typology: d.typology,
-        calls: namesOf(callees.get(b.id)),
-        called_by: namesOf(callers.get(b.id)),
+        calls: refsOf(callees.get(b.id)),
+        called_by: refsOf(callers.get(b.id)),
       };
       buildings.set(b.id, info);
       all.push(info);
@@ -118,10 +125,10 @@ export function buildCity(raw: RawCity): City {
       total_lines_of_code: list.reduce((n, b) => n + b.lines_of_code, 0),
       total_methods: list.reduce((n, b) => n + b.num_methods, 0),
       top_buildings: list
-        .map((b): [string, number] => [b.name, buildingSize(b)])
-        .sort(byCountThenName)
+        .map((b) => ({ ref: refOf(b), size: buildingSize(b) }))
+        .sort((a, b) => b.size - a.size || a.ref.name.localeCompare(b.ref.name))
         .slice(0, 8)
-        .map(([n]) => n),
+        .map(({ ref }) => ref),
     });
   }
 
