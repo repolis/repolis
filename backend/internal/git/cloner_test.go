@@ -1,6 +1,10 @@
 package git
 
-import "testing"
+import (
+	"os/exec"
+	"strings"
+	"testing"
+)
 
 // NormalizeRepoURL is a security boundary: git treats some strings as
 // transports that run shell commands, and a leading "-" as a flag.
@@ -45,5 +49,41 @@ func TestNormalizeRepoURLCanonicalises(t *testing.T) {
 		if got != want {
 			t.Errorf("NormalizeRepoURL(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestIsCommitHashRejectsAnythingButAFullHash(t *testing.T) {
+	bad := []string{"", "HEAD", "main", "abc123", "--upload-pack=x", strings.Repeat("A", 40), strings.Repeat("a", 41)}
+	for _, in := range bad {
+		if IsCommitHash(in) {
+			t.Errorf("IsCommitHash(%q) = true", in)
+		}
+	}
+	if !IsCommitHash(strings.Repeat("a1", 20)) {
+		t.Error("a full lowercase hash was rejected")
+	}
+}
+
+func TestCheckoutCommitMovesToAnOlderCommit(t *testing.T) {
+	dir := t.TempDir()
+	git := func(args ...string) string {
+		cmd := exec.Command("git", append([]string{"-c", "user.name=t", "-c", "user.email=t@t"}, args...)...)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git("init", "--quiet")
+	git("commit", "--quiet", "--allow-empty", "-m", "first")
+	first := git("rev-parse", "HEAD")
+	git("commit", "--quiet", "--allow-empty", "-m", "second")
+
+	if err := CheckoutCommit(dir, first); err != nil {
+		t.Fatal(err)
+	}
+	if head := git("rev-parse", "HEAD"); head != first {
+		t.Errorf("HEAD = %s, want %s", head, first)
 	}
 }

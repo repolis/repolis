@@ -29,8 +29,13 @@ function isEngineAlreadyRunning(error: unknown): boolean {
   );
 }
 
-export function useCityLoader(repoUrl: string, onCity: (raw: RawCity) => void) {
+export function useCityLoader(
+  repoUrl: string,
+  pinned: string | null,
+  onCity: (raw: RawCity) => void,
+) {
   const [busy, setBusy] = useState(false);
+  const [commit, setCommit] = useState(pinned);
   const [status, setStatus] = useState("Booting engine...");
   const [error, setError] = useState<string | null>(null);
   const source = useRef<EventSource | null>(null);
@@ -51,10 +56,11 @@ export function useCityLoader(repoUrl: string, onCity: (raw: RawCity) => void) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ repo_url: repoUrl, refresh }),
+        body: JSON.stringify({ repo_url: repoUrl, commit, refresh }),
       });
       const data = await res.json();
       if (!res.ok) return fail(data.error ?? "Analysis failed");
+      if (data.commit) setCommit(data.commit);
 
       if (data.cityData) {
         onCity(data.cityData);
@@ -119,5 +125,5 @@ export function useCityLoader(repoUrl: string, onCity: (raw: RawCity) => void) {
     };
   }, [repoUrl]);
 
-  return { busy, status, error, regenerate: load };
+  return { busy, status, error, commit, regenerate: load };
 }

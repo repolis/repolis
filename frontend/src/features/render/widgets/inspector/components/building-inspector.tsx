@@ -15,6 +15,7 @@ function formatAge(days: number): string {
 interface Props {
   info: BuildingInfo;
   repoUrl: string;
+  commit: string | null;
   onPick: (n: string) => void;
   onAnchor: (id: string) => void;
   onPath: (id: string) => void;
@@ -24,6 +25,7 @@ interface Props {
 export function BuildingInspector({
   info,
   repoUrl,
+  commit,
   onPick,
   onAnchor,
   onPath,
@@ -42,7 +44,11 @@ export function BuildingInspector({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ repo_url: repoUrl, building_id: info.id }),
+        body: JSON.stringify({
+          repo_url: repoUrl,
+          commit,
+          building_id: info.id,
+        }),
       });
       const data = await res.json();
       if (data.explanation) setExplanation(data.explanation);

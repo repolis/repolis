@@ -40,11 +40,19 @@ func (s *server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 	userID, _ := r.Context().Value(userIDKey).(string)
 	logger.Log(logger.InfoLevel, "Analyze request from %s: %s", userID, repoURL)
 
-	commit, err := resolveCommit(repoURL)
-	if err != nil {
-		logger.Log(logger.ErrorLevel, "ls-remote failed for %s: %v", repoURL, err)
-		sendError(w, "Could not reach that repository. Is it public?", http.StatusBadRequest)
+	if req.Commit != "" && !git.IsCommitHash(req.Commit) {
+		sendError(w, "Commit must be a full 40-character hash", http.StatusBadRequest)
 		return
+	}
+	latest := req.Commit == ""
+	commit := req.Commit
+	if latest {
+		commit, err = resolveCommit(repoURL)
+		if err != nil {
+			logger.Log(logger.ErrorLevel, "ls-remote failed for %s: %v", repoURL, err)
+			sendError(w, "Could not reach that repository. Is it public?", http.StatusBadRequest)
+			return
+		}
 	}
 
 	level := req.RefreshLevel()
@@ -52,9 +60,11 @@ func (s *server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 
 	if level == models.RefreshNone {
 		if city := readCachedCity(key); city != nil {
-			rememberCommit(repoURL, commit)
+			if latest {
+				rememberCommit(repoURL, commit)
+			}
 			logger.Log(logger.InfoLevel, "Serving cached city for %s@%s", repoURL, commit[:8])
-			writeJSON(w, http.StatusOK, models.AnalyzeResponse{Status: "success", CityData: city})
+			writeJSON(w, http.StatusOK, models.AnalyzeResponse{Status: "success", Commit: commit, CityData: city})
 			return
 		}
 	} else {
@@ -68,13 +78,13 @@ func (s *server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 
 	jobID := uuid.New().String()
 	job, started := s.jobs.GetOrStart(jobKey, jobID, repoURL, commit, func(j *jobs.Job) {
-		s.runAnalysis(j, key, level)
+		s.runAnalysis(j, key, level, latest)
 	})
 	if !started {
 		logger.Log(logger.InfoLevel, "Attaching to in-flight analysis of %s", repoURL)
 	}
 
-	writeJSON(w, http.StatusAccepted, models.AnalyzeResponse{Status: "pending", JobID: job.ID})
+	writeJSON(w, http.StatusAccepted, models.AnalyzeResponse{Status: "pending", JobID: job.ID, Commit: commit})
 }
 
 func reusableClone(j *jobs.Job, level string) (path string, ok bool) {
@@ -96,7 +106,7 @@ func reusableClone(j *jobs.Job, level string) (path string, ok bool) {
 	return path, true
 }
 
-func (s *server) runAnalysis(j *jobs.Job, key, level string) {
+func (s *server) runAnalysis(j *jobs.Job, key, level string, latest bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), analysisLimit)
 	defer cancel()
 
@@ -115,6 +125,11 @@ func (s *server) runAnalysis(j *jobs.Job, key, level string) {
 			fail("Failed to clone repository", err)
 			return
 		}
+		if err := git.CheckoutCommit(path, j.Commit); err != nil {
+			_ = os.RemoveAll(path)
+			fail("Could not find that commit in the repository", err)
+			return
+		}
 		clonePath = path
 		if err := db.CreateSession(sessionID, "shared", j.RepoURL, clonePath, j.Commit); err != nil {
 			logger.Log(logger.WarnLevel, "Could not record session: %v", err)
@@ -130,7 +145,9 @@ func (s *server) runAnalysis(j *jobs.Job, key, level string) {
 	// Navigable on its own and ready in a fraction of the LLM pass's time.
 	j.Emit(jobs.Event{Type: jobs.EventCity, City: draft, Refined: false})
 	writeCachedCity(key, draft)
-	rememberCommit(j.RepoURL, j.Commit)
+	if latest {
+		rememberCommit(j.RepoURL, j.Commit)
+	}
 	logger.Log(logger.InfoLevel, "Draft city published: %d districts, %d buildings, %d edges",
 		len(draft.Districts), draft.Stats.TotalBuildings, len(draft.Dependencies))
 
@@ -227,10 +244,17 @@ func (s *server) handleExplain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	commit, err := resolveCommit(repoURL)
-	if err != nil {
-		sendError(w, "Could not reach that repository", http.StatusBadRequest)
+	if req.Commit != "" && !git.IsCommitHash(req.Commit) {
+		sendError(w, "Commit must be a full 40-character hash", http.StatusBadRequest)
 		return
+	}
+	commit := req.Commit
+	if commit == "" {
+		commit, err = resolveCommit(repoURL)
+		if err != nil {
+			sendError(w, "Could not reach that repository", http.StatusBadRequest)
+			return
+		}
 	}
 
 	if text, ok := db.GetExplanation(commit, req.BuildingID); ok {

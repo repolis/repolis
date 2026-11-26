@@ -35,6 +35,7 @@ import {
 } from "./utils/city";
 import { isVisible } from "./utils/filter";
 import { closedLoop, shortestPath } from "./utils/graph";
+import { pinnedPath, splitCommit } from "./utils/permalink";
 import { decodeView } from "./utils/url-state";
 import { CycleList } from "./widgets/cycle-list";
 import { DistrictLabels } from "./widgets/district-labels";
@@ -53,7 +54,9 @@ interface Cycle {
 }
 
 export default function RenderPage() {
-  const { host, owner, repo } = useParams({ from: "/city/$host/$owner/$repo" });
+  const params = useParams({ from: "/city/$host/$owner/$repo" });
+  const { host, owner } = params;
+  const { repo, commit: pinned } = splitCommit(params.repo);
   const repoUrl = `https://${host}/${owner}/${repo}`;
 
   const [initial] = useState(() => decodeView(window.location.hash));
@@ -82,10 +85,18 @@ export default function RenderPage() {
     if (at !== undefined) focus_building(at);
   };
 
-  const loader = useCityLoader(repoUrl, (raw: RawCity) => {
+  const loader = useCityLoader(repoUrl, pinned, (raw: RawCity) => {
     city.current = buildCity(raw);
     load_city_data(raw);
   });
+
+  useEffect(() => {
+    if (!loader.commit) return;
+    const path = pinnedPath(host, owner, repo, loader.commit);
+    if (path === window.location.pathname) return;
+    const rest = window.location.search + window.location.hash;
+    window.history.replaceState(null, "", path + rest);
+  }, [host, owner, repo, loader.commit]);
 
   useEngineEvents({
     hover: (t) => setHover(city.current && hoverInfo(city.current, t)),
@@ -236,6 +247,7 @@ export default function RenderPage() {
           <InspectorPanel
             selection={selection}
             repoUrl={repoUrl}
+            commit={loader.commit}
             onClose={() => {
               setSelection(NOTHING);
               setPath(null);

@@ -20,6 +20,12 @@ var allowedHosts = map[string]bool{
 
 var repoPathRe = regexp.MustCompile(`^/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?(\.git)?$`)
 
+var commitHashRe = regexp.MustCompile(`^[0-9a-f]{40}$`)
+
+func IsCommitHash(s string) bool {
+	return commitHashRe.MatchString(s)
+}
+
 // A security boundary, not a convenience check: git reads some strings as
 // shell-executing transports (`ext::sh -c ...`) and a leading "-" as a flag,
 // so unvalidated input to `git clone` is remote code execution.
@@ -95,6 +101,29 @@ func CloneRepo(repoURL string, sessionID string) (string, error) {
 		return "", fmt.Errorf("git clone failed: %v: %s", err, strings.TrimSpace(string(out)))
 	}
 	return clonePath, nil
+}
+
+func CheckoutCommit(clonePath, commit string) error {
+	if !IsCommitHash(commit) {
+		return fmt.Errorf("invalid commit %q", commit)
+	}
+	if runGit(clonePath, "checkout", "--quiet", "--detach", commit) == nil {
+		return nil
+	}
+	if err := runGit(clonePath, "fetch", "--quiet", "--filter=blob:none", "origin", commit); err != nil {
+		return err
+	}
+	return runGit(clonePath, "checkout", "--quiet", "--detach", commit)
+}
+
+func runGit(dir string, args ...string) error {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Env = gitEnv()
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git %s failed: %v: %s", args[0], err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 func GetRemoteCommitHash(repoURL string) (string, error) {

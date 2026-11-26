@@ -22,6 +22,8 @@ var RefreshLevels = []string{RefreshNone, RefreshCity, RefreshModel, RefreshClon
 
 type AnalyzeRequest struct {
 	RepoURL string `json:"repo_url"`
+	// Empty means the latest commit on the default branch.
+	Commit string `json:"commit,omitempty"`
 	// Empty means "use the cache".
 	Refresh string `json:"refresh,omitempty"`
 	// Force is the older boolean spelling, equivalent to Refresh="city".
@@ -49,6 +51,7 @@ func Redoes(current, level string) bool {
 type AnalyzeResponse struct {
 	Status   string   `json:"status"`
 	JobID    string   `json:"job_id,omitempty"`
+	Commit   string   `json:"commit,omitempty"`
 	CityData *CityMap `json:"cityData,omitempty"`
 	Error    string   `json:"error,omitempty"`
 }
@@ -56,6 +59,7 @@ type AnalyzeResponse struct {
 type ExplainRequest struct {
 	RepoURL    string `json:"repo_url"`
 	BuildingID string `json:"building_id"`
+	Commit     string `json:"commit,omitempty"`
 }
 
 type ExplainResponse struct {

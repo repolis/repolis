@@ -5,6 +5,7 @@ import { DistrictInspector } from "./components/district-inspector";
 interface Props {
   selection: SelectPayload;
   repoUrl: string;
+  commit: string | null;
   onClose: () => void;
   onPick: (nameOrId: string) => void;
   onAnchor: (buildingId: string) => void;
@@ -15,6 +16,7 @@ interface Props {
 export function InspectorPanel({
   selection,
   repoUrl,
+  commit,
   onClose,
   onPick,
   onAnchor,
@@ -37,6 +39,7 @@ export function InspectorPanel({
           key={selection.data.id}
           info={selection.data}
           repoUrl={repoUrl}
+          commit={commit}
           onPick={onPick}
           onAnchor={onAnchor}
           onPath={onPath}
