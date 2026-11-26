@@ -315,6 +315,14 @@ const DIM = 1;
 const BRIGHT = 2;
 const FADED = 3;
 
+export function isVisible(
+  b: BuildingInfo,
+  filter: FilterState,
+  timeline: number | null,
+): boolean {
+  return (timeline === null || b.born_day <= timeline) && matches(filter, b);
+}
+
 export interface View {
   mode: string;
   filter: FilterState;
@@ -350,7 +358,7 @@ export function computeAppearance(city: City, v: View) {
     colors.set(color(b, city.scales), i * 3);
     states[i] =
       // Faded rather than gone: the timeline is for watching it get built.
-      (v.timeline !== null && b.born_day > v.timeline) || !matches(v.filter, b)
+      !isVisible(b, v.filter, v.timeline)
         ? FADED
         : onPath.size > 0
           ? onPath.has(b.id)

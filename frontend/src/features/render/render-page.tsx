@@ -16,8 +16,19 @@ import { Tooltip } from "./components/tooltip";
 import { useCityLoader } from "./hooks/use-city-loader";
 import { useEngineEvents } from "./hooks/use-engine-events";
 import { useUrlSync } from "./hooks/use-url-sync";
-import type { CitySummary, HoverInfo, PathInfo, SelectPayload } from "./types";
-import { computeAppearance, loopsOf, shortestPath } from "./utils/appearance";
+import type {
+  BuildingInfo,
+  CitySummary,
+  HoverInfo,
+  PathInfo,
+  SelectPayload,
+} from "./types";
+import {
+  computeAppearance,
+  isVisible,
+  loopsOf,
+  shortestPath,
+} from "./utils/appearance";
 import {
   buildCity,
   hoverInfo,
@@ -33,6 +44,7 @@ import { DistrictLabels } from "./widgets/district-labels";
 import { InspectorPanel } from "./widgets/inspector-panel";
 import { Legend } from "./widgets/legend";
 import { Timeline } from "./widgets/timeline";
+import { TopTable } from "./widgets/top-table";
 import { ViewControls } from "./widgets/view-controls";
 
 const NOTHING: SelectPayload = { type: "None" };
@@ -52,9 +64,11 @@ export default function RenderPage() {
   const [filter, setFilter] = useState(initial.filter);
   const [timelineDay, setTimelineDay] = useState(initial.timeline);
   const [links, setLinks] = useState(false);
+  const [table, setTable] = useState(false);
   const [cycle, setCycle] = useState<Cycle | null>(null);
 
   const [summary, setSummary] = useState<CitySummary | null>(null);
+  const [buildings, setBuildings] = useState<BuildingInfo[]>([]);
   const [hover, setHover] = useState<HoverInfo | null>(null);
   const [selection, setSelection] = useState<SelectPayload>(NOTHING);
   const [anchor, setAnchor] = useState<{ id: string; name: string } | null>(
@@ -85,6 +99,7 @@ export default function RenderPage() {
     city: () => {
       if (!city.current) return;
       setSummary(city.current.summary);
+      setBuildings(city.current.list);
       setAnchor(null);
       setPath(null);
 
@@ -194,7 +209,18 @@ export default function RenderPage() {
               setLinks(on);
               set_show_links(on);
             }}
-          />
+            table={table}
+            onTable={setTable}
+          >
+            {table && (
+              <TopTable
+                buildings={buildings.filter((b) =>
+                  isVisible(b, filter, timelineDay),
+                )}
+                onPick={pick}
+              />
+            )}
+          </ViewControls>
           <Legend summary={summary} mode={mode} />
           {filter.only_cycles && (
             <CycleList

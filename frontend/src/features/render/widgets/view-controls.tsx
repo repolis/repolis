@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 
 import type { CitySummary, FilterState } from "../types";
 import { COLOR_MODES, EMPTY_FILTER } from "../utils/appearance";
@@ -9,15 +9,13 @@ function activeCount(f: FilterState): number {
   ).length;
 }
 
-function Chip({
-  on,
-  label,
-  onClick,
-}: {
+interface ChipProps {
   on: boolean;
   label: string;
   onClick: () => void;
-}) {
+}
+
+function Chip({ on, label, onClick }: ChipProps) {
   return (
     <button
       onClick={onClick}
@@ -32,23 +30,31 @@ function Chip({
   );
 }
 
+interface Props {
+  summary: CitySummary | null;
+  mode: string;
+  filter: FilterState;
+  links: boolean;
+  table: boolean;
+  onMode: (m: string) => void;
+  onFilter: (f: FilterState) => void;
+  onLinks: (on: boolean) => void;
+  onTable: (on: boolean) => void;
+  children?: ReactNode;
+}
+
 export function ViewControls({
   summary,
   mode,
   filter,
   links,
+  table,
   onMode,
   onFilter,
   onLinks,
-}: {
-  summary: CitySummary | null;
-  mode: string;
-  filter: FilterState;
-  links: boolean;
-  onMode: (m: string) => void;
-  onFilter: (f: FilterState) => void;
-  onLinks: (on: boolean) => void;
-}) {
+  onTable,
+  children,
+}: Props) {
   const [open, setOpen] = useState(false);
   if (!summary) return null;
 
@@ -89,6 +95,7 @@ export function ViewControls({
           </button>
         )}
         <Chip on={links} label="Links" onClick={() => onLinks(!links)} />
+        <Chip on={table} label="Table" onClick={() => onTable(!table)} />
       </div>
 
       {open && (
@@ -201,6 +208,7 @@ export function ViewControls({
           </div>
         </div>
       )}
+      {children}
     </div>
   );
 }
