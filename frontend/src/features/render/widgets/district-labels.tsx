@@ -4,7 +4,11 @@ import { label_positions } from "@/wasm/engine";
 
 import type { DistrictInfo } from "../types";
 
-export function DistrictLabels({ districts }: { districts: DistrictInfo[] }) {
+interface Props {
+  districts: DistrictInfo[];
+}
+
+export function DistrictLabels({ districts }: Props) {
   const refs = useRef<(HTMLDivElement | null)[]>([]);
 
   useEffect(() => {

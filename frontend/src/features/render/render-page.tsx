@@ -23,12 +23,7 @@ import type {
   PathInfo,
   SelectPayload,
 } from "./types";
-import {
-  closedLoop,
-  computeAppearance,
-  isVisible,
-  shortestPath,
-} from "./utils/appearance";
+import { computeAppearance } from "./utils/appearance";
 import {
   buildCity,
   hoverInfo,
@@ -38,10 +33,12 @@ import {
   type City,
   type RawCity,
 } from "./utils/city";
+import { isVisible } from "./utils/filter";
+import { closedLoop, shortestPath } from "./utils/graph";
 import { decodeView } from "./utils/url-state";
 import { CycleList } from "./widgets/cycle-list";
 import { DistrictLabels } from "./widgets/district-labels";
-import { InspectorPanel } from "./widgets/inspector-panel";
+import { InspectorPanel } from "./widgets/inspector/inspector-panel";
 import { Legend } from "./widgets/legend";
 import { Timeline } from "./widgets/timeline";
 import { TopTable } from "./widgets/top-table";

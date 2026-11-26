@@ -6,7 +6,7 @@ import type {
   PathInfo,
   SelectPayload,
 } from "../types";
-import { scalesFor, type Scales } from "./appearance";
+import { scalesFor, type Scales } from "./color-modes";
 
 export interface RawCity {
   districts: RawDistrict[];

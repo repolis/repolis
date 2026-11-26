@@ -1,5 +1,5 @@
 import type { CycleInfo } from "../types";
-import { closedLoop } from "../utils/appearance";
+import { closedLoop } from "../utils/graph";
 
 interface Props {
   cycles: CycleInfo[];

@@ -1,27 +1,16 @@
 import { useState } from "react";
 
+import { Swatch } from "../components/swatch";
 import type { CitySummary } from "../types";
-import { colorMode, RAMP_CSS } from "../utils/appearance";
+import { colorMode } from "../utils/color-modes";
+import { RAMP_CSS } from "../utils/colors";
 
-function Swatch({ color, label }: { color: string; label: string }) {
-  return (
-    <span className="flex items-center gap-1 rounded bg-gray-800 px-1.5 py-0.5">
-      <span
-        className="inline-block h-2 w-2 rounded-sm"
-        style={{ background: color }}
-      />
-      {label}
-    </span>
-  );
-}
-
-export function Legend({
-  summary,
-  mode = "typology",
-}: {
+interface Props {
   summary: CitySummary | null;
   mode?: string;
-}) {
+}
+
+export function Legend({ summary, mode = "typology" }: Props) {
   const [open, setOpen] = useState(false);
   if (!summary) return null;
 

@@ -4,19 +4,21 @@ import type { CitySummary, IndexEntry } from "../types";
 import { matchRank } from "../utils/city";
 import { Regenerate } from "./regenerate";
 
+interface Props {
+  summary: CitySummary | null;
+  busy: boolean;
+  onPick: (id: string) => void;
+  onReset: () => void;
+  onRegenerate: (level: string) => void;
+}
+
 export function SearchBar({
   summary,
   busy,
   onPick,
   onReset,
   onRegenerate,
-}: {
-  summary: CitySummary | null;
-  busy: boolean;
-  onPick: (id: string) => void;
-  onReset: () => void;
-  onRegenerate: (level: string) => void;
-}) {
+}: Props) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
 

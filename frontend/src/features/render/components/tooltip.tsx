@@ -3,7 +3,11 @@ import { useEffect, useState } from "react";
 import type { HoverInfo } from "../types";
 
 // Tracks the cursor itself so mouse moves re-render only this.
-export function Tooltip({ hover }: { hover: HoverInfo | null }) {
+interface Props {
+  hover: HoverInfo | null;
+}
+
+export function Tooltip({ hover }: Props) {
   const [pos, setPos] = useState({ x: 0, y: 0 });
 
   useEffect(() => {

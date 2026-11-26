@@ -1,14 +1,12 @@
 import type { PathInfo } from "../types";
 
-export function PathBanner({
-  anchorName,
-  path,
-  onClear,
-}: {
+interface Props {
   anchorName: string | null;
   path: PathInfo | null;
   onClear: () => void;
-}) {
+}
+
+export function PathBanner({ anchorName, path, onClear }: Props) {
   if (!anchorName && !path) return null;
 
   return (

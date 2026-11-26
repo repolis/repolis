@@ -19,13 +19,12 @@ const REFRESH_LEVELS = [
   },
 ] as const;
 
-export function Regenerate({
-  busy,
-  onRun,
-}: {
+interface Props {
   busy: boolean;
   onRun: (level: string) => void;
-}) {
+}
+
+export function Regenerate({ busy, onRun }: Props) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 

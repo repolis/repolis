@@ -1,113 +1,10 @@
 import { useState } from "react";
 
-import type { BuildingInfo, DistrictInfo, SelectPayload } from "../types";
-import { TYPOLOGY_COLORS } from "../utils/appearance";
-
-interface Props {
-  selection: SelectPayload;
-  repoUrl: string;
-  onClose: () => void;
-  onPick: (nameOrId: string) => void;
-  onAnchor: (buildingId: string) => void;
-  onPath: (buildingId: string) => void;
-  anchorId: string | null;
-}
-
-export function InspectorPanel({
-  selection,
-  repoUrl,
-  onClose,
-  onPick,
-  onAnchor,
-  onPath,
-  anchorId,
-}: Props) {
-  if (selection.type === "None") return null;
-
-  return (
-    <div className="absolute top-4 right-4 z-50 flex max-h-[calc(100vh-2rem)] w-80 flex-col gap-3 overflow-x-hidden overflow-y-auto rounded border border-gray-700 bg-gray-900/95 p-4 text-xs text-gray-200">
-      <button
-        onClick={onClose}
-        className="absolute top-3 right-3 text-gray-500 hover:text-gray-200"
-        title="Close (Esc)"
-      >
-        x
-      </button>
-      {selection.type === "Building" && (
-        <BuildingInspector
-          key={selection.data.id}
-          info={selection.data}
-          repoUrl={repoUrl}
-          onPick={onPick}
-          onAnchor={onAnchor}
-          onPath={onPath}
-          anchorId={anchorId}
-        />
-      )}
-      {selection.type === "District" && (
-        <DistrictInspector info={selection.data} onPick={onPick} />
-      )}
-    </div>
-  );
-}
-
-function Chips({
-  items,
-  limit,
-  onPick,
-}: {
-  items: string[];
-  limit: number;
-  onPick?: (n: string) => void;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const shown = expanded ? items : items.slice(0, limit);
-  const chip =
-    "max-w-full break-all rounded bg-gray-800 px-1 py-0.5 text-left font-mono text-[10px] text-gray-300";
-
-  return (
-    <div className="flex min-w-0 flex-wrap gap-1">
-      {shown.map((v, i) =>
-        onPick ? (
-          <button
-            key={i}
-            onClick={() => onPick(v)}
-            className={`${chip} hover:bg-gray-700 hover:text-white`}
-          >
-            {v}
-          </button>
-        ) : (
-          <span key={i} className={chip}>
-            {v}
-          </span>
-        ),
-      )}
-      {items.length > limit && (
-        <button
-          onClick={() => setExpanded(!expanded)}
-          className="text-[10px] text-gray-500 hover:text-gray-300"
-        >
-          {expanded ? "show less" : `+${items.length - limit} more`}
-        </button>
-      )}
-    </div>
-  );
-}
-
-function Section({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="flex min-w-0 flex-col gap-1 border-t border-gray-800 pt-2">
-      <div className="font-semibold text-gray-400">{title}</div>
-      {children}
-    </div>
-  );
-}
+import type { BuildingInfo } from "../../../types";
+import { TYPOLOGY_COLORS } from "../../../utils/colors";
+import { Chips } from "./chips";
+import { Metric } from "./metric";
+import { Section } from "./section";
 
 function formatAge(days: number): string {
   if (days <= 0) return "unknown";
@@ -115,21 +12,23 @@ function formatAge(days: number): string {
   return `${Math.round(days / 30)}mo ago`;
 }
 
-function BuildingInspector({
-  info,
-  repoUrl,
-  onPick,
-  onAnchor,
-  onPath,
-  anchorId,
-}: {
+interface Props {
   info: BuildingInfo;
   repoUrl: string;
   onPick: (n: string) => void;
   onAnchor: (id: string) => void;
   onPath: (id: string) => void;
   anchorId: string | null;
-}) {
+}
+
+export function BuildingInspector({
+  info,
+  repoUrl,
+  onPick,
+  onAnchor,
+  onPath,
+  anchorId,
+}: Props) {
   const [explanation, setExplanation] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -314,66 +213,6 @@ function BuildingInspector({
       {info.called_by.length > 0 && (
         <Section title={`Used by (${info.called_by.length})`}>
           <Chips items={info.called_by} limit={8} onPick={onPick} />
-        </Section>
-      )}
-    </div>
-  );
-}
-
-function Metric({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="min-w-0 rounded border border-gray-700 p-1.5">
-      <div className="text-[10px] text-gray-400">{label}</div>
-      <div className="truncate font-semibold text-white">{value}</div>
-    </div>
-  );
-}
-
-function DistrictInspector({
-  info,
-  onPick,
-}: {
-  info: DistrictInfo;
-  onPick: (n: string) => void;
-}) {
-  return (
-    <div className="flex min-w-0 flex-col gap-3">
-      <div className="min-w-0 border-b border-gray-700 pr-5 pb-2">
-        <div className="flex items-center gap-2 text-[11px] text-gray-400">
-          <span
-            className="inline-block h-2 w-2 rounded-sm"
-            style={{
-              background:
-                TYPOLOGY_COLORS[info.typology] ?? TYPOLOGY_COLORS.unknown,
-            }}
-          />
-          <span>District, {info.typology}</span>
-        </div>
-        <div className="mt-1 text-sm font-bold break-all text-white">
-          {info.name}
-        </div>
-        {info.summary && (
-          <div className="mt-1 text-gray-300">{info.summary}</div>
-        )}
-      </div>
-
-      <div className="grid grid-cols-3 gap-2 text-center">
-        <Metric label="Entities" value={String(info.building_count)} />
-        <Metric label="Functions" value={String(info.total_methods)} />
-        <Metric
-          label="Lines"
-          value={info.total_lines_of_code.toLocaleString()}
-        />
-      </div>
-
-      {info.tags.length > 0 && (
-        <Section title="Tags">
-          <Chips items={info.tags} limit={6} />
-        </Section>
-      )}
-      {info.top_buildings.length > 0 && (
-        <Section title="Largest entities">
-          <Chips items={info.top_buildings} limit={8} onPick={onPick} />
         </Section>
       )}
     </div>

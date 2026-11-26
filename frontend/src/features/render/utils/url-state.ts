@@ -1,5 +1,5 @@
 import type { FilterState } from "../types";
-import { EMPTY_FILTER } from "./appearance";
+import { EMPTY_FILTER } from "./filter";
 
 // In the fragment so it never reaches the server.
 export interface ViewURL {

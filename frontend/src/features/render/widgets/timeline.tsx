@@ -2,15 +2,13 @@ import { useEffect, useState } from "react";
 
 import type { CitySummary } from "../types";
 
-export function Timeline({
-  summary,
-  day,
-  onChange,
-}: {
+interface Props {
   summary: CitySummary | null;
   day: number | null;
   onChange: (day: number | null) => void;
-}) {
+}
+
+export function Timeline({ summary, day, onChange }: Props) {
   const [playing, setPlaying] = useState(false);
   const total = summary?.history_days ?? 0;
 
