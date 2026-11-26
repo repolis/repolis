@@ -12,7 +12,7 @@ import (
 
 // cacheSchema is bumped whenever the CityMap shape changes, so a stale cache
 // entry can never be served to a renderer that expects different fields.
-const cacheSchema = "v2"
+const cacheSchema = "v3"
 
 func cacheKey(repoURL, commit string) string {
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(cacheSchema+"|"+repoURL+"@"+commit)))

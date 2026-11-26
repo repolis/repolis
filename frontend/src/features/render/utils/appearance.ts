@@ -1,4 +1,4 @@
-import type { BuildingInfo, CitySummary, FilterState } from "../types";
+import type { BuildingInfo, CitySummary, FilterState, Smell } from "../types";
 import type { City } from "./city";
 
 type Rgb = [number, number, number];
@@ -25,8 +25,6 @@ export const LANGUAGE_RGB: Record<string, Rgb> = {
   Go: [0.35, 0.72, 0.76],
   unknown: GREY,
 };
-
-export type Smell = "god" | "brain" | "data";
 
 export const SMELL_RGB: Record<Smell, Rgb> = {
   god: [0.82, 0.2, 0.22],
@@ -92,8 +90,6 @@ const groundRgb = (typology: string): Rgb => {
 export interface Scales {
   complexity: number;
   fanIn: number;
-  sumComplexity: number;
-  fanOut: number;
   born: number;
 }
 
@@ -110,8 +106,6 @@ export function scalesFor(buildings: BuildingInfo[]): Scales {
   return {
     complexity: p95((b) => b.max_complexity),
     fanIn: p95((b) => b.fan_in),
-    sumComplexity: p95((b) => b.sum_complexity),
-    fanOut: p95((b) => b.fan_out),
     born: Math.max(1, ...buildings.map((b) => b.born_day)),
   };
 }
@@ -120,26 +114,6 @@ export function scalesFor(buildings: BuildingInfo[]): Scales {
  * Rough stand-ins for Lanza & Marinescu's detection strategies, which need
  * metrics we do not collect. Floors keep small repos from flagging anything.
  */
-const GOD_MIN_TOTAL_COMPLEXITY = 40;
-const GOD_MIN_FAN_OUT = 5;
-const GOD_MIN_METHODS = 8;
-const BRAIN_MIN_COMPLEXITY = 15;
-const DATA_MIN_FIELDS = 8;
-
-export function smell(b: BuildingInfo, s: Scales): Smell | null {
-  const isGod =
-    b.sum_complexity >= Math.max(GOD_MIN_TOTAL_COMPLEXITY, s.sumComplexity) &&
-    b.fan_out >= Math.max(GOD_MIN_FAN_OUT, s.fanOut) &&
-    b.num_methods >= GOD_MIN_METHODS;
-  if (isGod) return "god";
-  if (b.max_complexity >= Math.max(BRAIN_MIN_COMPLEXITY, s.complexity))
-    return "brain";
-  const isDataOnly =
-    b.kind === "type" && b.num_fields >= DATA_MIN_FIELDS && b.num_methods === 0;
-  if (isDataOnly) return "data";
-  return null;
-}
-
 export interface ColorMode {
   id: string;
   label: string;
@@ -217,10 +191,7 @@ export const COLOR_MODES: ColorMode[] = [
         label,
         SMELL_COLORS[k],
       ]),
-    color: (b, s) => {
-      const k = smell(b, s);
-      return k ? SMELL_RGB[k] : NO_SMELL;
-    },
+    color: (b) => (b.smell ? SMELL_RGB[b.smell] : NO_SMELL),
   },
   {
     id: "born",
@@ -296,46 +267,6 @@ export function shortestPath(
     }
   }
   return [];
-}
-
-function shortestLoopThrough(
-  out: Map<string, Set<string>>,
-  members: Set<string>,
-  start: string,
-): string[] | null {
-  const prev = new Map<string, string>([[start, start]]);
-  const queue = [start];
-  for (let head = 0; head < queue.length; head++) {
-    const current = queue[head];
-    for (const next of out.get(current) ?? []) {
-      if (next === start) return walkBack(prev, start, current);
-      if (members.has(next) && !prev.has(next)) {
-        prev.set(next, current);
-        queue.push(next);
-      }
-    }
-  }
-  return null;
-}
-
-function rotateToSmallestId(loop: string[]): string[] {
-  const smallest = loop.indexOf([...loop].sort()[0]);
-  return [...loop.slice(smallest), ...loop.slice(0, smallest)];
-}
-
-export function loopsOf(
-  out: Map<string, Set<string>>,
-  members: string[],
-): string[][] {
-  const inside = new Set(members);
-  const unique = new Map<string, string[]>();
-  for (const start of members) {
-    const loop = shortestLoopThrough(out, inside, start);
-    if (!loop) continue;
-    const rotated = rotateToSmallestId(loop);
-    unique.set(rotated.join("\n"), rotated);
-  }
-  return [...unique.values()].sort((a, b) => a.length - b.length);
 }
 
 export const closedLoop = (loop: string[]) => [...loop, loop[0]];

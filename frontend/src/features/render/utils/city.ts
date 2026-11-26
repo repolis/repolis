@@ -38,6 +38,7 @@ type RawStats = Omit<
         namespaces: number;
         members: string[];
         reliable: boolean;
+        loops?: string[][] | null;
       }[]
     | null;
 };
@@ -57,7 +58,6 @@ export interface City {
   list: BuildingInfo[];
   indexOf: Map<string, number>;
   adj: Map<string, Set<string>>;
-  out: Map<string, Set<string>>;
   scales: Scales;
 }
 
@@ -74,7 +74,6 @@ export function buildCity(raw: RawCity): City {
   const callees = new Map<string, string[]>();
   const callers = new Map<string, string[]>();
   const adj = new Map<string, Set<string>>();
-  const out = new Map<string, Set<string>>();
   const append = (m: Map<string, string[]>, key: string, value: string) =>
     m.has(key) ? m.get(key)!.push(value) : m.set(key, [value]);
   const addTo = (m: Map<string, Set<string>>, key: string, value: string) =>
@@ -85,7 +84,6 @@ export function buildCity(raw: RawCity): City {
     append(callees, e.source, e.target);
     append(callers, e.target, e.source);
     if (e.source === e.target) continue;
-    addTo(out, e.source, e.target);
     addTo(adj, e.source, e.target);
     addTo(adj, e.target, e.source);
   }
@@ -134,11 +132,12 @@ export function buildCity(raw: RawCity): City {
     languages: Object.entries(s.languages ?? {}).sort(byCountThenName),
     cycles: (s.cycles ?? [])
       .filter((c) => c.reliable && c.namespaces > 1)
-      .map(({ id, size, namespaces, members }) => ({
+      .map(({ id, size, namespaces, members, loops }) => ({
         id,
         size,
         namespaces,
         members,
+        loops: loops ?? [],
       })),
     districts: [...districts.values()],
     index: [...buildings.values()].map((b) => ({
@@ -156,7 +155,6 @@ export function buildCity(raw: RawCity): City {
     list: all,
     indexOf: new Map(all.map((b, i) => [b.id, i])),
     adj,
-    out,
     scales: scalesFor(all),
   };
 }

@@ -27,7 +27,6 @@ import {
   closedLoop,
   computeAppearance,
   isVisible,
-  loopsOf,
   shortestPath,
 } from "./utils/appearance";
 import {
@@ -165,8 +164,7 @@ export default function RenderPage() {
   function pickCycle(id: number) {
     setSelection(NOTHING);
     clearPath();
-    const members = summary?.cycles.find((c) => c.id === id)?.members ?? [];
-    const loops = city.current ? loopsOf(city.current.out, members) : [];
+    const loops = summary?.cycles.find((c) => c.id === id)?.loops ?? [];
     setCycle(
       id === cycle?.id || loops.length === 0
         ? null

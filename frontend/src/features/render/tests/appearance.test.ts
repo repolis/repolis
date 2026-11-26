@@ -6,11 +6,9 @@ import {
   colorMode,
   computeAppearance,
   EMPTY_FILTER,
-  loopsOf,
   matches,
   ramp,
   shortestPath,
-  smell,
 } from "../utils/appearance";
 import type { City } from "../utils/city";
 
@@ -30,8 +28,6 @@ const widget = {
 const SCALES = {
   complexity: 1,
   fanIn: 1,
-  sumComplexity: 1,
-  fanOut: 1,
   born: 1,
 };
 
@@ -98,49 +94,13 @@ describe("birth mode", () => {
   });
 });
 
-describe("smells", () => {
-  const plain = {
-    ...widget,
-    num_fields: 2,
-    num_methods: 4,
-    max_complexity: 3,
-    sum_complexity: 10,
-    fan_out: 2,
-  };
+describe("smells mode", () => {
+  const smells = colorMode("smells");
 
-  it("flags a god class", () => {
-    const b = { ...plain, num_methods: 20, sum_complexity: 90, fan_out: 9 };
-    expect(smell(b, SCALES)).toBe("god");
-  });
-
-  it("can flag a module as god", () => {
-    const b = {
-      ...plain,
-      kind: "module",
-      num_methods: 60,
-      sum_complexity: 300,
-      fan_out: 12,
-    };
-    expect(smell(b, SCALES)).toBe("god");
-  });
-
-  it("flags a very complex function", () => {
-    expect(smell({ ...plain, max_complexity: 30 }, SCALES)).toBe("brain");
-  });
-
-  it("flags a data-only struct but not a module", () => {
-    const b = { ...plain, num_fields: 10, num_methods: 0 };
-    expect(smell(b, SCALES)).toBe("data");
-    expect(smell({ ...b, kind: "module" }, SCALES)).toBeNull();
-  });
-
-  it("flags nothing in a small repo", () => {
-    expect(smell(plain, SCALES)).toBeNull();
-  });
-
-  it("raises thresholds to the repo's p95", () => {
-    const b = { ...plain, max_complexity: 30 };
-    expect(smell(b, { ...SCALES, complexity: 40 })).toBeNull();
+  it("colours a building by the smell the backend found", () => {
+    const god = smells.color({ ...widget, smell: "god" }, SCALES);
+    const none = smells.color(widget, SCALES);
+    expect(god).not.toEqual(none);
   });
 });
 
@@ -170,46 +130,6 @@ describe("cycle filter", () => {
       path: [],
     });
     expect([...links]).toEqual([0, 1]);
-  });
-});
-
-describe("loops", () => {
-  const out = (pairs: [string, string][]) => {
-    const m = new Map<string, Set<string>>();
-    for (const [a, b] of pairs) m.set(a, (m.get(a) ?? new Set()).add(b));
-    return m;
-  };
-
-  it("reads a cycle in call order", () => {
-    const g = out([
-      ["b", "c"],
-      ["c", "a"],
-      ["a", "b"],
-    ]);
-    expect(loopsOf(g, ["c", "a", "b"])).toEqual([["a", "b", "c"]]);
-  });
-
-  it("splits a tangle into its shortest loops", () => {
-    const g = out([
-      ["a", "b"],
-      ["b", "a"],
-      ["b", "c"],
-      ["c", "b"],
-    ]);
-    expect(loopsOf(g, ["a", "b", "c"])).toEqual([
-      ["a", "b"],
-      ["b", "c"],
-    ]);
-  });
-
-  it("ignores edges that leave the cycle", () => {
-    const g = out([
-      ["a", "b"],
-      ["b", "x"],
-      ["x", "a"],
-      ["b", "a"],
-    ]);
-    expect(loopsOf(g, ["a", "b"])).toEqual([["a", "b"]]);
   });
 });
 

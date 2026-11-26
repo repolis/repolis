@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -129,6 +130,27 @@ func main() {
 	}
 	fmt.Printf("cycles      %d cross-module findings (sizes:%s) | %d large tangles | %d within one module\n",
 		findings, sizes, tangles, within)
+
+	nameOf := make(map[string]string, len(draft.Buildings))
+	smells := make(map[string]int)
+	for _, b := range draft.Buildings {
+		nameOf[b.ID] = b.Name
+		smells[b.Smell]++
+	}
+	fmt.Printf("smells      god %d | brain %d | data %d\n",
+		smells[analyzer.SmellGod], smells[analyzer.SmellBrain], smells[analyzer.SmellData])
+
+	for _, c := range draft.Cycles {
+		if !c.Reliable || !c.CrossModule() || len(c.Loops) == 0 {
+			continue
+		}
+		loop := slices.Concat(c.Loops[0], c.Loops[0][:1])
+		names := make([]string, len(loop))
+		for i, id := range loop {
+			names[i] = nameOf[id]
+		}
+		fmt.Printf("  cycle %d   %s\n", c.ID, strings.Join(names, " -> "))
+	}
 
 	zeroField, zeroMethod, loc1 := 0, 0, 0
 	withHistory := 0

@@ -1,3 +1,5 @@
+export type Smell = "god" | "brain" | "data";
+
 export interface BuildingInfo {
   id: string;
   name: string;
@@ -29,6 +31,7 @@ export interface BuildingInfo {
   assoc_source: string;
   /** 0 when not in a cycle. */
   cycle_id: number;
+  smell?: Smell;
   fields: string[];
   methods: string[];
   calls: string[];
@@ -81,6 +84,7 @@ export interface CycleInfo {
   size: number;
   namespaces: number;
   members: string[];
+  loops: string[][];
 }
 
 export interface PathInfo {

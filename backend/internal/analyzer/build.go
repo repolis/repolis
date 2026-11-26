@@ -46,6 +46,7 @@ func BuildDraft(raw *RawExtraction, history map[string]*git.FileHistory, st *Sym
 	d.Edges = BuildDependencies(raw, st, ownerOf)
 	d.attachHistory(history)
 	d.computeCoupling()
+	markSmells(d.Buildings)
 
 	cycles := FindCycles(d.Buildings, d.Edges)
 	MarkCycles(d.Buildings, d.Edges, cycles)
@@ -285,7 +286,6 @@ func (d *Draft) computeCoupling() {
 		in[e.Target]++
 	}
 
-	fanIns := make([]int, 0, len(d.Buildings))
 	for i := range d.Buildings {
 		b := &d.Buildings[i]
 		b.FanIn = in[b.ID]
@@ -293,16 +293,11 @@ func (d *Draft) computeCoupling() {
 		if total := b.FanIn + b.FanOut; total > 0 {
 			b.Instability = float64(b.FanOut) / float64(total)
 		}
-		fanIns = append(fanIns, b.FanIn)
 	}
 
 	// Relative to this repo: "heavily depended upon" differs wildly between
 	// a library and an application.
-	sort.Ints(fanIns)
-	cutoff := 3
-	if n := len(fanIns); n > 0 {
-		cutoff = max(3, fanIns[n*95/100])
-	}
+	cutoff := max(3, p95(d.Buildings, func(b models.Building) int { return b.FanIn }))
 	for i := range d.Buildings {
 		d.Buildings[i].Hub = d.Buildings[i].FanIn >= cutoff
 	}

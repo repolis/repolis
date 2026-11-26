@@ -2,6 +2,7 @@ package analyzer
 
 import (
 	"cmp"
+	"fmt"
 	"slices"
 	"sort"
 	"strings"
@@ -43,12 +44,22 @@ func FindCycles(buildings []models.Building, edges []models.DependencyEdge) []mo
 			members = append(members, buildings[n].ID)
 			namespaces[buildings[n].Namespace] = true
 		}
-		out = append(out, models.Cycle{
+		cycle := models.Cycle{
 			Size:       len(comp),
 			Members:    members,
 			Namespaces: len(namespaces),
 			Reliable:   len(comp) <= maxReliableCycle,
-		})
+		}
+		if cycle.Reliable {
+			for _, loop := range loopsWithin(adj, comp) {
+				ids := make([]string, len(loop))
+				for i, n := range loop {
+					ids[i] = buildings[n].ID
+				}
+				cycle.Loops = append(cycle.Loops, ids)
+			}
+		}
+		out = append(out, cycle)
 	}
 
 	// Reliable cross-module cycles are the actionable findings, then the
@@ -180,4 +191,59 @@ func boolDesc(a, b bool) int {
 		return -1
 	}
 	return 1
+}
+
+func loopsWithin(adj [][]int, members []int) [][]int {
+	inside := make(map[int]bool, len(members))
+	for _, m := range members {
+		inside[m] = true
+	}
+	seen := make(map[string]bool)
+	var loops [][]int
+	for _, start := range members {
+		loop := shortestLoopThrough(adj, inside, start)
+		if loop == nil {
+			continue
+		}
+		loop = rotateToSmallest(loop)
+		if key := fmt.Sprint(loop); !seen[key] {
+			seen[key] = true
+			loops = append(loops, loop)
+		}
+	}
+	slices.SortStableFunc(loops, func(a, b []int) int { return cmp.Compare(len(a), len(b)) })
+	return loops
+}
+
+func shortestLoopThrough(adj [][]int, inside map[int]bool, start int) []int {
+	prev := map[int]int{start: start}
+	queue := []int{start}
+	for head := 0; head < len(queue); head++ {
+		current := queue[head]
+		for _, next := range adj[current] {
+			if next == start {
+				return walkBack(prev, start, current)
+			}
+			if _, visited := prev[next]; inside[next] && !visited {
+				prev[next] = current
+				queue = append(queue, next)
+			}
+		}
+	}
+	return nil
+}
+
+func walkBack(prev map[int]int, from, to int) []int {
+	path := []int{to}
+	for at := to; at != from; {
+		at = prev[at]
+		path = append(path, at)
+	}
+	slices.Reverse(path)
+	return path
+}
+
+func rotateToSmallest(loop []int) []int {
+	smallest := slices.Index(loop, slices.Min(loop))
+	return slices.Concat(loop[smallest:], loop[:smallest])
 }

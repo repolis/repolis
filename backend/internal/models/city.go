@@ -41,6 +41,8 @@ type Building struct {
 
 	CycleID int `json:"cycle_id"` // 0 when not in a cycle
 
+	Smell string `json:"smell,omitempty"` // god | brain | data
+
 	// How the methods were attributed: syntax | rule | llm | none. Shown in
 	// the inspector so inferred data is never mistaken for fact.
 	AssocSource string `json:"assoc_source"`
@@ -76,7 +78,8 @@ type Cycle struct {
 	Reliable bool `json:"reliable"`
 	// Modules spanned. A cycle inside one module is normal; one that crosses
 	// module boundaries is the finding.
-	Namespaces int `json:"namespaces"`
+	Namespaces int        `json:"namespaces"`
+	Loops      [][]string `json:"loops,omitempty"` // reliable cycles only, shortest first
 }
 
 func (c Cycle) CrossModule() bool { return c.Namespaces > 1 }
