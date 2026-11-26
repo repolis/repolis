@@ -4,7 +4,7 @@ import (
 	"iter"
 	"strings"
 
-	sitter "github.com/smacker/go-tree-sitter"
+	sitter "github.com/tree-sitter/go-tree-sitter"
 )
 
 type Ref struct {
@@ -34,7 +34,7 @@ type TypeDef struct {
 	Fields     []string
 	FieldTypes []string
 	LOC        int
-	Start, End uint32 // byte range, for quoting source
+	Start, End uint // byte range, for quoting source
 }
 
 type FuncDef struct {
@@ -48,7 +48,7 @@ type FuncDef struct {
 	Calls      []Ref
 	LOC        int
 	Complexity int // McCabe: one plus the number of decision points
-	Start, End uint32
+	Start, End uint
 }
 
 type FileFacts struct {
@@ -117,14 +117,14 @@ func Text(n *sitter.Node, src []byte) string {
 		return ""
 	}
 	s, e := n.StartByte(), n.EndByte()
-	if s <= e && e <= uint32(len(src)) {
+	if s <= e && e <= uint(len(src)) {
 		return string(src[s:e])
 	}
 	return ""
 }
 
 func Lines(n *sitter.Node) int {
-	return int(n.EndPoint().Row-n.StartPoint().Row) + 1
+	return int(n.EndPosition().Row-n.StartPosition().Row) + 1
 }
 
 func Collapse(s string) string {
@@ -133,7 +133,7 @@ func Collapse(s string) string {
 
 func Children(n *sitter.Node) iter.Seq[*sitter.Node] {
 	return func(yield func(*sitter.Node) bool) {
-		for i := range int(n.ChildCount()) {
+		for i := range n.ChildCount() {
 			if ch := n.Child(i); ch != nil && !yield(ch) {
 				return
 			}
@@ -144,8 +144,8 @@ func Children(n *sitter.Node) iter.Seq[*sitter.Node] {
 // A field can repeat: `int x, y;` is one declaration with two declarators.
 func FieldChildren(n *sitter.Node, field string) iter.Seq[*sitter.Node] {
 	return func(yield func(*sitter.Node) bool) {
-		for i := range int(n.ChildCount()) {
-			if n.FieldNameForChild(i) != field {
+		for i := range n.ChildCount() {
+			if n.FieldNameForChild(uint32(i)) != field {
 				continue
 			}
 			if ch := n.Child(i); ch != nil && !yield(ch) {
@@ -206,10 +206,10 @@ func (fn *FuncDef) scanBody(body *sitter.Node, src []byte, branches map[string]b
 	refs(body, src, fn)
 	fn.Complexity = 1
 	Walk(body, func(x *sitter.Node) bool {
-		if branches[x.Type()] {
+		if branches[x.Kind()] {
 			fn.Complexity++
 		}
-		if x.Type() == "binary_expression" {
+		if x.Kind() == "binary_expression" {
 			if op := Text(x.ChildByFieldName("operator"), src); op == "&&" || op == "||" {
 				fn.Complexity++
 			}

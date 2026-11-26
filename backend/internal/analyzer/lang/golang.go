@@ -4,17 +4,20 @@ import (
 	"path"
 	"strings"
 
-	sitter "github.com/smacker/go-tree-sitter"
-	tsgo "github.com/smacker/go-tree-sitter/golang"
+	sitter "github.com/tree-sitter/go-tree-sitter"
+	tsgo "github.com/tree-sitter/tree-sitter-go/bindings/go"
 )
 
 func init() { Register(&goLang{}) }
 
 type goLang struct{}
 
-func (goLang) Name() string              { return "Go" }
-func (goLang) Extensions() []string      { return []string{".go"} }
-func (goLang) Grammar() *sitter.Language { return tsgo.GetLanguage() }
+func (goLang) Name() string         { return "Go" }
+func (goLang) Extensions() []string { return []string{".go"} }
+
+var goGrammar = sitter.NewLanguage(tsgo.Language())
+
+func (goLang) Grammar() *sitter.Language { return goGrammar }
 func (goLang) Separator() string         { return "." }
 
 func (goLang) SyntacticMethods() bool { return true }
@@ -53,14 +56,14 @@ func (goLang) Parse(root *sitter.Node, src []byte) FileFacts {
 	var out FileFacts
 
 	for n := range Children(root) {
-		switch n.Type() {
+		switch n.Kind() {
 		case "import_declaration":
 			goImports(n, src, &out.Imports)
 
 		case "type_declaration":
 			for spec := range Children(n) {
 				// An alias declares no members; recording it duplicates the type.
-				if spec.Type() != "type_spec" {
+				if spec.Kind() != "type_spec" {
 					continue
 				}
 				if t := goTypeDef(spec, src); t != nil {
@@ -98,9 +101,9 @@ func goImports(n *sitter.Node, src []byte, out *[]Import) {
 			// The package name - by convention the last path segment - is
 			// what qualifies every call site, renamed or not.
 			imp.Alias = path.Base(raw)
-		case name.Type() == "dot":
+		case name.Kind() == "dot":
 			imp.Wildcard = true
-		case name.Type() == "blank_identifier":
+		case name.Kind() == "blank_identifier":
 			return // imported only for its side effects
 		default:
 			imp.Alias = Text(name, src)
@@ -109,7 +112,7 @@ func goImports(n *sitter.Node, src []byte, out *[]Import) {
 	}
 
 	Walk(n, func(x *sitter.Node) bool {
-		if x.Type() == "import_spec" {
+		if x.Kind() == "import_spec" {
 			add(x)
 			return false
 		}
@@ -130,10 +133,10 @@ func goTypeDef(spec *sitter.Node, src []byte) *TypeDef {
 	fields := make([]string, 0, 8)
 	types := make([]string, 0, 8)
 
-	switch body.Type() {
+	switch body.Kind() {
 	case "struct_type":
 		Walk(body, func(x *sitter.Node) bool {
-			if x.Type() != "field_declaration" {
+			if x.Kind() != "field_declaration" {
 				return true
 			}
 			// `a, b int` is one declaration with two name fields.
@@ -154,7 +157,7 @@ func goTypeDef(spec *sitter.Node, src []byte) *TypeDef {
 
 	case "interface_type":
 		Walk(body, func(x *sitter.Node) bool {
-			if x.Type() == "method_elem" {
+			if x.Kind() == "method_elem" {
 				if id := x.ChildByFieldName("name"); id != nil {
 					fields = append(fields, Text(id, src))
 				}
@@ -176,7 +179,7 @@ func goReceiverType(n *sitter.Node, src []byte) string {
 		return ""
 	}
 	for p := range Children(recv) {
-		if p.Type() == "parameter_declaration" {
+		if p.Kind() == "parameter_declaration" {
 			return goTypeName(p.ChildByFieldName("type"), src)
 		}
 	}
@@ -190,7 +193,7 @@ func goFunc(n *sitter.Node, src []byte, receiver string) *FuncDef {
 	}
 
 	fn := newFunc(n, n.ChildByFieldName("parameters"), src, name, receiver, func(p *sitter.Node) (string, bool) {
-		return goTypeName(p.ChildByFieldName("type"), src), p.Type() == "parameter_declaration"
+		return goTypeName(p.ChildByFieldName("type"), src), p.Kind() == "parameter_declaration"
 	})
 	fn.ReturnType = goTypeName(n.ChildByFieldName("result"), src)
 	fn.scanBody(n.ChildByFieldName("body"), src, goBranchNodes, goBodyRefs)
@@ -205,13 +208,13 @@ var goBranchNodes = map[string]bool{
 
 func goBodyRefs(n *sitter.Node, src []byte, fn *FuncDef) {
 	Walk(n, func(x *sitter.Node) bool {
-		switch x.Type() {
+		switch x.Kind() {
 		case "call_expression":
 			f := x.ChildByFieldName("function")
 			if f == nil {
 				break
 			}
-			switch f.Type() {
+			switch f.Kind() {
 			case "identifier":
 				fn.Calls = append(fn.Calls, Ref{Name: Text(f, src)})
 			case "selector_expression":
@@ -220,7 +223,7 @@ func goBodyRefs(n *sitter.Node, src []byte, fn *FuncDef) {
 				// `pkg.Fn()` and `value.Method()` have the same shape, so the
 				// operand is offered as a qualifier and resolution falls back
 				// to the bare name when no import matches.
-				if operand != nil && operand.Type() == "identifier" {
+				if operand != nil && operand.Kind() == "identifier" {
 					fn.Calls = append(fn.Calls, Ref{Qualifier: Text(operand, src), Name: field})
 				} else {
 					fn.Calls = append(fn.Calls, Ref{Name: field, Method: true})
@@ -249,7 +252,7 @@ func goTypeName(t *sitter.Node, src []byte) string {
 	if t == nil {
 		return ""
 	}
-	switch t.Type() {
+	switch t.Kind() {
 	case "type_identifier":
 		name := Text(t, src)
 		if goBuiltin[name] {

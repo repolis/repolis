@@ -1,12 +1,11 @@
 package analyzer
 
 import (
-	"context"
 	"os"
 	"strings"
 
 	"github.com/repolis/repolis/backend/internal/analyzer/lang"
-	sitter "github.com/smacker/go-tree-sitter"
+	sitter "github.com/tree-sitter/go-tree-sitter"
 )
 
 // For /api/explain only: nothing in the main pipeline sends source to a model.
@@ -21,9 +20,12 @@ func ExtractSymbolSource(fullPath string, symbolNames []string) string {
 	}
 
 	parser := sitter.NewParser()
-	parser.SetLanguage(l.Grammar())
-	tree, err := parser.ParseCtx(context.Background(), nil, content)
-	if err != nil {
+	defer parser.Close()
+	if err := parser.SetLanguage(l.Grammar()); err != nil {
+		return ""
+	}
+	tree := parser.Parse(content, nil)
+	if tree == nil {
 		return ""
 	}
 	defer tree.Close()
@@ -39,7 +41,7 @@ func ExtractSymbolSource(fullPath string, symbolNames []string) string {
 
 	const budget = 6000
 	var out strings.Builder
-	quote := func(name string, start, end uint32) {
+	quote := func(name string, start, end uint) {
 		if !targets[name] || out.Len() > budget || end <= start || int(end) > len(content) {
 			return
 		}

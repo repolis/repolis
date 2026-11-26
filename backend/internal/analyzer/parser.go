@@ -2,7 +2,6 @@ package analyzer
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"io/fs"
 	"os"
@@ -15,7 +14,7 @@ import (
 	"github.com/repolis/repolis/backend/internal/logger"
 
 	"github.com/repolis/repolis/backend/internal/analyzer/lang"
-	sitter "github.com/smacker/go-tree-sitter"
+	sitter "github.com/tree-sitter/go-tree-sitter"
 )
 
 var ignoredDirs = map[string]bool{
@@ -142,12 +141,21 @@ func ExtractRepository(clonePath string) (*RawExtraction, error) {
 			// Per worker: tree-sitter parsers are not goroutine safe, and one
 			// per file is wasteful.
 			parsers := make(map[string]*sitter.Parser)
+			defer func() {
+				for _, p := range parsers {
+					p.Close()
+				}
+			}()
 			for idx := range jobCh {
 				j := jobs[idx]
 				p, ok := parsers[j.lang.Name()]
 				if !ok {
 					p = sitter.NewParser()
-					p.SetLanguage(j.lang.Grammar())
+					if err := p.SetLanguage(j.lang.Grammar()); err != nil {
+						logger.Log(logger.ErrorLevel, "Grammar for %s rejected: %v", j.lang.Name(), err)
+						p.Close()
+						continue
+					}
 					parsers[j.lang.Name()] = p
 				}
 				out, perr := parseFile(p, j.lang, j.fullPath, j.relPath)
@@ -188,9 +196,9 @@ func parseFile(parser *sitter.Parser, l lang.Language, fullPath, relPath string)
 		return parseOutput{}, fmt.Errorf("file too large (%d bytes)", len(content))
 	}
 
-	tree, err := parser.ParseCtx(context.Background(), nil, content)
-	if err != nil {
-		return parseOutput{}, err
+	tree := parser.Parse(content, nil)
+	if tree == nil {
+		return parseOutput{}, fmt.Errorf("tree-sitter returned no tree")
 	}
 	defer tree.Close()
 

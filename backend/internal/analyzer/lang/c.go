@@ -3,17 +3,20 @@ package lang
 import (
 	"strings"
 
-	sitter "github.com/smacker/go-tree-sitter"
-	tsc "github.com/smacker/go-tree-sitter/c"
+	sitter "github.com/tree-sitter/go-tree-sitter"
+	tsc "github.com/tree-sitter/tree-sitter-c/bindings/go"
 )
 
 func init() { Register(&cLang{}) }
 
 type cLang struct{}
 
-func (cLang) Name() string              { return "C" }
-func (cLang) Extensions() []string      { return []string{".c", ".h"} }
-func (cLang) Grammar() *sitter.Language { return tsc.GetLanguage() }
+func (cLang) Name() string         { return "C" }
+func (cLang) Extensions() []string { return []string{".c", ".h"} }
+
+var cGrammar = sitter.NewLanguage(tsc.Language())
+
+func (cLang) Grammar() *sitter.Language { return cGrammar }
 func (cLang) Separator() string         { return "" }
 
 func (cLang) SyntacticMethods() bool { return false }
@@ -34,13 +37,13 @@ func (cLang) ImportTargets(imp Import, _ string) []string {
 
 func (l cLang) Parse(root *sitter.Node, src []byte) FileFacts {
 	var out FileFacts
-	seen := make(map[uint32]bool)
+	seen := make(map[uint]bool)
 
 	Walk(root, func(n *sitter.Node) bool {
 		if seen[n.StartByte()] {
 			return false
 		}
-		switch n.Type() {
+		switch n.Kind() {
 		case "struct_specifier", "union_specifier", "enum_specifier":
 			if t := cTypeDef(n, src, ""); t != nil {
 				out.Types = append(out.Types, *t)
@@ -50,7 +53,7 @@ func (l cLang) Parse(root *sitter.Node, src []byte) FileFacts {
 			if t := cTypedef(n, src); t != nil {
 				out.Types = append(out.Types, *t)
 				for ch := range Children(n) {
-					if cIsTypeSpecifier(ch.Type()) {
+					if cIsTypeSpecifier(ch.Kind()) {
 						seen[ch.StartByte()] = true
 					}
 				}
@@ -68,7 +71,7 @@ func (l cLang) Parse(root *sitter.Node, src []byte) FileFacts {
 			}
 
 		case "declaration":
-			if n.Parent() != nil && n.Parent().Type() == "translation_unit" {
+			if n.Parent() != nil && n.Parent().Kind() == "translation_unit" {
 				out.ScopeVar++
 			}
 		}
@@ -89,7 +92,7 @@ func cBodyList(n *sitter.Node) *sitter.Node {
 		return b
 	}
 	for ch := range Children(n) {
-		if ch.Type() == "field_declaration_list" || ch.Type() == "enumerator_list" {
+		if ch.Kind() == "field_declaration_list" || ch.Kind() == "enumerator_list" {
 			return ch
 		}
 	}
@@ -114,7 +117,7 @@ func cTypeDef(n *sitter.Node, src []byte, nameOverride string) *TypeDef {
 
 func cTypedef(n *sitter.Node, src []byte) *TypeDef {
 	for ch := range Children(n) {
-		if cIsTypeSpecifier(ch.Type()) {
+		if cIsTypeSpecifier(ch.Kind()) {
 			name := strings.TrimLeft(Text(n.ChildByFieldName("declarator"), src), "* \t")
 			return cTypeDef(ch, src, name)
 		}
@@ -126,7 +129,7 @@ func cMembers(body *sitter.Node, src []byte) ([]string, []string) {
 	fields := make([]string, 0, body.ChildCount())
 	types := make([]string, 0, body.ChildCount())
 	for ch := range Children(body) {
-		switch ch.Type() {
+		switch ch.Kind() {
 		case "field_declaration":
 			// `int x, y;` is one declaration with two declarators.
 			fields = append(fields, cDeclaratorNames(ch, src)...)
@@ -153,7 +156,7 @@ func cDeclaratorNames(n *sitter.Node, src []byte) []string {
 }
 
 func cUnwrap(n *sitter.Node, src []byte) string {
-	switch n.Type() {
+	switch n.Kind() {
 	case "field_identifier", "identifier", "type_identifier":
 		return Text(n, src)
 	case "pointer_declarator", "array_declarator", "function_declarator",
@@ -174,7 +177,7 @@ func cBaseType(t *sitter.Node, src []byte) string {
 	if t == nil {
 		return ""
 	}
-	switch t.Type() {
+	switch t.Kind() {
 	case "type_identifier":
 		return Text(t, src)
 	case "struct_specifier", "union_specifier", "enum_specifier":
@@ -198,7 +201,7 @@ func cFunc(node *sitter.Node, src []byte) *FuncDef {
 	}
 
 	fn := newFunc(node, fnDecl.ChildByFieldName("parameters"), src, name, "", func(p *sitter.Node) (string, bool) {
-		return cBaseType(p.ChildByFieldName("type"), src), p.Type() == "parameter_declaration"
+		return cBaseType(p.ChildByFieldName("type"), src), p.Kind() == "parameter_declaration"
 	})
 	fn.ReturnType = cBaseType(node.ChildByFieldName("type"), src)
 	fn.scanBody(node.ChildByFieldName("body"), src, cBranchNodes, cBodyRefs)
@@ -212,7 +215,7 @@ var cBranchNodes = map[string]bool{
 }
 
 func cFuncDeclarator(n *sitter.Node) *sitter.Node {
-	switch n.Type() {
+	switch n.Kind() {
 	case "function_declarator":
 		return n
 	case "pointer_declarator", "parenthesized_declarator":
@@ -221,7 +224,7 @@ func cFuncDeclarator(n *sitter.Node) *sitter.Node {
 		}
 	}
 	for ch := range Children(n) {
-		if ch.Type() == "function_declarator" {
+		if ch.Kind() == "function_declarator" {
 			return ch
 		}
 	}
@@ -230,10 +233,10 @@ func cFuncDeclarator(n *sitter.Node) *sitter.Node {
 
 func cBodyRefs(n *sitter.Node, src []byte, fn *FuncDef) {
 	Walk(n, func(x *sitter.Node) bool {
-		switch x.Type() {
+		switch x.Kind() {
 		case "call_expression":
 			if f := x.ChildByFieldName("function"); f != nil {
-				switch f.Type() {
+				switch f.Kind() {
 				case "identifier":
 					fn.Calls = append(fn.Calls, Ref{Name: Text(f, src)})
 				case "field_expression":

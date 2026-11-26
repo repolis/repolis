@@ -4,17 +4,20 @@ import (
 	"path"
 	"strings"
 
-	sitter "github.com/smacker/go-tree-sitter"
-	tsrust "github.com/smacker/go-tree-sitter/rust"
+	sitter "github.com/tree-sitter/go-tree-sitter"
+	tsrust "github.com/tree-sitter/tree-sitter-rust/bindings/go"
 )
 
 func init() { Register(&rustLang{}) }
 
 type rustLang struct{}
 
-func (rustLang) Name() string              { return "Rust" }
-func (rustLang) Extensions() []string      { return []string{".rs"} }
-func (rustLang) Grammar() *sitter.Language { return tsrust.GetLanguage() }
+func (rustLang) Name() string         { return "Rust" }
+func (rustLang) Extensions() []string { return []string{".rs"} }
+
+var rustGrammar = sitter.NewLanguage(tsrust.Language())
+
+func (rustLang) Grammar() *sitter.Language { return rustGrammar }
 func (rustLang) Separator() string         { return "::" }
 func (rustLang) SyntacticMethods() bool    { return true }
 func (rustLang) ModuleScoped() bool        { return true }
@@ -128,7 +131,7 @@ func (rustLang) Parse(root *sitter.Node, src []byte) FileFacts {
 	var scan func(n *sitter.Node, receiver string)
 	scan = func(n *sitter.Node, receiver string) {
 		for ch := range Children(n) {
-			switch ch.Type() {
+			switch ch.Kind() {
 			case "use_declaration":
 				if a := ch.ChildByFieldName("argument"); a != nil {
 					rustUse(a, src, "", &out.Imports)
@@ -140,7 +143,7 @@ func (rustLang) Parse(root *sitter.Node, src []byte) FileFacts {
 					out.Types = append(out.Types, *t)
 				}
 				// A trait body holds signatures that belong to the trait.
-				if ch.Type() == "trait_item" {
+				if ch.Kind() == "trait_item" {
 					if body := ch.ChildByFieldName("body"); body != nil {
 						scan(body, Text(ch.ChildByFieldName("name"), src))
 					}
@@ -189,7 +192,7 @@ func rustUse(n *sitter.Node, src []byte, prefix string, out *[]Import) {
 		return a + "::" + b
 	}
 
-	switch n.Type() {
+	switch n.Kind() {
 	case "identifier", "scoped_identifier", "crate", "super", "self":
 		full := join(prefix, Text(n, src))
 		// `use a::b::c` brings `c` into scope; the implicit alias is what
@@ -205,7 +208,7 @@ func rustUse(n *sitter.Node, src []byte, prefix string, out *[]Import) {
 	case "use_wildcard":
 		p := ""
 		for ch := range Children(n) {
-			if ch.Type() != "*" {
+			if ch.Kind() != "*" {
 				p = Text(ch, src) // the last non-* child is the path
 			}
 		}
@@ -244,7 +247,7 @@ func rustTypeDef(n *sitter.Node, src []byte) *TypeDef {
 	fields := make([]string, 0, body.ChildCount())
 	types := make([]string, 0, body.ChildCount())
 	for ch := range Children(body) {
-		switch ch.Type() {
+		switch ch.Kind() {
 		case "field_declaration":
 			if id := ch.ChildByFieldName("name"); id != nil {
 				fields = append(fields, Text(id, src))
@@ -274,7 +277,7 @@ func rustFunc(n *sitter.Node, src []byte, receiver string) *FuncDef {
 	}
 
 	fn := newFunc(n, n.ChildByFieldName("parameters"), src, name, receiver, func(p *sitter.Node) (string, bool) {
-		switch p.Type() {
+		switch p.Kind() {
 		case "parameter":
 			return rustTypeName(p.ChildByFieldName("type"), src), true
 		case "self_parameter":
@@ -295,10 +298,10 @@ var rustBranchNodes = map[string]bool{
 
 func rustBodyRefs(n *sitter.Node, src []byte, fn *FuncDef) {
 	Walk(n, func(x *sitter.Node) bool {
-		switch x.Type() {
+		switch x.Kind() {
 		case "call_expression":
 			if f := x.ChildByFieldName("function"); f != nil {
-				switch f.Type() {
+				switch f.Kind() {
 				case "identifier":
 					fn.Calls = append(fn.Calls, Ref{Name: Text(f, src)})
 				case "scoped_identifier":
@@ -335,7 +338,7 @@ func rustTypeName(t *sitter.Node, src []byte) string {
 	if t == nil {
 		return ""
 	}
-	switch t.Type() {
+	switch t.Kind() {
 	case "type_identifier":
 		return Text(t, src)
 	case "primitive_type":
