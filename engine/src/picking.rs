@@ -11,10 +11,13 @@ pub struct Pickable {
     pub max: Vec3,
 }
 
+const CLICK_SLOP_PX: f32 = 5.0;
+
 /// What the cursor was over last frame, so hover is only reported on change.
 #[derive(Resource, Default)]
 pub struct Hovered(pub Option<Target>);
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn picking_system(
     windows: Query<&Window>,
     camera_q: Query<(&Camera, &GlobalTransform), With<CityCamera>>,
@@ -23,6 +26,7 @@ pub(crate) fn picking_system(
     mut hovered: ResMut<Hovered>,
     mouse: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
+    mut pressed_at: Local<Option<Vec2>>,
 ) {
     if keys.just_pressed(KeyCode::Escape) {
         dispatch_select(None);
@@ -31,8 +35,8 @@ pub(crate) fn picking_system(
         return;
     };
 
-    let hit = window
-        .cursor_position()
+    let cursor = window.cursor_position();
+    let hit = cursor
         .and_then(|cursor| camera.viewport_to_world(cam_tf, cursor))
         .and_then(|ray| nearest(ray, &pickables));
     let target = hit.map(|p| p.target);
@@ -43,6 +47,11 @@ pub(crate) fn picking_system(
     }
 
     if mouse.just_pressed(MouseButton::Left) {
+        *pressed_at = cursor;
+    }
+    let clicked = mouse.just_released(MouseButton::Left)
+        && matches!((pressed_at.take(), cursor), (Some(down), Some(up)) if down.distance(up) < CLICK_SLOP_PX);
+    if clicked {
         if let (Some(p), Ok(mut cam)) = (hit, city_cam.get_single_mut()) {
             frame(&mut cam, p);
         }
