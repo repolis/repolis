@@ -1,6 +1,4 @@
 use bevy::prelude::*;
-use bevy::render::settings::{Backends, RenderCreation, WgpuSettings};
-use bevy::render::RenderPlugin;
 use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
 
@@ -87,27 +85,16 @@ pub fn run_bevy_app() {
     console_error_panic_hook::set_once();
 
     let mut app = App::new();
-    app.add_plugins(
-        DefaultPlugins
-            .set(WindowPlugin {
-                primary_window: Some(Window {
-                    title: "Repolis".into(),
-                    canvas: Some("#bevy-canvas".into()),
-                    fit_canvas_to_parent: true,
-                    prevent_default_event_handling: false,
-                    ..default()
-                }),
-                ..default()
-            })
-            .set(RenderPlugin {
-                render_creation: RenderCreation::from(WgpuSettings {
-                    // WebGL2 too: WebGPU alone is a blank canvas in Firefox and older Safari.
-                    backends: Some(Backends::BROWSER_WEBGPU | Backends::GL),
-                    ..default()
-                }),
-                ..default()
-            }),
-    );
+    app.add_plugins(DefaultPlugins.set(WindowPlugin {
+        primary_window: Some(Window {
+            title: "Repolis".into(),
+            canvas: Some("#bevy-canvas".into()),
+            fit_canvas_to_parent: true,
+            prevent_default_event_handling: false,
+            ..default()
+        }),
+        ..default()
+    }));
     bevy::asset::embedded_asset!(app, "shaders/facade.wesl");
     app.add_plugins(MaterialPlugin::<FacadeMaterial>::default());
     add_city_systems(&mut app);

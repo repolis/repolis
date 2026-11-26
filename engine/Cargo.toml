@@ -22,7 +22,6 @@ bevy = { version = "0.20", default-features = false, features = [
     "bevy_winit",
     "tonemapping_luts",
     "web",
-    "webgl2",
     "webgpu",
     "x11",
     "zstd_rust",

@@ -6,7 +6,7 @@ Shows a code repository as a 3D city. Supports C, Rust and Go.
 
 - Go 1.26, Node 22, git
 - Rust through rustup (version pinned in `engine/rust-toolchain.toml`) and wasm-pack
-- A browser with WebGPU. The fallback does not work yet.
+- A browser with WebGPU
 - Optional: an OpenAI-compatible LLM endpoint, such as llama.cpp's
   `llama-server`, to name districts. Without one, districts are named after
   their main directory.

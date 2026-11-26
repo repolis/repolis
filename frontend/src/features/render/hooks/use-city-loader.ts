@@ -105,7 +105,7 @@ export function useCityLoader(repoUrl: string, onCity: (raw: RawCity) => void) {
         if (!isEngineAlreadyRunning(e)) {
           if (!cancelled)
             setError(
-              "The 3D engine failed to start. Your browser may not support WebGPU or WebGL2.",
+              "The 3D engine failed to start. Your browser may not support WebGPU.",
             );
           return;
         }
