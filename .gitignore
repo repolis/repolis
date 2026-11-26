@@ -13,8 +13,10 @@ backend/repos_cache/
 
 # engine
 engine/target/
-engine/Cargo.lock
 engine/pkg/
+
+# frontend
+frontend/src/wasm/
 
 # ide
 .idea/

@@ -16,17 +16,17 @@ engine/     Rust + Bevy compiled to WebAssembly: layout and rendering
 # 1. Backend
 cd backend
 cp .env.example .env          # then point LLM_BASE_URL at your model server
-go run ./cmd/api              # http://localhost:8080
+go run ./cmd/api              # http://localhost:8081
 
-# 2. Engine -> wasm (only needed when engine/ changes)
-cd ../engine
-./build-wasm.sh
-
-# 3. Frontend
+# 2. Frontend; also builds the engine to wasm whenever engine/ changed
 cd ../frontend
-npm install
+npm ci
 npm run dev                   # http://localhost:5173
 ```
+
+`make dev` runs both with backend live reload. `npm run dev` builds a fast,
+unoptimised wasm; `make wasm` builds the release one that CI and Docker ship.
+`docker compose up --build` serves the whole thing on `http://localhost:3000`.
 
 Then open `http://localhost:5173/city/<host>/<owner>/<repo>`, for example
 `/city/github.com/tsoding/nothing`.
@@ -43,10 +43,8 @@ cd backend && go run ./cmd/analyze /path/to/a/checkout
 # Same, plus the LLM refinement pass
 go run ./cmd/analyze -llm /path/to/a/checkout
 
-# Tests
-cd backend  && go test ./...
-cd engine   && cargo test --release
-cd frontend && npm test
+# Every check CI runs (or check-backend, check-engine, check-frontend)
+make check
 ```
 
 ## Adding a language
@@ -111,13 +109,13 @@ happen again. Three levels, each including the ones above it:
 The same thing over HTTP:
 
 ```bash
-curl -X POST localhost:8080/api/analyze   -H 'Content-Type: application/json'   -d '{"repo_url":"https://github.com/tsoding/nothing","refresh":"model"}'
+curl -X POST localhost:8081/api/analyze   -H 'Content-Type: application/json'   -d '{"repo_url":"https://github.com/tsoding/nothing","refresh":"model"}'
 ```
 
 `refresh` is `city`, `model` or `clone`; omit it to use the cache. The older
 `"force": true` still works and means `city`. Measured on tsoding/nothing:
 cached 0.5 s, `city` 0.7 s with no model calls, `model` 2.6 s with 18.
 
-Architecture and design rationale: [`../tech.md`](../tech.md) and
-[`../city_generation.md`](../city_generation.md). Roadmap:
-[`../steps.md`](../steps.md).
+Architecture and design rationale:
+[`../thesis/notes/architecture.md`](../thesis/notes/architecture.md). Roadmap:
+[`../roadmap.md`](../roadmap.md).

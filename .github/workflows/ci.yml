@@ -21,12 +21,10 @@ permissions:
 # waiting forever. Cost is controlled by caching and cancel-in-progress instead.
 
 jobs:
+  # Each job runs the same make target as a local `make check`.
   backend:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    defaults:
-      run:
-        working-directory: ./backend
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -35,46 +33,53 @@ jobs:
           # for 1.26 while CI pinned 1.22) and the build could not have passed.
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
-      - name: gofmt
-        run: |
-          unformatted=$(gofmt -l .)
-          if [ -n "$unformatted" ]; then
-            echo "::error::gofmt needed for:"; echo "$unformatted"; exit 1
-          fi
-      - run: go build -v ./...
-      - run: go vet ./...
       # -race matters here: single-flight job dedup, the SSE broadcast and the
       # atomic cache writes are all concurrent.
-      - run: go test -race -v ./...
+      - run: make check-backend
 
   engine:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    defaults:
-      run:
-        working-directory: ./engine
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
-          components: clippy
+      # Version, components and targets come from engine/rust-toolchain.toml.
+      - run: rustup toolchain install
+        working-directory: ./engine
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: engine
-      - name: install alsa and udev
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev
-      # Pinned and cached, rather than piping an unversioned installer to sh
-      # on every run.
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: wasm-pack@0.15.0
-      # Clippy first: it populates the same build cache the tests then reuse.
-      - run: cargo clippy --release --all-targets -- -D warnings
       # Layout invariants (no overlapping buildings, everything inside its
       # district) run on the host target; wasm is only the delivery format.
-      - run: cargo test --release
-      - run: ./build-wasm.sh
+      # Clippy only type-checks, so it shares little with the test build.
+      - run: make check-engine
+
+  wasm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      # Most pushes do not touch the engine, so the frontend reuses the last
+      # wasm instead of waiting for a cold Bevy release build.
+      - id: cache
+        uses: actions/cache@v4
+        with:
+          path: frontend/src/wasm
+          key: wasm-${{ hashFiles('engine/src/**', 'engine/Cargo.toml', 'engine/Cargo.lock', 'engine/build-wasm.sh') }}
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: rustup toolchain install
+        working-directory: ./engine
+      - if: steps.cache.outputs.cache-hit != 'true'
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: engine
+      # Pinned and cached, rather than piping an unversioned installer to sh
+      # on every run.
+      - if: steps.cache.outputs.cache-hit != 'true'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack@0.15.1
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: engine/build-wasm.sh
       - uses: actions/upload-artifact@v7
         with:
           name: wasm
@@ -84,10 +89,7 @@ jobs:
   frontend:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: engine
-    defaults:
-      run:
-        working-directory: ./frontend
+    needs: wasm
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -101,10 +103,9 @@ jobs:
           name: wasm
           path: frontend/src/wasm
       - run: npm ci
-      - run: npx prettier --check .
-      # Errors fail the build; the remaining warnings are the WebGPU shims in
-      # main.tsx, where `any` is the honest type for patching browser globals.
-      - run: npm run lint
-      - run: npx tsc --noEmit
-      - run: npm test
+        working-directory: ./frontend
+      # Lint errors fail the build; the remaining warnings are the WebGPU shims
+      # in main.tsx, where `any` is the honest type for patching browser globals.
+      - run: make check-frontend
       - run: npm run build
+        working-directory: ./frontend

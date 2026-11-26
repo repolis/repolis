@@ -1,0 +1,12 @@
+# Host build output: engine/target alone is several GB, and the macOS
+# node_modules would overwrite the Linux ones installed by npm ci.
+**/node_modules
+**/dist
+**/target
+engine/pkg
+frontend/src/wasm
+backend/tmp
+backend/data
+**/.env
+**/.DS_Store
+.git

@@ -4,20 +4,22 @@ services:
       context: .
       dockerfile: ./backend/Dockerfile
     ports:
-      - "8080:8080"
+      - "8081:8081"
     environment:
       # The code reads APP_ENV; the previous compose file set ENV, which
       # nothing looked at, so cookies never became Secure in production.
       - APP_ENV=${APP_ENV:-development}
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - DB_PATH=/app/data/sqlite.db
+      # On the volume, so a restart does not force a re-clone.
+      - CLONE_DIR=/app/data/clones
       # host.docker.internal reaches a llama-server running on the host.
       - LLM_BASE_URL=${LLM_BASE_URL:-http://host.docker.internal:8080/v1}
       - LLM_API_KEY=${LLM_API_KEY:-llama.cpp}
       - LLM_MODEL=${LLM_MODEL:-gemma4-12b}
       - LLM_MODEL_FAST=${LLM_MODEL_FAST:-qwen3.5-2b}
       - LLM_CONCURRENCY=${LLM_CONCURRENCY:-2}
-      - CORS_ORIGIN=${CORS_ORIGIN:-http://localhost:3000}
+      - LLM_ADJUDICATE=${LLM_ADJUDICATE:-true}
     volumes:
       - repolis-db-data:/app/data
     extra_hosts:

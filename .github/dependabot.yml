@@ -1,7 +1,5 @@
 version: 2
 
-# Grouped and monthly: this is a three-language repository and ungrouped weekly
-# updates would produce more pull requests than the project can review.
 updates:
   - package-ecosystem: gomod
     directory: /backend
@@ -23,12 +21,13 @@ updates:
     directory: /engine
     schedule:
       interval: monthly
+    ignore:
+      - dependency-name: "bevy"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
     groups:
       engine:
         patterns: ["*"]
 
-  # The reason this file exists: every action in the workflow was between two
-  # and four major versions behind before anything flagged it.
   - package-ecosystem: github-actions
     directory: /
     schedule:

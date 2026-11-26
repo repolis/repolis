@@ -1,28 +1,26 @@
-# build rust
-FROM rust:slim AS engine-builder
-RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
-RUN curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+# syntax=docker/dockerfile:1
+FROM rust:1.97.1-slim AS engine-builder
+ARG WASM_PACK=0.15.1
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN curl -sSfL "https://github.com/wasm-bindgen/wasm-pack/releases/download/v${WASM_PACK}/wasm-pack-v${WASM_PACK}-$(uname -m)-unknown-linux-musl.tar.gz" \
+    | tar -xz --strip-components=1 -C /usr/local/bin "wasm-pack-v${WASM_PACK}-$(uname -m)-unknown-linux-musl/wasm-pack"
+WORKDIR /src/engine
+COPY engine/rust-toolchain.toml ./
+RUN rustup toolchain install
+COPY engine/ ./
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/src/engine/target \
+    ./build-wasm.sh
 
-WORKDIR /engine
-COPY ./engine .
-# build web assembly package
-RUN wasm-pack build --target web --out-dir /frontend-src/wasm
-
-# build frontend
-FROM node:20-slim AS frontend-builder
-WORKDIR /app
-COPY ./frontend/package*.json ./
-RUN npm ci
-
-# xopy everything from frontend
-COPY ./frontend .
-# copy compiled wasm into the source folder
-COPY --from=engine-builder /frontend-src/wasm ./src/wasm
-
+FROM node:22-slim AS frontend-builder
+WORKDIR /src/frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN --mount=type=cache,target=/root/.npm npm ci
+COPY frontend/ ./
+COPY --from=engine-builder /src/frontend/src/wasm ./src/wasm
 RUN npm run build
 
-# production serve 
-FROM nginx:alpine AS production
-COPY --from=frontend-builder /app/dist /usr/share/nginx/html
+FROM nginx:1.30-alpine
+COPY frontend/nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=frontend-builder /src/frontend/dist /usr/share/nginx/html
 EXPOSE 80
-CMD ["nginx", "-g", "daemon off;"]

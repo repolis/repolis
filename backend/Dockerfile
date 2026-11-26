@@ -1,19 +1,16 @@
-FROM golang:1.26-alpine AS builder
-RUN apk add --no-cache git gcc musl-dev
+# syntax=docker/dockerfile:1
+FROM golang:1.26.11-alpine3.24 AS builder
+# go-tree-sitter is cgo.
+RUN apk add --no-cache gcc musl-dev
+WORKDIR /src
+COPY backend/ ./
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=1 go build -o /out/repolis ./cmd/api
 
+FROM alpine:3.24
+RUN apk add --no-cache git ca-certificates
 WORKDIR /app
-COPY ./backend/go.mod ./backend/go.sum* ./
-RUN go mod download
-
-COPY ./backend .
-RUN CGO_ENABLED=1 GOOS=linux go build -o main ./cmd/api
-
-FROM alpine:latest
-RUN apk add --no-cache git openssh-client
-
-WORKDIR /app
-COPY --from=builder /app/main .
-RUN mkdir -p /app/data/cities
-
-EXPOSE 8080
-CMD ["./main"]
+COPY --from=builder /out/repolis ./repolis
+EXPOSE 8081
+CMD ["./repolis"]

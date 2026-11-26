@@ -18,6 +18,8 @@ const (
 	maxBodyBytes  = 64 << 10
 	cloneMaxAge   = 24 * time.Hour
 	analysisLimit = 20 * time.Minute
+	// 8080 is llama-server's default, which is where LLM_BASE_URL usually points.
+	listenAddr = ":8081"
 )
 
 type server struct {
@@ -26,7 +28,10 @@ type server struct {
 }
 
 func main() {
-	_ = godotenv.Load()
+	if err := godotenv.Load(); err != nil && os.Getenv("LLM_BASE_URL") == "" {
+		cwd, _ := os.Getwd()
+		logger.Log(logger.WarnLevel, "No .env in %s and LLM_BASE_URL unset: districts will be named after directories. Run from backend/.", cwd)
+	}
 
 	if err := db.Init(); err != nil {
 		logger.Log(logger.FatalLevel, "Failed to initialize database: %v", err)
@@ -47,7 +52,7 @@ func main() {
 	})
 
 	srv := &http.Server{
-		Addr:              ":8080",
+		Addr:              listenAddr,
 		Handler:           corsMiddleware(cookieMiddleware(mux)),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
@@ -56,7 +61,7 @@ func main() {
 		MaxHeaderBytes: 1 << 16,
 	}
 
-	logger.Log(logger.InfoLevel, "Backend server is running on http://localhost:8080")
+	logger.Log(logger.InfoLevel, "Backend server is running on http://localhost%s", listenAddr)
 	if err := srv.ListenAndServe(); err != nil {
 		logger.Log(logger.FatalLevel, "Server crashed: %v", err)
 	}

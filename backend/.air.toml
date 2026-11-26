@@ -15,3 +15,6 @@ tmp_dir = "tmp"
   watcher = "cyan"
   build = "yellow"
   runner = "green"
+
+[misc]
+  clean_on_exit = true

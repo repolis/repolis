@@ -71,7 +71,13 @@ func gitEnv() []string {
 // Blobless partial clone: full commit and tree history, blobs fetched lazily.
 // Unlike --depth it keeps churn accurate.
 func CloneRepo(repoURL string, sessionID string) (string, error) {
-	clonePath, err := os.MkdirTemp("", "repolis-session-"+sessionID+"-*")
+	cloneDir := os.Getenv("CLONE_DIR")
+	if cloneDir != "" {
+		if err := os.MkdirAll(cloneDir, 0o755); err != nil {
+			return "", err
+		}
+	}
+	clonePath, err := os.MkdirTemp(cloneDir, "repolis-session-"+sessionID+"-*")
 	if err != nil {
 		return "", err
 	}
