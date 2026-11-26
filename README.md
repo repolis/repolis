@@ -1,121 +1,40 @@
 # Repolis
 
-Turns a source repository into a 3D city you can navigate. One building per
-type or file module, grouped into districts by how the code actually calls
-itself. **C, Rust and Go** are supported; adding a language is one file.
+Shows a code repository as a 3D city. Supports C, Rust and Go.
+
+## Requirements
+
+- Go 1.26, Node 22, git
+- Rust through rustup (version pinned in `engine/rust-toolchain.toml`) and wasm-pack
+- A browser with WebGPU. The fallback does not work yet.
+- Optional: an OpenAI-compatible LLM endpoint, such as llama.cpp's
+  `llama-server`, to name districts. Without one, districts are named after
+  their main directory.
+
+## Run
+
+```bash
+cp backend/.env.example backend/.env
+cd frontend && npm ci
+make dev
+```
+
+Open http://localhost:5173/city/github.com/sqlite/sqlite. Any public GitHub,
+GitLab, Codeberg or Bitbucket repository works the same way.
+
+`docker compose up --build` runs everything on http://localhost:3000.
+
+## Develop
+
+- `make dev` spins up a dev server of both frontend and backend.
+- `make check` runs the same checks as CI.
+- `make wasm` builds the release engine. `npm run dev` builds a faster,
+  unoptimised one when `engine/` changed.
+- `cd backend && go run ./cmd/analyze <path>` prints what the analyzer extracts
+  from a local checkout, no server needed.
 
 ```
-frontend/   React + Vite UI, hosts the canvas and the inspector
 backend/    Go: clone, parse, call graph, git history, clustering, API
-engine/     Rust + Bevy compiled to WebAssembly: layout and rendering
+engine/     Rust + Bevy, compiled to WebAssembly: layout and rendering
+frontend/   React + Vite: UI around the canvas
 ```
-
-## Running it
-
-```bash
-# 1. Backend
-cd backend
-cp .env.example .env          # then point LLM_BASE_URL at your model server
-go run ./cmd/api              # http://localhost:8081
-
-# 2. Frontend; also builds the engine to wasm whenever engine/ changed
-cd ../frontend
-npm ci
-npm run dev                   # http://localhost:5173
-```
-
-`make dev` runs both with backend live reload. `npm run dev` builds a fast,
-unoptimised wasm; `make wasm` builds the release one that CI and Docker ship.
-`docker compose up --build` serves the whole thing on `http://localhost:3000`.
-
-Then open `http://localhost:5173/city/<host>/<owner>/<repo>`, for example
-`/city/github.com/tsoding/nothing`.
-
-The LLM is optional. Without one configured the backend still serves a complete
-city; districts are named after their dominant directory instead of by a model.
-
-## Working on it
-
-```bash
-# Extraction quality, no server and no LLM (fast loop)
-cd backend && go run ./cmd/analyze /path/to/a/checkout
-
-# Same, plus the LLM refinement pass
-go run ./cmd/analyze -llm /path/to/a/checkout
-
-# Every check CI runs (or check-backend, check-engine, check-frontend)
-make check
-```
-
-## Adding a language
-
-Everything language-specific lives in `backend/internal/analyzer/lang/`. The
-association ladder, call graph, clustering, layout and renderer never name a
-tree-sitter node type.
-
-To add one, implement `lang.Language` in a new file and call `Register` from
-its `init`. Nine methods:
-
-| Method                          | Answers                                           |
-| ------------------------------- | ------------------------------------------------- |
-| `Name`, `Extensions`, `Grammar` | which files, which tree-sitter grammar            |
-| `Namespace(path)`               | which module a file's symbols belong to           |
-| `Separator`                     | how qualified names are written (`::`, `.`)       |
-| `SyntacticMethods`              | does the grammar state method ownership?          |
-| `ImportTargets`                 | what namespaces one import makes visible          |
-| `Parse`                         | types, functions, calls and imports from one file |
-
-`SyntacticMethods` is the important one. Rust's `impl` block, a Go receiver
-and a method inside a class body all _state_ the owning type, so `Receiver` is
-read straight from the tree and nothing is inferred. C cannot express the idea
-at all, which is why it alone needs the heuristic ladder and the model that
-adjudicates it. Measured:
-
-|                           | association                  | LLM calls                   |
-| ------------------------- | ---------------------------- | --------------------------- |
-| gin (Go, 99 files)        | 430 by syntax, 0 guessed     | **8**, all district naming  |
-| ripgrep (Rust, 110 files) | 1443 by syntax, 0 guessed    | **13**, all district naming |
-| libgit2 (C, 1032 files)   | 7124 by rule, 2549 ambiguous | **616**                     |
-
-A repository may mix languages; each file is parsed by whichever language
-claims its extension, and they share one call graph.
-
-## How it reads
-
-| Channel              | Meaning                                                |
-| -------------------- | ------------------------------------------------------ |
-| Height               | number of functions                                    |
-| Footprint            | number of fields                                       |
-| Hue                  | district purpose (core, data, network, security, etc.) |
-| Saturation           | recency (old code fades toward grey)                   |
-| District ground area | amount of code in that district                        |
-
-Drag to orbit, scroll to zoom, WASD to pan, click to select, Esc to clear,
-`R` to reset. The legend in the bottom right repeats all of
-this, along with how much of the analysis was deterministic.
-
-## Regenerating a city
-
-A finished city is cached by repository and commit, so re-opening it is
-instant. The **Regenerate** button next to the search box forces the work to
-happen again. Three levels, each including the ones above it:
-
-| Level            | Redoes                                                   | Use it when                             |
-| ---------------- | -------------------------------------------------------- | --------------------------------------- |
-| Re-analyse       | parsing, association, call graph, clustering, layout     | you changed extraction or layout code   |
-| Re-ask the model | the above, plus every model answer                       | you changed a prompt or switched models |
-| Re-clone         | the above, plus deleting and re-downloading the checkout | the working copy is stale or damaged    |
-
-The same thing over HTTP:
-
-```bash
-curl -X POST localhost:8081/api/analyze   -H 'Content-Type: application/json'   -d '{"repo_url":"https://github.com/tsoding/nothing","refresh":"model"}'
-```
-
-`refresh` is `city`, `model` or `clone`; omit it to use the cache. The older
-`"force": true` still works and means `city`. Measured on tsoding/nothing:
-cached 0.5 s, `city` 0.7 s with no model calls, `model` 2.6 s with 18.
-
-Architecture and design rationale:
-[`../thesis/notes/architecture.md`](../thesis/notes/architecture.md). Roadmap:
-[`../roadmap.md`](../roadmap.md).
