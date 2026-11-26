@@ -1,4 +1,5 @@
 import type { CycleInfo } from "../types";
+import { closedLoop } from "../utils/appearance";
 
 interface Props {
   cycles: CycleInfo[];
@@ -50,7 +51,7 @@ export function CycleList({
                 className={`block w-full px-3 py-1 text-left font-mono text-[10px] hover:bg-gray-800 ${l === loop ? "text-white" : "text-gray-400"}`}
               >
                 {l === loop ? (
-                  [...l, l[0]].map((id, k) => (
+                  closedLoop(l).map((id, k) => (
                     <div key={k} className="break-all">
                       {k > 0 && <span className="text-red-400">{"-> "}</span>}
                       {nameOf(id)}
@@ -58,7 +59,7 @@ export function CycleList({
                   ))
                 ) : (
                   <div className="truncate">
-                    {[...l, l[0]].map(nameOf).join(" -> ")}
+                    {closedLoop(l).map(nameOf).join(" -> ")}
                   </div>
                 )}
               </button>

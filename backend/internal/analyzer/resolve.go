@@ -59,7 +59,25 @@ func buildScopes(raw *RawExtraction) *scopes {
 		sc.sep = l.Separator()
 	}
 
-	for _, f := range raw.Files {
+	sc.indexNamespaces(raw.Files)
+
+	edges := make(map[string][]string, len(raw.Files))
+	for i := range raw.Files {
+		f := &raw.Files[i]
+		l := lang.ForFile(f.Path)
+		if l == nil {
+			continue
+		}
+		sc.moduleScoped[f.Path] = l.ModuleScoped()
+		sc.visible[f.Path] = sc.importsOf(f, l, edges)
+	}
+
+	sc.addTransitiveReach(raw.Files, edges)
+	return sc
+}
+
+func (sc *scopes) indexNamespaces(files []FileInfo) {
+	for _, f := range files {
 		sc.nsByFile[f.Path] = f.Namespace
 		if !sc.allNS[f.Namespace] {
 			sc.allNS[f.Namespace] = true
@@ -67,52 +85,46 @@ func buildScopes(raw *RawExtraction) *scopes {
 			sc.bySuffix[seg] = append(sc.bySuffix[seg], f.Namespace)
 		}
 	}
+}
 
-	edges := make(map[string][]string, len(raw.Files))
-	for _, f := range raw.Files {
-		l := lang.ForFile(f.Path)
-		if l == nil {
+func (sc *scopes) importsOf(f *FileInfo, l lang.Language, edges map[string][]string) map[string]int {
+	vis := map[string]int{f.Namespace: visOwn}
+	for _, imp := range f.Imports {
+		targets := l.ImportTargets(imp, f.Namespace)
+		if len(targets) == 0 {
 			continue
 		}
-		sc.moduleScoped[f.Path] = l.ModuleScoped()
-		vis := map[string]int{f.Namespace: visOwn}
 
-		for _, imp := range f.Imports {
-			targets := l.ImportTargets(imp, f.Namespace)
-			if len(targets) == 0 {
+		// The alias stands for the full path, not the module prefix:
+		// `use a::b::area as alias` must remember "area".
+		if imp.Alias != "" {
+			if sc.aliases[f.Path] == nil {
+				sc.aliases[f.Path] = map[string]string{}
+			}
+			sc.aliases[f.Path][imp.Alias] = targets[0]
+		}
+
+		for _, target := range targets {
+			matches := sc.match(target)
+			if len(matches) == 0 {
 				continue
 			}
-
-			// The alias stands for the full path, not the module prefix:
-			// `use a::b::area as alias` must remember "area".
-			if imp.Alias != "" {
-				if sc.aliases[f.Path] == nil {
-					sc.aliases[f.Path] = map[string]string{}
+			for _, m := range matches {
+				if vis[m] < visImported {
+					vis[m] = visImported
 				}
-				sc.aliases[f.Path][imp.Alias] = targets[0]
+				edges[f.Namespace] = append(edges[f.Namespace], m)
 			}
-
-			for _, target := range targets {
-				matches := sc.match(target)
-				if len(matches) == 0 {
-					continue
-				}
-				for _, m := range matches {
-					if vis[m] < visImported {
-						vis[m] = visImported
-					}
-					edges[f.Namespace] = append(edges[f.Namespace], m)
-				}
-				break // first target that matched a real namespace wins
-			}
-			// An import matching nothing is external: no visibility.
+			break // first target that matched a real namespace wins
 		}
-		sc.visible[f.Path] = vis
+		// An import matching nothing is external: no visibility.
 	}
+	return vis
+}
 
-	// Transitive reach: a C file routinely calls through a header it picks up
-	// via another header.
-	for _, f := range raw.Files {
+// A C file routinely calls through a header it picks up via another header.
+func (sc *scopes) addTransitiveReach(files []FileInfo, edges map[string][]string) {
+	for _, f := range files {
 		vis := sc.visible[f.Path]
 		if vis == nil {
 			continue
@@ -137,8 +149,16 @@ func buildScopes(raw *RawExtraction) *scopes {
 			}
 		}
 	}
+}
 
-	return sc
+func parentPath(p, sep string) string {
+	if sep == "" {
+		return ""
+	}
+	if i := strings.LastIndex(p, sep); i > 0 {
+		return p[:i]
+	}
+	return ""
 }
 
 // Exact, then by path suffix, which maps `#include "git2/oid.h"` onto
@@ -193,8 +213,8 @@ func (sc *scopes) expand(qualifier, fromFile string) []string {
 	if aliases, ok := sc.aliases[fromFile]; ok {
 		head, rest := q, ""
 		if sc.sep != "" {
-			if i := strings.Index(q, sc.sep); i != -1 {
-				head, rest = q[:i], q[i+len(sc.sep):]
+			if h, r, ok := strings.Cut(q, sc.sep); ok {
+				head, rest = h, r
 			}
 		}
 		if full, ok := aliases[head]; ok {
@@ -217,10 +237,8 @@ func (sc *scopes) expand(qualifier, fromFile string) []string {
 
 	out := make([]string, 0, 4)
 	out = append(out, sc.match(q)...)
-	if sc.sep != "" {
-		if i := strings.LastIndex(q, sc.sep); i > 0 {
-			out = append(out, sc.match(q[:i])...)
-		}
+	if parent := parentPath(q, sc.sep); parent != "" {
+		out = append(out, sc.match(parent)...)
 	}
 	return out
 }
@@ -241,12 +259,7 @@ func (sc *scopes) aliasTarget(name, fromFile string) (string, []string) {
 		return "", nil
 	}
 	real := lastSegment(full, sc.sep)
-	parent := ""
-	if sc.sep != "" {
-		if i := strings.LastIndex(full, sc.sep); i > 0 {
-			parent = full[:i]
-		}
-	}
+	parent := parentPath(full, sc.sep)
 	if parent == "" {
 		return real, nil
 	}

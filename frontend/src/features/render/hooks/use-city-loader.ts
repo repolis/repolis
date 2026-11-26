@@ -21,8 +21,15 @@ interface StreamMessage {
   error?: string;
 }
 
+function isEngineAlreadyRunning(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : "";
+  return (
+    message.includes("Using exceptions for control flow") ||
+    message.includes("already initialized")
+  );
+}
+
 export function useCityLoader(repoUrl: string, onCity: (raw: RawCity) => void) {
-  // Separate from "is a city shown": a regeneration keeps the city on screen.
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("Booting engine...");
   const [error, setError] = useState<string | null>(null);
@@ -91,25 +98,21 @@ export function useCityLoader(repoUrl: string, onCity: (raw: RawCity) => void) {
 
   useEffect(() => {
     let cancelled = false;
-    init()
-      .catch((e: unknown) => {
-        // Bevy's winit loop throws to hand control back to the browser, so
-        // that rejection means the engine is running; so does a second init.
-        const m = e instanceof Error ? e.message : "";
-        if (
-          !m.includes("Using exceptions for control flow") &&
-          !m.includes("already initialized")
-        )
-          throw e;
-      })
-      .then(
-        () => !cancelled && start(),
-        () =>
-          !cancelled &&
-          setError(
-            "The 3D engine failed to start. Your browser may not support WebGPU or WebGL2.",
-          ),
-      );
+    async function startEngine() {
+      try {
+        await init();
+      } catch (e) {
+        if (!isEngineAlreadyRunning(e)) {
+          if (!cancelled)
+            setError(
+              "The 3D engine failed to start. Your browser may not support WebGPU or WebGL2.",
+            );
+          return;
+        }
+      }
+      if (!cancelled) start();
+    }
+    void startEngine();
     return () => {
       cancelled = true;
       source.current?.close();

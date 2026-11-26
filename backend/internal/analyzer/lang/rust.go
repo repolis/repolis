@@ -30,8 +30,23 @@ func (rustLang) ModuleScoped() bool        { return true }
 // where `printer::color` and `matcher::color` collide.
 func (rustLang) Namespace(relPath string) string {
 	p := strings.TrimSuffix(path.Clean(relPath), ".rs")
-	parts := strings.Split(p, "/")
+	crate, mod := splitCrateAndModule(strings.Split(p, "/"))
 
+	// A crate root or a directory module adds no segment of its own.
+	if len(mod) > 0 {
+		switch mod[len(mod)-1] {
+		case "lib", "main", "mod":
+			mod = mod[:len(mod)-1]
+		}
+	}
+
+	if len(mod) == 0 {
+		return crate
+	}
+	return crate + "::" + strings.Join(mod, "::")
+}
+
+func splitCrateAndModule(parts []string) (crate string, mod []string) {
 	root := -1
 	for i, seg := range parts {
 		switch seg {
@@ -40,8 +55,7 @@ func (rustLang) Namespace(relPath string) string {
 		}
 	}
 
-	crate := "crate"
-	var mod []string
+	crate = "crate"
 	switch {
 	case root >= 0:
 		if root > 0 {
@@ -59,19 +73,7 @@ func (rustLang) Namespace(relPath string) string {
 			}
 		}
 	}
-
-	// A crate root or a directory module adds no segment of its own.
-	if len(mod) > 0 {
-		switch mod[len(mod)-1] {
-		case "lib", "main", "mod":
-			mod = mod[:len(mod)-1]
-		}
-	}
-
-	if len(mod) == 0 {
-		return crate
-	}
-	return crate + "::" + strings.Join(mod, "::")
+	return crate, mod
 }
 
 func (rustLang) ImportTargets(imp Import, from string) []string {

@@ -33,50 +33,38 @@ type Assoc struct {
 
 func (a *Assoc) Receiver() string { return a.Fn.Receiver }
 
-// Names are normalised once up front, so this allocates nothing.
-func (st *SymbolTable) prefixScoreIdx(fnNorm, fnStripped string, i int) int {
-	t := st.normNames[i]
-	if len(t) < 3 {
-		return 0
-	}
-	if strings.HasPrefix(fnNorm, t) {
-		return len(t)
-	}
-	if fnStripped != "" && strings.HasPrefix(fnStripped, t) {
-		return len(t)
-	}
-	return 0
+type fnNames struct {
+	normal            string
+	withoutRepoPrefix string
 }
 
-func (st *SymbolTable) fnForms(fnName string) (string, string) {
-	fnNorm := norm(fnName)
-	fnStripped := ""
+func (st *SymbolTable) fnNames(fnName string) fnNames {
+	names := fnNames{normal: norm(fnName)}
 	if st.repoPrefix != "" && strings.HasPrefix(fnName, st.repoPrefix) {
-		fnStripped = norm(strings.TrimPrefix(fnName, st.repoPrefix))
+		names.withoutRepoPrefix = norm(strings.TrimPrefix(fnName, st.repoPrefix))
 	}
-	return fnNorm, fnStripped
+	return names
 }
 
-func (st *SymbolTable) prefixScore(fnName, typeName string) int {
-	if len(typeName) < 3 {
-		return 0
+func prefixMatchLen(fn fnNames, typeNorm string) int {
+	if strings.HasPrefix(fn.normal, typeNorm) {
+		return len(typeNorm)
 	}
-	t := norm(typeName)
-	fnNorm, fnStripped := st.fnForms(fnName)
-	if strings.HasPrefix(fnNorm, t) {
-		return len(t)
-	}
-	if fnStripped != "" && strings.HasPrefix(fnStripped, t) {
-		return len(t)
+	if fn.withoutRepoPrefix != "" && strings.HasPrefix(fn.withoutRepoPrefix, typeNorm) {
+		return len(typeNorm)
 	}
 	return 0
 }
 
 func (st *SymbolTable) bestPrefixType(fn *RawFunction) (string, int) {
-	fnNorm, fnStripped := st.fnForms(fn.Name)
+	names := st.fnNames(fn.Name)
 	bestIdx, bestPS := -1, 0
-	for i := range st.Types {
-		if ps := st.prefixScoreIdx(fnNorm, fnStripped, i); ps > bestPS {
+	// Names are normalised once up front, so this loop allocates nothing.
+	for i, t := range st.normNames {
+		if len(t) < 3 {
+			continue
+		}
+		if ps := prefixMatchLen(names, t); ps > bestPS {
 			bestIdx, bestPS = i, ps
 		}
 	}
@@ -84,6 +72,37 @@ func (st *SymbolTable) bestPrefixType(fn *RawFunction) (string, int) {
 		return "", 0
 	}
 	return st.resolve(st.Types[bestIdx].Name, fn.SourceFile), bestPS
+}
+
+const (
+	scoreFirstParam = 100
+	scoreParam      = 40
+	scoreLateParam  = 20
+	scoreReturn     = 60
+	scoreBodyBase   = 10
+	scoreBodyMax    = 35
+	scoreSameFile   = 25
+	scoreNamePrefix = 90
+)
+
+func (st *SymbolTable) typeUses(fn *RawFunction) map[string]int {
+	uses := make(map[string]int)
+	for _, t := range fn.TypesUsed {
+		if id := st.resolveRef(t, fn.SourceFile); id != "" {
+			uses[id]++
+		}
+	}
+	return uses
+}
+
+func (st *SymbolTable) mostUsedType(fn *RawFunction) string {
+	best, bestN := "", 0
+	for id, n := range st.typeUses(fn) {
+		if n > bestN || (n == bestN && id < best) {
+			best, bestN = id, n
+		}
+	}
+	return best
 }
 
 // The closed, AST-derived set stops a small model hallucinating: it cannot name
@@ -105,30 +124,26 @@ func (st *SymbolTable) candidateSet(fn *RawFunction) []string {
 	}
 
 	for i, pt := range fn.ParamTypes {
-		s := 40
+		s := scoreParam
 		if i == 0 {
-			s = 100
+			s = scoreFirstParam
 		} else if i > 2 {
-			s = 20
+			s = scoreLateParam
 		}
 		add(st.resolve(pt, fn.SourceFile), s)
 	}
-	add(st.resolve(fn.ReturnType, fn.SourceFile), 60)
+	add(st.resolve(fn.ReturnType, fn.SourceFile), scoreReturn)
 
-	freq := make(map[string]int)
-	for _, t := range fn.TypesUsed {
-		freq[st.resolveRef(t, fn.SourceFile)]++
-	}
-	for id, n := range freq {
-		add(id, min(10+n, 35))
+	for id, n := range st.typeUses(fn) {
+		add(id, min(scoreBodyBase+n, scoreBodyMax))
 	}
 
 	for _, i := range st.byFile[fn.SourceFile] {
-		add(st.Types[i].ID, 25)
+		add(st.Types[i].ID, scoreSameFile)
 	}
 
 	if id, ps := st.bestPrefixType(fn); ps > 0 {
-		add(id, 90+ps)
+		add(id, scoreNamePrefix+ps)
 	}
 
 	list := make([]cand, 0, len(seen))
@@ -180,21 +195,7 @@ func (st *SymbolTable) associate(fn *RawFunction) *Assoc {
 
 	byReturn := st.resolve(fn.ReturnType, fn.SourceFile)
 
-	byBody := ""
-	{
-		freq := make(map[string]int)
-		for _, t := range fn.TypesUsed {
-			if id := st.resolveRef(t, fn.SourceFile); id != "" {
-				freq[id]++
-			}
-		}
-		bestN := 0
-		for id, n := range freq {
-			if n > bestN || (n == bestN && id < byBody) {
-				byBody, bestN = id, n
-			}
-		}
-	}
+	byBody := st.mostUsedType(fn)
 
 	switch {
 	case byPrefix != "" && byParam != "" && byPrefix == byParam:
@@ -231,7 +232,7 @@ func (st *SymbolTable) verify(fn *RawFunction, typeID string) bool {
 	}
 	name := st.Types[idx].Name
 
-	return st.prefixScore(fn.Name, name) > 0 ||
+	return (len(name) >= 3 && prefixMatchLen(st.fnNames(fn.Name), norm(name)) > 0) ||
 		slices.Contains(fn.ParamTypes, name) ||
 		fn.ReturnType == name ||
 		slices.ContainsFunc(fn.TypesUsed, func(t lang.Ref) bool { return t.Name == name })

@@ -1,5 +1,5 @@
 use crate::data::CityMap;
-use crate::treemap::{area, inset, squarify};
+use crate::treemap::{area, inset_by_share, squarify};
 use bevy::math::{Rect, Vec2, Vec3};
 use std::collections::HashMap;
 
@@ -90,7 +90,6 @@ pub fn compute_layout(city: &CityMap) -> LayoutResult {
         };
     }
 
-    // Budget for streets, gutters and gaps too, or plots fit only the footprints.
     let mut footprint = vec![0.0; city.districts.len()];
     for s in &sized {
         footprint[s.district] += s.lot_area();
@@ -98,11 +97,7 @@ pub fn compute_layout(city: &CityMap) -> LayoutResult {
     let needed: Vec<f32> = footprint
         .iter()
         .zip(&city.districts)
-        .map(|(a, d)| {
-            let count = d.buildings.len().max(1) as f32;
-            let side = (a * 1.45 + count * STREET_WIDTH * STREET_WIDTH).sqrt() + DISTRICT_GAP * 2.0;
-            (side * side).max(400.0)
-        })
+        .map(|(&lots, d)| district_area_needed(lots, d.buildings.len()))
         .collect();
 
     let half = needed.iter().sum::<f32>().sqrt() * 0.5;
@@ -114,15 +109,9 @@ pub fn compute_layout(city: &CityMap) -> LayoutResult {
     let mut lane_lines = Vec::new();
     centre_lines(&cells, Rect::new(-half, -half, half, half), &mut lane_lines);
     for (i, &cell) in cells.iter().enumerate() {
-        let ground = inset(
-            cell,
-            (cell.width().min(cell.height()) * 0.08).clamp(1.0, DISTRICT_GAP),
-        );
+        let ground = inset_by_share(cell, 0.08, 1.0, DISTRICT_GAP);
         // Scaled, not fixed: a fixed inset ate a one-building district's whole plot.
-        let plot = inset(
-            ground,
-            (ground.width().min(ground.height()) * 0.07).clamp(0.5, DISTRICT_PADDING),
-        );
+        let plot = inset_by_share(ground, 0.07, 0.5, DISTRICT_PADDING);
         let mine: Vec<&Sized> = sized.iter().filter(|s| s.district == i).collect();
         pack_district(&mine, plot, &mut buildings, &mut blocks, &mut lane_lines);
         districts.push(ground);
@@ -139,24 +128,38 @@ pub fn compute_layout(city: &CityMap) -> LayoutResult {
     }
 }
 
+/// Budget for streets, gutters and gaps too, or plots fit only the footprints.
+fn district_area_needed(lot_area: f32, building_count: usize) -> f32 {
+    let count = building_count.max(1) as f32;
+    let side = (lot_area * 1.45 + count * STREET_WIDTH * STREET_WIDTH).sqrt() + DISTRICT_GAP * 2.0;
+    (side * side).max(400.0)
+}
+
+fn footprint_side(num_fields: u32) -> f32 {
+    soften(
+        MIN_FOOTPRINT + (num_fields as f32).powf(0.58) * 2.4,
+        26.0,
+        0.5,
+    )
+}
+
+fn building_height(num_methods: u32, lines_of_code: u32) -> f32 {
+    let raw = if num_methods > 0 {
+        MIN_HEIGHT + (num_methods as f32).powf(0.72) * 3.4
+    } else if lines_of_code > 1 {
+        MIN_HEIGHT + (lines_of_code as f32).powf(0.5) * 0.35
+    } else {
+        MIN_HEIGHT
+    };
+    soften(raw, 60.0, 0.55)
+}
+
 fn compute_dimensions(city: &CityMap) -> Vec<Sized<'_>> {
     let mut out = Vec::new();
     for (d, district) in city.districts.iter().enumerate() {
         for b in &district.buildings {
-            // Footprint is state (fields), height is behaviour (methods).
-            let side = soften(
-                MIN_FOOTPRINT + (b.num_fields as f32).powf(0.58) * 2.4,
-                26.0,
-                0.5,
-            );
-            let raw_height = if b.num_methods > 0 {
-                MIN_HEIGHT + (b.num_methods as f32).powf(0.72) * 3.4
-            } else if b.lines_of_code > 1 {
-                MIN_HEIGHT + (b.lines_of_code as f32).powf(0.5) * 0.35
-            } else {
-                MIN_HEIGHT
-            };
-            let height = soften(raw_height, 60.0, 0.55);
+            let side = footprint_side(b.num_fields);
+            let height = building_height(b.num_methods, b.lines_of_code);
 
             // Keep towers from becoming needles.
             let side = side.max(height * 0.2 + 2.2);
@@ -199,11 +202,7 @@ fn pack_district(
     let cells = squarify(&dir_areas, plot);
     centre_lines(&cells, plot, lane_lines);
     for (in_dir, block) in dirs.iter().zip(cells) {
-        // Proportional so a block never disappears into its own gutter.
-        let inner = inset(
-            block,
-            (block.width().min(block.height()) * 0.09).clamp(0.25, STREET_WIDTH * 0.5),
-        );
+        let inner = inset_by_share(block, 0.09, 0.25, STREET_WIDTH * 0.5);
         if area(inner) <= 1e-6 {
             continue;
         }
@@ -211,10 +210,7 @@ fn pack_district(
 
         let lot_areas: Vec<f32> = in_dir.iter().map(|s| s.lot_area()).collect();
         for (s, lot) in in_dir.iter().zip(squarify(&lot_areas, inner)) {
-            let cell = inset(
-                lot,
-                (lot.width().min(lot.height()) * 0.12).clamp(0.05, LOT_MARGIN),
-            );
+            let cell = inset_by_share(lot, 0.12, 0.05, LOT_MARGIN);
             if cell.width() <= 1e-4 || cell.height() <= 1e-4 {
                 continue;
             }
@@ -235,22 +231,45 @@ fn pack_district(
 
 /// Edges on `bounds` face open ground and get no centre line.
 fn centre_lines(cells: &[Rect], bounds: Rect, out: &mut Vec<Rect>) {
-    let on = |v: f32, a: f32, b: f32| (v - a).abs() < 0.01 || (v - b).abs() < 0.01;
     for c in cells {
-        for (x0, y0, x1, y1) in [
-            (c.min.x, c.min.y, c.max.x, c.min.y),
-            (c.min.x, c.max.y, c.max.x, c.max.y),
-            (c.min.x, c.min.y, c.min.x, c.max.y),
-            (c.max.x, c.min.y, c.max.x, c.max.y),
+        let top_left = Vec2::new(c.min.x, c.max.y);
+        let bottom_right = Vec2::new(c.max.x, c.min.y);
+        for (from, to) in [
+            (c.min, bottom_right),
+            (top_left, c.max),
+            (c.min, top_left),
+            (bottom_right, c.max),
         ] {
-            let outer = if x0 == x1 {
-                on(x0, bounds.min.x, bounds.max.x)
-            } else {
-                on(y0, bounds.min.y, bounds.max.y)
-            };
-            if !outer {
-                out.push(Rect::new(x0, y0, x1, y1).inflate(0.09));
+            if !edge_on_bounds(from, to, bounds) {
+                out.push(Rect::from_corners(from, to).inflate(0.09));
             }
+        }
+    }
+}
+
+fn edge_on_bounds(from: Vec2, to: Vec2, bounds: Rect) -> bool {
+    let near_either = |v: f32, a: f32, b: f32| (v - a).abs() < 0.01 || (v - b).abs() < 0.01;
+    if from.x == to.x {
+        near_either(from.x, bounds.min.x, bounds.max.x)
+    } else {
+        near_either(from.y, bounds.min.y, bounds.max.y)
+    }
+}
+
+#[derive(Default)]
+struct MergedEdge {
+    weight: u32,
+    in_cycle: bool,
+    forward: bool,
+    backward: bool,
+}
+
+impl MergedEdge {
+    fn direction(&self) -> Direction {
+        match (self.forward, self.backward) {
+            (true, true) => Direction::Both,
+            (false, true) => Direction::Backward,
+            _ => Direction::Forward,
         }
     }
 }
@@ -266,24 +285,25 @@ fn build_links(city: &CityMap, buildings: &[PlacedBuilding]) -> Vec<Link> {
         buildings.iter().map(|b| (ids[b.order], b)).collect();
 
     // Collapse reciprocal edges; A->B and B->A would overlap exactly.
-    let mut merged: HashMap<(usize, usize), (u32, bool, bool, bool)> = HashMap::new();
+    let mut merged: HashMap<(usize, usize), MergedEdge> = HashMap::new();
     for e in &city.dependencies {
-        let (Some(a), Some(b)) = (placed.get(e.source.as_str()), placed.get(e.target.as_str()))
+        let (Some(source), Some(target)) =
+            (placed.get(e.source.as_str()), placed.get(e.target.as_str()))
         else {
             continue;
         };
-        if a.order == b.order {
+        if source.order == target.order {
             continue;
         }
-        let slot = merged
-            .entry((a.order.min(b.order), a.order.max(b.order)))
-            .or_default();
-        slot.0 += e.weight.max(1);
-        slot.1 |= e.in_cycle;
-        if a.order < b.order {
-            slot.2 = true;
+        let low = source.order.min(target.order);
+        let high = source.order.max(target.order);
+        let edge = merged.entry((low, high)).or_default();
+        edge.weight += e.weight.max(1);
+        edge.in_cycle |= e.in_cycle;
+        if source.order < target.order {
+            edge.forward = true;
         } else {
-            slot.3 = true;
+            edge.backward = true;
         }
     }
 
@@ -291,17 +311,13 @@ fn build_links(city: &CityMap, buildings: &[PlacedBuilding]) -> Vec<Link> {
         buildings.iter().map(|b| (b.order, b)).collect();
     let mut links: Vec<Link> = merged
         .into_iter()
-        .map(|((a, b), (weight, in_cycle, forward, backward))| Link {
-            points: arc(by_order[&a], by_order[&b]),
-            width: (0.45 + (weight as f32).ln_1p() * 0.5).min(3.0),
-            in_cycle,
-            direction: match (forward, backward) {
-                (true, true) => Direction::Both,
-                (false, true) => Direction::Backward,
-                _ => Direction::Forward,
-            },
-            source: a,
-            target: b,
+        .map(|((low, high), edge)| Link {
+            points: arc(by_order[&low], by_order[&high]),
+            width: (0.45 + (edge.weight as f32).ln_1p() * 0.5).min(3.0),
+            in_cycle: edge.in_cycle,
+            direction: edge.direction(),
+            source: low,
+            target: high,
         })
         .collect();
     links.sort_by_key(|l| (l.source, l.target));

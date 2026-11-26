@@ -123,12 +123,7 @@ func (c Cluster) FallbackName() string {
 	}
 	clean := func(s string) string {
 		s = strings.TrimSuffix(strings.TrimSuffix(s, ".c"), ".h")
-		kept := make([]string, 0, 4)
-		for _, w := range SplitIdentifier(s) {
-			if !banned[w] || len(kept) > 0 {
-				kept = append(kept, w)
-			}
-		}
+		kept := dropLeadingNoise(SplitIdentifier(s), banned)
 		if len(kept) == 0 {
 			return ""
 		}
@@ -163,6 +158,13 @@ func (c Cluster) FallbackName() string {
 	default:
 		return "District"
 	}
+}
+
+func dropLeadingNoise(words []string, banned map[string]bool) []string {
+	for len(words) > 0 && banned[words[0]] {
+		words = words[1:]
+	}
+	return words
 }
 
 func titleize(s string) string {

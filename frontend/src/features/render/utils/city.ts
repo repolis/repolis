@@ -61,6 +61,8 @@ export interface City {
   scales: Scales;
 }
 
+const buildingSize = (b: RawBuilding) => b.num_methods * 3 + b.num_fields;
+
 const byCountThenName = (a: [string, number], b: [string, number]) =>
   b[1] - a[1] || a[0].localeCompare(b[0]);
 
@@ -69,25 +71,26 @@ export function buildCity(raw: RawCity): City {
   for (const d of raw.districts)
     for (const b of d.buildings ?? []) name.set(b.id, b.name);
 
-  const calls = new Map<string, string[]>();
-  const calledBy = new Map<string, string[]>();
+  const callees = new Map<string, string[]>();
+  const callers = new Map<string, string[]>();
   const adj = new Map<string, Set<string>>();
   const out = new Map<string, Set<string>>();
-  const push = (m: Map<string, string[]>, k: string, v: string) =>
-    m.has(k) ? m.get(k)!.push(v) : m.set(k, [v]);
-  const link = (m: Map<string, Set<string>>, a: string, b: string) =>
-    m.has(a) ? m.get(a)!.add(b) : m.set(a, new Set([b]));
+  const append = (m: Map<string, string[]>, key: string, value: string) =>
+    m.has(key) ? m.get(key)!.push(value) : m.set(key, [value]);
+  const addTo = (m: Map<string, Set<string>>, key: string, value: string) =>
+    m.has(key) ? m.get(key)!.add(value) : m.set(key, new Set([value]));
+
   for (const e of raw.dependencies ?? []) {
-    const t = name.get(e.target);
-    const s = name.get(e.source);
-    if (t !== undefined) push(calls, e.source, t);
-    if (s !== undefined) push(calledBy, e.target, s);
-    if (t !== undefined && s !== undefined && e.source !== e.target) {
-      link(adj, e.source, e.target);
-      link(adj, e.target, e.source);
-      link(out, e.source, e.target);
-    }
+    if (!name.has(e.source) || !name.has(e.target)) continue;
+    append(callees, e.source, e.target);
+    append(callers, e.target, e.source);
+    if (e.source === e.target) continue;
+    addTo(out, e.source, e.target);
+    addTo(adj, e.source, e.target);
+    addTo(adj, e.target, e.source);
   }
+  const namesOf = (ids: string[] | undefined) =>
+    (ids ?? []).map((id) => name.get(id)!);
 
   const buildings = new Map<string, BuildingInfo>();
   const districts = new Map<string, DistrictInfo>();
@@ -101,8 +104,8 @@ export function buildCity(raw: RawCity): City {
         methods: b.methods ?? [],
         district_name: d.name,
         typology: d.typology,
-        calls: calls.get(b.id) ?? [],
-        called_by: calledBy.get(b.id) ?? [],
+        calls: namesOf(callees.get(b.id)),
+        called_by: namesOf(callers.get(b.id)),
       };
       buildings.set(b.id, info);
       all.push(info);
@@ -117,10 +120,7 @@ export function buildCity(raw: RawCity): City {
       total_lines_of_code: list.reduce((n, b) => n + b.lines_of_code, 0),
       total_methods: list.reduce((n, b) => n + b.num_methods, 0),
       top_buildings: list
-        .map((b): [string, number] => [
-          b.name,
-          b.num_methods * 3 + b.num_fields,
-        ])
+        .map((b): [string, number] => [b.name, buildingSize(b)])
         .sort(byCountThenName)
         .slice(0, 8)
         .map(([n]) => n),
@@ -197,14 +197,21 @@ export function pathInfo(city: City, p: PathQuery): PathInfo {
   };
 }
 
+export function matchRank(name: string, lowerQuery: string): number | null {
+  const lowerName = name.toLowerCase();
+  if (lowerName === lowerQuery) return 0;
+  if (lowerName.startsWith(lowerQuery)) return 1;
+  if (lowerName.includes(lowerQuery)) return 2;
+  return null;
+}
+
 export function resolveSymbol(city: City, query: string): string | null {
   if (city.buildings.has(query)) return query;
-  const q = query.toLowerCase();
-  let best: { id: string; score: number } | null = null;
+  const lowerQuery = query.toLowerCase();
+  let best: { id: string; rank: number } | null = null;
   for (const b of city.buildings.values()) {
-    const n = b.name.toLowerCase();
-    const score = n === q ? 0 : n.startsWith(q) ? 1 : n.includes(q) ? 2 : -1;
-    if (score >= 0 && (!best || score < best.score)) best = { id: b.id, score };
+    const rank = matchRank(b.name, lowerQuery);
+    if (rank !== null && (!best || rank < best.rank)) best = { id: b.id, rank };
   }
   return best?.id ?? null;
 }

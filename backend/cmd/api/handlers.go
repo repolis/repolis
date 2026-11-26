@@ -60,8 +60,6 @@ func (s *server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 		logger.Log(logger.InfoLevel, "Regenerating %s@%s at level %q", repoURL, commit[:8], level)
 	}
 
-	// Keyed by refresh level too, so a forced regeneration never attaches to
-	// a weaker run already in flight.
 	jobKey := key
 	if level != models.RefreshNone {
 		jobKey = key + "|" + level
@@ -78,7 +76,25 @@ func (s *server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, models.AnalyzeResponse{Status: "pending", JobID: job.ID})
 }
 
-// Detached context, so the work survives the originating request.
+func reusableClone(j *jobs.Job, level string) (path string, ok bool) {
+	id, path, found := db.FindClone(j.RepoURL, j.Commit)
+	if !found {
+		return "", false
+	}
+	if models.Redoes(level, models.RefreshClone) {
+		logger.Log(logger.InfoLevel, "Discarding checkout %s before re-cloning", path)
+		if strings.Contains(path, "repolis-session-") {
+			_ = os.RemoveAll(path)
+		}
+		db.DeleteSession(id)
+		return "", false
+	}
+	if _, err := os.Stat(path); err != nil {
+		return "", false
+	}
+	return path, true
+}
+
 func (s *server) runAnalysis(j *jobs.Job, key, level string) {
 	ctx, cancel := context.WithTimeout(context.Background(), analysisLimit)
 	defer cancel()
@@ -90,21 +106,8 @@ func (s *server) runAnalysis(j *jobs.Job, key, level string) {
 
 	j.Stage(pipeline.Stage{Name: "cloning"})
 
-	// A checkout is content-addressed by commit, so any existing clone of it
-	// is reusable whoever requested it.
-	clonePath := ""
-	if id, path, found := db.FindClone(j.RepoURL, j.Commit); found {
-		if models.Redoes(level, models.RefreshClone) {
-			logger.Log(logger.InfoLevel, "Discarding checkout %s before re-cloning", path)
-			if strings.Contains(path, "repolis-session-") {
-				_ = os.RemoveAll(path)
-			}
-			db.DeleteSession(id)
-		} else if _, statErr := os.Stat(path); statErr == nil {
-			clonePath = path
-		}
-	}
-	if clonePath == "" {
+	clonePath, reused := reusableClone(j, level)
+	if !reused {
 		sessionID := uuid.New().String()
 		path, err := git.CloneRepo(j.RepoURL, sessionID)
 		if err != nil {
@@ -241,14 +244,7 @@ func (s *server) handleExplain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var building *models.Building
-	for di := range city.Districts {
-		for bi := range city.Districts[di].Buildings {
-			if city.Districts[di].Buildings[bi].ID == req.BuildingID {
-				building = &city.Districts[di].Buildings[bi]
-			}
-		}
-	}
+	building := findBuilding(city, req.BuildingID)
 	if building == nil {
 		sendError(w, "Unknown building", http.StatusNotFound)
 		return
@@ -298,6 +294,17 @@ func (s *server) handleExplain(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, models.ExplainResponse{
 		Status: "success", BuildingID: req.BuildingID, Explanation: text,
 	})
+}
+
+func findBuilding(city *models.CityMap, id string) *models.Building {
+	for di := range city.Districts {
+		for bi := range city.Districts[di].Buildings {
+			if city.Districts[di].Buildings[bi].ID == id {
+				return &city.Districts[di].Buildings[bi]
+			}
+		}
+	}
+	return nil
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

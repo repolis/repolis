@@ -48,21 +48,7 @@ func newJob(id, repoURL, commit string) *Job {
 
 func (j *Job) Emit(e Event) {
 	j.mu.Lock()
-	// Only the latest city of each kind is worth replaying; stages are
-	// transient. Keeps the replay buffer bounded.
-	if e.Type == EventCity {
-		filtered := j.history[:0]
-		for _, h := range j.history {
-			if h.Type == EventCity && h.Refined == e.Refined {
-				continue
-			}
-			filtered = append(filtered, h)
-		}
-		j.history = filtered
-	}
-	if e.Type != EventStage {
-		j.history = append(j.history, e)
-	}
+	j.remember(e)
 	if e.Type == EventDone || e.Type == EventError {
 		j.done = true
 	}
@@ -77,6 +63,24 @@ func (j *Job) Emit(e Event) {
 		case c <- e:
 		default: // slow consumer: drop rather than stall the pipeline
 		}
+	}
+}
+
+// Only the latest city of each kind is worth replaying; stages are
+// transient. Keeps the replay buffer bounded.
+func (j *Job) remember(e Event) {
+	if e.Type == EventCity {
+		filtered := j.history[:0]
+		for _, h := range j.history {
+			if h.Type == EventCity && h.Refined == e.Refined {
+				continue
+			}
+			filtered = append(filtered, h)
+		}
+		j.history = filtered
+	}
+	if e.Type != EventStage {
+		j.history = append(j.history, e)
 	}
 }
 

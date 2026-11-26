@@ -146,18 +146,7 @@ func (st *SymbolTable) resolveIn(name, fromFile string, namespaces []string) str
 		for _, ns := range namespaces {
 			allowed[ns] = true
 		}
-		best, bestRank := "", -1
-		for _, idx := range idxs {
-			t := st.Types[idx]
-			if !allowed[t.Namespace] {
-				continue
-			}
-			r := st.scopes.rank(fromFile, t.Namespace)
-			if r > bestRank || (r == bestRank && t.ID < best) {
-				best, bestRank = t.ID, r
-			}
-		}
-		if best != "" {
+		if best := st.bestRanked(idxs, fromFile, allowed, false); best != "" {
 			return best
 		}
 		// A qualifier matching no known namespace is external; fall through
@@ -167,11 +156,18 @@ func (st *SymbolTable) resolveIn(name, fromFile string, namespaces []string) str
 	if len(idxs) == 1 {
 		return st.Types[idxs[0]].ID
 	}
+	return st.bestRanked(idxs, fromFile, nil, true)
+}
+
+func (st *SymbolTable) bestRanked(idxs []int, fromFile string, allowed map[string]bool, sameFileBonus bool) string {
 	best, bestRank := "", -1
 	for _, idx := range idxs {
-		t := st.Types[idx]
+		t := &st.Types[idx]
+		if allowed != nil && !allowed[t.Namespace] {
+			continue
+		}
 		r := st.scopes.rank(fromFile, t.Namespace)
-		if t.SourceFile == fromFile {
+		if sameFileBonus && t.SourceFile == fromFile {
 			r++ // same file beats same namespace
 		}
 		if r > bestRank || (r == bestRank && t.ID < best) {

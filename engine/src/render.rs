@@ -131,6 +131,12 @@ pub fn link_material(
     })
 }
 
+const TAPER_AT_CALLEE: f32 = 0.8;
+
+fn tangent_at(points: &[Vec3], i: usize) -> Vec3 {
+    points[(i + 1).min(points.len() - 1)] - points[i.saturating_sub(1)]
+}
+
 fn toward_callee(direction: Direction, t: f32) -> f32 {
     match direction {
         Direction::Forward => t,
@@ -155,15 +161,14 @@ pub fn build_link_mesh(links: &[&Link], vertical: f32, colors: &LinkColors) -> M
         let base = positions.len() as u32;
         for (i, &p) in pts.iter().enumerate() {
             let t = i as f32 / (pts.len() - 1) as f32;
-            let along = pts[(i + 1).min(pts.len() - 1)] - pts[i.saturating_sub(1)];
             let d = toward_callee(link.direction, t);
             let taper = if link.direction == Direction::Both {
                 1.0
             } else {
-                1.0 - 0.8 * d
+                1.0 - TAPER_AT_CALLEE * d
             };
             let half = link.width * 0.5 * taper;
-            let side = along.xz().normalize_or_zero().perp() * half;
+            let side = tangent_at(pts, i).xz().normalize_or_zero().perp() * half;
             let side = Vec3::new(side.x, 0.0, side.y);
             let p = p + Vec3::Y * vertical;
             positions.extend([(p + side).to_array(), (p - side).to_array()]);

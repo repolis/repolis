@@ -8,6 +8,10 @@ pub fn inset(r: Rect, m: f32) -> Rect {
     Rect::from_center_half_size(r.center(), (r.half_size() - m).max(Vec2::ZERO))
 }
 
+pub fn inset_by_share(r: Rect, share: f32, min: f32, max: f32) -> Rect {
+    inset(r, (r.width().min(r.height()) * share).clamp(min, max))
+}
+
 /// One rect per area, in input order; areas are scaled to fill `bounds`.
 pub fn squarify(areas: &[f32], bounds: Rect) -> Vec<Rect> {
     let mut out = vec![Rect::default(); areas.len()];
@@ -36,44 +40,34 @@ pub fn squarify(areas: &[f32], bounds: Rect) -> Vec<Rect> {
             break;
         }
 
-        let mut end = start + 1;
-        while end < order.len()
-            && worst_ratio(&sizes[start..=end], side) <= worst_ratio(&sizes[start..end], side)
-        {
-            end += 1;
-        }
-
+        let end = row_end(&sizes, start, side);
         let row_area: f32 = sizes[start..end].iter().sum();
-        let vertical = free.width() >= free.height();
-        let thickness = row_area
-            / if vertical {
-                free.height()
-            } else {
-                free.width()
-            };
+        let (along, across) = if free.width() >= free.height() {
+            (Vec2::Y, Vec2::X)
+        } else {
+            (Vec2::X, Vec2::Y)
+        };
+        let thickness = row_area / free.size().dot(along);
         let mut cursor = free.min;
         for k in start..end {
             let len = sizes[k] / thickness;
-            let size = if vertical {
-                Vec2::new(thickness, len)
-            } else {
-                Vec2::new(len, thickness)
-            };
-            out[order[k]] = Rect::from_corners(cursor, cursor + size);
-            if vertical {
-                cursor.y += len;
-            } else {
-                cursor.x += len;
-            }
+            out[order[k]] = Rect::from_corners(cursor, cursor + across * thickness + along * len);
+            cursor += along * len;
         }
-        if vertical {
-            free.min.x += thickness;
-        } else {
-            free.min.y += thickness;
-        }
+        free.min += across * thickness;
         start = end;
     }
     out
+}
+
+fn row_end(sizes: &[f32], start: usize, side: f32) -> usize {
+    let mut end = start + 1;
+    while end < sizes.len()
+        && worst_ratio(&sizes[start..=end], side) <= worst_ratio(&sizes[start..end], side)
+    {
+        end += 1;
+    }
+    end
 }
 
 /// `row` must be sorted largest first.

@@ -109,6 +109,12 @@ function Section({
   );
 }
 
+function formatAge(days: number): string {
+  if (days <= 0) return "unknown";
+  if (days < 60) return `${days}d ago`;
+  return `${Math.round(days / 30)}mo ago`;
+}
+
 function BuildingInspector({
   info,
   repoUrl,
@@ -149,12 +155,7 @@ function BuildingInspector({
     }
   }
 
-  const age =
-    info.age_days > 0
-      ? info.age_days < 60
-        ? `${info.age_days}d ago`
-        : `${Math.round(info.age_days / 30)}mo ago`
-      : "unknown";
+  const age = formatAge(info.age_days);
 
   return (
     <div className="flex min-w-0 flex-col gap-3">

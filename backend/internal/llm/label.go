@@ -77,41 +77,46 @@ func (c *Client) LabelClusters(ctx context.Context, clusters []analyzer.Cluster,
 	})
 
 	named := 0
-	for i, l := range out {
-		if l == nil {
-			continue
-		}
-		if strings.EqualFold(strings.TrimSpace(l.Summary), exampleDesc) {
-			l.Summary = ""
-		}
-		if strings.EqualFold(strings.TrimSpace(l.Name), exampleName) {
-			l.Name = ""
-		}
-		if l.Name != "" {
-			trimmed := stripProjectToken(l.Name, noise)
-			if !isVague(trimmed, noise) {
-				labels[i].Name = trimmed
-				named++
-			}
-			// The name is the strongest typology signal available, and
-			// unlike the model's own TYPE answer we classify it ourselves.
-			if t := analyzer.GuessTypology(l.Name); t != "unknown" {
-				labels[i].Typology = t
-			}
-		}
-		if l.Summary != "" {
-			labels[i].Summary = l.Summary
-			if labels[i].Typology == "unknown" {
-				if t := analyzer.GuessTypology(l.Summary); t != "unknown" {
-					labels[i].Typology = t
-				}
-			}
+	for i, got := range out {
+		if got != nil && applyModelLabel(&labels[i], got, noise) {
+			named++
 		}
 	}
 	uniqueNames(labels, clusters)
 
 	logger.Log(logger.InfoLevel, "Districts named: %d by model, %d by fallback", named, len(clusters)-named)
 	return labels
+}
+
+func applyModelLabel(label, got *Label, noise []string) bool {
+	if strings.EqualFold(strings.TrimSpace(got.Summary), exampleDesc) {
+		got.Summary = ""
+	}
+	if strings.EqualFold(strings.TrimSpace(got.Name), exampleName) {
+		got.Name = ""
+	}
+	named := false
+	if got.Name != "" {
+		trimmed := stripProjectToken(got.Name, noise)
+		if !isVague(trimmed, noise) {
+			label.Name = trimmed
+			named = true
+		}
+		// The name is the strongest typology signal available, and
+		// unlike the model's own TYPE answer we classify it ourselves.
+		if t := analyzer.GuessTypology(got.Name); t != "unknown" {
+			label.Typology = t
+		}
+	}
+	if got.Summary != "" {
+		label.Summary = got.Summary
+		if label.Typology == "unknown" {
+			if t := analyzer.GuessTypology(got.Summary); t != "unknown" {
+				label.Typology = t
+			}
+		}
+	}
+	return named
 }
 
 func FallbackLabels(clusters []analyzer.Cluster) []Label {
@@ -186,14 +191,23 @@ var vagueNames = map[string]bool{
 	"components": true, "code": true, "implementation": true,
 }
 
-func isVague(name string, noise []string) bool {
-	banned := make(map[string]bool, len(noise))
-	for _, w := range noise {
-		banned[w] = true
+func wordSet(words []string) map[string]bool {
+	set := make(map[string]bool, len(words))
+	for _, w := range words {
+		set[w] = true
 	}
+	return set
+}
+
+func cleanWord(w string) string {
+	return strings.ToLower(strings.Trim(w, ".,()"))
+}
+
+func isVague(name string, noise []string) bool {
+	banned := wordSet(noise)
 	kept := 0
-	for _, w := range strings.Fields(strings.ToLower(name)) {
-		w = strings.Trim(w, ".,()")
+	for _, w := range strings.Fields(name) {
+		w = cleanWord(w)
 		if w == "" || vagueNames[w] || banned[w] {
 			continue
 		}
@@ -208,14 +222,11 @@ func stripProjectToken(name string, noise []string) string {
 	if len(noise) == 0 {
 		return name
 	}
-	banned := make(map[string]bool, len(noise))
-	for _, w := range noise {
-		banned[w] = true
-	}
+	banned := wordSet(noise)
 	words := strings.Fields(name)
 	kept := words[:0]
 	for _, w := range words {
-		if banned[strings.ToLower(strings.Trim(w, ".,()"))] {
+		if banned[cleanWord(w)] {
 			continue
 		}
 		kept = append(kept, w)
@@ -235,9 +246,9 @@ func parseLabel(s string) *Label {
 		upper := strings.ToUpper(line)
 		switch {
 		case strings.HasPrefix(upper, "NAME:"):
-			l.Name = cleanLabel(line[5:], 42)
+			l.Name = cleanLabel(line[len("NAME:"):], 42)
 		case strings.HasPrefix(upper, "DESC:"):
-			l.Summary = cleanLabel(line[5:], 90)
+			l.Summary = cleanLabel(line[len("DESC:"):], 90)
 		}
 	}
 	if l.Name == "" && l.Summary == "" {
@@ -250,10 +261,7 @@ func stripNoise(names, noise []string) []string {
 	if len(noise) == 0 {
 		return names
 	}
-	banned := make(map[string]bool, len(noise))
-	for _, w := range noise {
-		banned[w] = true
-	}
+	banned := wordSet(noise)
 	out := make([]string, 0, len(names))
 	for _, n := range names {
 		kept := make([]string, 0, 4)

@@ -66,58 +66,68 @@ func BuildDraft(raw *RawExtraction, history map[string]*git.FileHistory, st *Sym
 	return d
 }
 
-func (d *Draft) assemble(raw *RawExtraction, st *SymbolTable, ownerOf map[string]string) {
-	methodsOf := make(map[string][]string)
-	sourceOf := make(map[string]string)
-	maxCx := make(map[string]int)
-	sumCx := make(map[string]int)
+type ownerTotals struct {
+	methods       []string
+	source        string
+	maxComplexity int
+	sumComplexity int
+}
 
+func (d *Draft) assemble(raw *RawExtraction, st *SymbolTable, ownerOf map[string]string) {
+	owners := make(map[string]*ownerTotals)
 	for _, a := range st.Assocs {
 		owner := ownerOf[funcKey(a.Fn)]
-		methodsOf[owner] = append(methodsOf[owner], a.Fn.Name)
-		sumCx[owner] += a.Fn.Complexity
-		if a.Fn.Complexity > maxCx[owner] {
-			maxCx[owner] = a.Fn.Complexity
+		o := owners[owner]
+		if o == nil {
+			o = &ownerTotals{}
+			owners[owner] = o
 		}
+		o.methods = append(o.methods, a.Fn.Name)
+		o.sumComplexity += a.Fn.Complexity
+		o.maxComplexity = max(o.maxComplexity, a.Fn.Complexity)
 		// A building's attribution is the weakest of its members'.
 		switch {
 		case a.Source == SourceLLM:
-			if sourceOf[owner] != SourceLLM {
-				sourceOf[owner] = SourceLLM
-			}
+			o.source = SourceLLM
 		case a.Source == SourceRule || a.Source == SourceSyntax:
-			if sourceOf[owner] == "" {
-				sourceOf[owner] = a.Source
+			if o.source == "" {
+				o.source = a.Source
 			}
 		}
 	}
+	totalsOf := func(id string) ownerTotals {
+		if o := owners[id]; o != nil {
+			return *o
+		}
+		return ownerTotals{}
+	}
 
-	fileLOC := make(map[string]int, len(raw.Files))
-	fileVars := make(map[string]int, len(raw.Files))
-	fileLang := make(map[string]string, len(raw.Files))
-	fileNS := make(map[string]string, len(raw.Files))
-	for _, f := range raw.Files {
-		fileLOC[f.Path] = f.LinesOfCode
-		fileVars[f.Path] = f.FileScopeVars
-		fileLang[f.Path] = f.Language
-		fileNS[f.Path] = f.Namespace
+	filesByPath := make(map[string]*FileInfo, len(raw.Files))
+	for i := range raw.Files {
+		filesByPath[raw.Files[i].Path] = &raw.Files[i]
+	}
+	fileOf := func(path string) FileInfo {
+		if f := filesByPath[path]; f != nil {
+			return *f
+		}
+		return FileInfo{}
 	}
 
 	for _, t := range st.Types {
-		methods := methodsOf[t.ID]
-		sort.Strings(methods)
-		src := sourceOf[t.ID]
+		o := totalsOf(t.ID)
+		sort.Strings(o.methods)
+		src := o.source
 		if src == "" {
 			src = "none"
 		}
 		d.Buildings = append(d.Buildings, models.Building{
 			ID: t.ID, Name: t.Name, Kind: "type",
 			SourceFile: t.SourceFile, Dir: t.Dir, Namespace: t.Namespace,
-			NumFields: len(t.Fields), NumMethods: len(methods),
-			Fields: nonNil(t.Fields), Methods: nonNil(methods),
+			NumFields: len(t.Fields), NumMethods: len(o.methods),
+			Fields: nonNil(t.Fields), Methods: nonNil(o.methods),
 			LinesOfCode: t.LOC, AssocSource: src,
-			Language:      fileLang[t.SourceFile],
-			MaxComplexity: maxCx[t.ID], SumComplexity: sumCx[t.ID],
+			Language:      fileOf(t.SourceFile).Language,
+			MaxComplexity: o.maxComplexity, SumComplexity: o.sumComplexity,
 		})
 	}
 
@@ -139,14 +149,16 @@ func (d *Draft) assemble(raw *RawExtraction, st *SymbolTable, ownerOf map[string
 	for _, f := range files {
 		fns := moduleFuncs[f]
 		sort.Strings(fns)
+		file := fileOf(f)
+		o := totalsOf(moduleID(f))
 		d.Buildings = append(d.Buildings, models.Building{
 			ID: moduleID(f), Name: filepath.Base(f), Kind: "module",
-			SourceFile: f, Dir: dirOf(f), Namespace: fileNS[f],
-			NumFields: fileVars[f], NumMethods: len(fns),
+			SourceFile: f, Dir: dirOf(f), Namespace: file.Namespace,
+			NumFields: file.FileScopeVars, NumMethods: len(fns),
 			Fields: []string{}, Methods: fns,
-			LinesOfCode: fileLOC[f], AssocSource: SourceRule,
-			Language:      fileLang[f],
-			MaxComplexity: maxCx[moduleID(f)], SumComplexity: sumCx[moduleID(f)],
+			LinesOfCode: file.LinesOfCode, AssocSource: SourceRule,
+			Language:      file.Language,
+			MaxComplexity: o.maxComplexity, SumComplexity: o.sumComplexity,
 		})
 	}
 
@@ -193,12 +205,12 @@ func (d *Draft) attachHistory(history map[string]*git.FileHistory) {
 		if !h.FirstSeen.IsZero() {
 			b.FirstSeen = h.FirstSeen.Format(time.RFC3339)
 			if !first.IsZero() {
-				b.BornDay = int(h.FirstSeen.Sub(first).Hours() / 24)
+				b.BornDay = daysBetween(first, h.FirstSeen)
 			}
 		}
 		if !h.LastModified.IsZero() {
 			b.LastModified = h.LastModified.Format(time.RFC3339)
-			b.AgeDays = max(0, int(now.Sub(h.LastModified).Hours()/24))
+			b.AgeDays = max(0, daysBetween(h.LastModified, now))
 		}
 		churns = append(churns, h.Churn)
 	}
@@ -215,6 +227,10 @@ func (d *Draft) attachHistory(history map[string]*git.FileHistory) {
 		idx := sort.SearchInts(churns, b.CommitChurn)
 		b.ChurnRank = float64(idx) / float64(len(churns))
 	}
+}
+
+func daysBetween(from, to time.Time) int {
+	return int(to.Sub(from).Hours() / 24)
 }
 
 func (d *Draft) computeStats(raw *RawExtraction, st *SymbolTable) {
@@ -254,7 +270,7 @@ func (d *Draft) computeStats(raw *RawExtraction, st *SymbolTable) {
 	if !d.firstCommit.IsZero() {
 		s.FirstCommit = d.firstCommit.Format(time.RFC3339)
 		s.LastCommit = d.lastCommit.Format(time.RFC3339)
-		s.HistoryDays = int(d.lastCommit.Sub(d.firstCommit).Hours() / 24)
+		s.HistoryDays = daysBetween(d.firstCommit, d.lastCommit)
 	}
 	d.Stats = s
 }

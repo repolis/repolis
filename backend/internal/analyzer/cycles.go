@@ -13,8 +13,6 @@ import (
 // up to this size a cycle is verifiable by hand against the source.
 const maxReliableCycle = 12
 
-// Iterative on purpose: recursion depth would be bounded by the graph's
-// longest path, and a blown stack here takes the whole request down.
 func FindCycles(buildings []models.Building, edges []models.DependencyEdge) []models.Cycle {
 	index := make(map[string]int, len(buildings))
 	for i, b := range buildings {
@@ -35,81 +33,7 @@ func FindCycles(buildings []models.Building, edges []models.DependencyEdge) []mo
 		sort.Ints(adj[i])
 	}
 
-	const unvisited = -1
-	disc := make([]int, len(buildings))
-	low := make([]int, len(buildings))
-	onStack := make([]bool, len(buildings))
-	for i := range disc {
-		disc[i] = unvisited
-	}
-	var stack []int
-	counter := 0
-
-	type frame struct {
-		v    int
-		next int
-	}
-
-	var components [][]int
-
-	for root := range buildings {
-		if disc[root] != unvisited {
-			continue
-		}
-		work := []frame{{v: root}}
-
-		for len(work) > 0 {
-			f := &work[len(work)-1]
-			v := f.v
-
-			if f.next == 0 {
-				disc[v] = counter
-				low[v] = counter
-				counter++
-				stack = append(stack, v)
-				onStack[v] = true
-			}
-
-			if f.next < len(adj[v]) {
-				w := adj[v][f.next]
-				f.next++
-				switch {
-				case disc[w] == unvisited:
-					work = append(work, frame{v: w})
-				case onStack[w]:
-					if disc[w] < low[v] {
-						low[v] = disc[w]
-					}
-				}
-				continue
-			}
-
-			if low[v] == disc[v] {
-				var comp []int
-				for {
-					w := stack[len(stack)-1]
-					stack = stack[:len(stack)-1]
-					onStack[w] = false
-					comp = append(comp, w)
-					if w == v {
-						break
-					}
-				}
-				if len(comp) > 1 {
-					sort.Ints(comp)
-					components = append(components, comp)
-				}
-			}
-
-			work = work[:len(work)-1]
-			if len(work) > 0 {
-				parent := work[len(work)-1].v
-				if low[v] < low[parent] {
-					low[parent] = low[v]
-				}
-			}
-		}
-	}
+	components := stronglyConnectedComponents(adj)
 
 	out := make([]models.Cycle, 0, len(components))
 	for _, comp := range components {
@@ -142,6 +66,87 @@ func FindCycles(buildings []models.Building, edges []models.DependencyEdge) []mo
 		out[i].ID = i + 1
 	}
 	return out
+}
+
+// Iterative on purpose: recursion depth would be bounded by the graph's
+// longest path, and a blown stack here takes the whole request down.
+func stronglyConnectedComponents(adj [][]int) [][]int {
+	const unvisited = -1
+	discovered := make([]int, len(adj))
+	lowLink := make([]int, len(adj))
+	onStack := make([]bool, len(adj))
+	for i := range discovered {
+		discovered[i] = unvisited
+	}
+	var stack []int
+	counter := 0
+
+	type frame struct {
+		node     int
+		nextEdge int
+	}
+
+	var components [][]int
+
+	for root := range adj {
+		if discovered[root] != unvisited {
+			continue
+		}
+		work := []frame{{node: root}}
+
+		for len(work) > 0 {
+			f := &work[len(work)-1]
+			node := f.node
+
+			if f.nextEdge == 0 {
+				discovered[node] = counter
+				lowLink[node] = counter
+				counter++
+				stack = append(stack, node)
+				onStack[node] = true
+			}
+
+			if f.nextEdge < len(adj[node]) {
+				next := adj[node][f.nextEdge]
+				f.nextEdge++
+				switch {
+				case discovered[next] == unvisited:
+					work = append(work, frame{node: next})
+				case onStack[next]:
+					if discovered[next] < lowLink[node] {
+						lowLink[node] = discovered[next]
+					}
+				}
+				continue
+			}
+
+			if lowLink[node] == discovered[node] {
+				var comp []int
+				for {
+					top := stack[len(stack)-1]
+					stack = stack[:len(stack)-1]
+					onStack[top] = false
+					comp = append(comp, top)
+					if top == node {
+						break
+					}
+				}
+				if len(comp) > 1 {
+					sort.Ints(comp)
+					components = append(components, comp)
+				}
+			}
+
+			work = work[:len(work)-1]
+			if len(work) > 0 {
+				parent := work[len(work)-1].node
+				if lowLink[node] < lowLink[parent] {
+					lowLink[parent] = lowLink[node]
+				}
+			}
+		}
+	}
+	return components
 }
 
 // members. An edge leaving the component is not part of the cycle.

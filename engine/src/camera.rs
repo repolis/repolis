@@ -7,12 +7,19 @@ pub const CAMERA_FOV: f32 = std::f32::consts::FRAC_PI_4;
 /// Fraction of the viewport height a focused object should fill.
 const FOCUS_FILL: f32 = 0.55;
 
+const DEFAULT_YAW: f32 = std::f32::consts::FRAC_PI_4;
+const DEFAULT_PITCH: f32 = 0.62;
+const MIN_PITCH: f32 = 0.06;
+const MAX_PITCH: f32 = 1.52;
+const MIN_RADIUS: f32 = 2.5;
+const MAX_RADIUS: f32 = 20000.0;
+
 #[derive(Component)]
 pub struct CityCamera {
     pub focus: Vec3,
     pub radius: f32,
-    pub alpha: f32,
-    pub beta: f32,
+    pub yaw: f32,
+    pub pitch: f32,
     pub target_focus: Vec3,
     pub target_radius: f32,
     pub home_focus: Vec3,
@@ -24,8 +31,8 @@ impl Default for CityCamera {
         Self {
             focus: Vec3::ZERO,
             radius: 200.0,
-            alpha: std::f32::consts::FRAC_PI_4,
-            beta: 0.62,
+            yaw: DEFAULT_YAW,
+            pitch: DEFAULT_PITCH,
             target_focus: Vec3::ZERO,
             target_radius: 200.0,
             home_focus: Vec3::ZERO,
@@ -43,8 +50,8 @@ impl CityCamera {
         self.target_radius = radius;
         self.home_focus = center;
         self.home_radius = radius;
-        self.alpha = std::f32::consts::FRAC_PI_4;
-        self.beta = 0.62;
+        self.yaw = DEFAULT_YAW;
+        self.pitch = DEFAULT_PITCH;
     }
 
     /// `size` must be max(footprint, height), or a tall tower puts the camera inside it.
@@ -62,14 +69,34 @@ impl CityCamera {
     }
 
     pub fn apply(&self, transform: &mut Transform) {
-        let (sa, ca) = self.alpha.sin_cos();
-        let (sb, cb) = self.beta.sin_cos();
+        let (sin_yaw, cos_yaw) = self.yaw.sin_cos();
+        let (sin_pitch, cos_pitch) = self.pitch.sin_cos();
         let pos = Vec3::new(
-            self.focus.x + self.radius * sa * cb,
-            self.focus.y + self.radius * sb,
-            self.focus.z + self.radius * ca * cb,
+            self.focus.x + self.radius * sin_yaw * cos_pitch,
+            self.focus.y + self.radius * sin_pitch,
+            self.focus.z + self.radius * cos_yaw * cos_pitch,
         );
         *transform = Transform::from_translation(pos).looking_at(self.focus, Vec3::Y);
+    }
+
+    pub fn to_state(&self) -> String {
+        format!(
+            "{:.1},{:.1},{:.1},{:.3},{:.3}",
+            self.focus.x, self.focus.z, self.radius, self.yaw, self.pitch
+        )
+    }
+
+    pub fn apply_state(&mut self, state: &str) {
+        let values: Vec<f32> = state.split(',').filter_map(|v| v.parse().ok()).collect();
+        let &[x, z, radius, yaw, pitch] = values.as_slice() else {
+            return;
+        };
+        self.focus = Vec3::new(x, 0.0, z);
+        self.target_focus = self.focus;
+        self.radius = radius.clamp(MIN_RADIUS, MAX_RADIUS);
+        self.target_radius = self.radius;
+        self.yaw = yaw;
+        self.pitch = pitch.clamp(MIN_PITCH, MAX_PITCH);
     }
 }
 
@@ -108,8 +135,8 @@ pub fn camera_controls(
         }
 
         if drag != Vec2::ZERO && !panning {
-            cam.alpha -= drag.x * 0.005;
-            cam.beta = (cam.beta + drag.y * 0.005).clamp(0.06, 1.52);
+            cam.yaw -= drag.x * 0.005;
+            cam.pitch = (cam.pitch + drag.y * 0.005).clamp(MIN_PITCH, MAX_PITCH);
         }
 
         let mut pan = Vec2::ZERO;
@@ -131,9 +158,9 @@ pub fn camera_controls(
         }
         if pan != Vec2::ZERO {
             let speed = cam.radius * 0.6 * dt;
-            let (sa, ca) = cam.alpha.sin_cos();
-            let forward = Vec3::new(-sa, 0.0, -ca);
-            let right = Vec3::new(ca, 0.0, -sa);
+            let (sin_yaw, cos_yaw) = cam.yaw.sin_cos();
+            let forward = Vec3::new(-sin_yaw, 0.0, -cos_yaw);
+            let right = Vec3::new(cos_yaw, 0.0, -sin_yaw);
             let delta = (forward * pan.y + right * pan.x) * speed;
             cam.focus += delta;
             cam.target_focus += delta;
@@ -142,12 +169,12 @@ pub fn camera_controls(
         if scroll != 0.0 {
             // Purely proportional: a flat floor makes one notch jump through the target.
             let factor = (1.0 - scroll * 0.12).clamp(0.45, 2.2);
-            cam.target_radius = (cam.target_radius * factor).clamp(2.5, 20000.0);
+            cam.target_radius = (cam.target_radius * factor).clamp(MIN_RADIUS, MAX_RADIUS);
         }
 
-        let k = (1.0 - (-12.0 * dt).exp()).clamp(0.0, 1.0);
-        let focus_delta = (cam.target_focus - cam.focus) * k;
-        let radius_delta = (cam.target_radius - cam.radius) * k;
+        let ease = (1.0 - (-12.0 * dt).exp()).clamp(0.0, 1.0);
+        let focus_delta = (cam.target_focus - cam.focus) * ease;
+        let radius_delta = (cam.target_radius - cam.radius) * ease;
         cam.focus += focus_delta;
         cam.radius += radius_delta;
 

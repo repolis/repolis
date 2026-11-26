@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 
 import type { CitySummary, IndexEntry } from "../types";
+import { matchRank } from "../utils/city";
 import { Regenerate } from "./regenerate";
 
 export function SearchBar({
@@ -21,17 +22,11 @@ export function SearchBar({
 
   const results = useMemo<IndexEntry[]>(() => {
     if (!summary || query.trim().length < 2) return [];
-    const q = query.trim().toLowerCase();
+    const lowerQuery = query.trim().toLowerCase();
     return summary.index
-      .map((e) => {
-        const n = e.name.toLowerCase();
-        if (n === q) return { e, score: 0 };
-        if (n.startsWith(q)) return { e, score: 1 };
-        if (n.includes(q)) return { e, score: 2 };
-        return null;
-      })
-      .filter((r): r is { e: IndexEntry; score: number } => r !== null)
-      .sort((a, b) => a.score - b.score || a.e.name.length - b.e.name.length)
+      .map((e) => ({ e, rank: matchRank(e.name, lowerQuery) }))
+      .filter((r): r is { e: IndexEntry; rank: number } => r.rank !== null)
+      .sort((a, b) => a.rank - b.rank || a.e.name.length - b.e.name.length)
       .slice(0, 12)
       .map((r) => r.e);
   }, [summary, query]);

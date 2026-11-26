@@ -24,6 +24,7 @@ import type {
   SelectPayload,
 } from "./types";
 import {
+  closedLoop,
   computeAppearance,
   isVisible,
   loopsOf,
@@ -122,7 +123,7 @@ export default function RenderPage() {
       filter,
       timeline: timelineDay,
       selectedId,
-      path: path?.ids ?? (focused ? [...focused.loop, focused.loop[0]] : []),
+      path: path?.ids ?? (focused ? closedLoop(focused.loop) : []),
     });
     set_appearance(a.colors, a.states, a.grounds, a.links);
   }, [summary, mode, filter, timelineDay, selectedId, path, focused]);

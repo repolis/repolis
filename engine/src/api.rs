@@ -67,7 +67,7 @@ pub fn reset_camera() {
     queue(Command::Reset);
 }
 
-/// The current camera, as `focusX,focusZ,radius,alpha,beta`. Polled rather
+/// The current camera, as `focusX,focusZ,radius,yaw,pitch`. Polled rather
 /// than pushed: it changes every frame during a drag.
 #[wasm_bindgen]
 pub fn camera_state() -> String {
@@ -102,33 +102,40 @@ pub fn set_appearance(colors: Vec<f32>, states: Vec<u8>, grounds: Vec<f32>, link
     }));
 }
 
+#[derive(Default)]
+pub(crate) struct LastMove {
+    focus: Vec3,
+    radius: f32,
+    at: f64,
+}
+
 /// Publishes the camera once still, so the URL records where the user stopped
 /// looking rather than every frame of the drag.
 pub(crate) fn publish_camera(
     cam_q: Query<(&Transform, &CityCamera)>,
     time: Res<Time>,
-    mut last: Local<(Vec3, f32, f64)>,
+    mut last: Local<LastMove>,
     mut settled: Local<bool>,
 ) {
     let Ok((_, cam)) = cam_q.get_single() else {
         return;
     };
     let now = time.elapsed_seconds_f64();
-    let moved = (cam.focus - last.0).length() > 0.01 || (cam.radius - last.1).abs() > 0.01;
+    let moved = (cam.focus - last.focus).length() > 0.01 || (cam.radius - last.radius).abs() > 0.01;
     if moved {
-        *last = (cam.focus, cam.radius, now);
+        *last = LastMove {
+            focus: cam.focus,
+            radius: cam.radius,
+            at: now,
+        };
         *settled = false;
         return;
     }
-    if *settled || now - last.2 < 0.35 {
+    if *settled || now - last.at < 0.35 {
         return;
     }
     *settled = true;
-    let text = format!(
-        "{:.1},{:.1},{:.1},{:.3},{:.3}",
-        cam.focus.x, cam.focus.z, cam.radius, cam.alpha, cam.beta
-    );
-    CAMERA_OUT.with(|c| *c.borrow_mut() = text);
+    CAMERA_OUT.with(|c| *c.borrow_mut() = cam.to_state());
 }
 
 pub(crate) fn publish_labels(
@@ -172,17 +179,9 @@ pub(crate) fn consume_commands(
             }
             Command::Links(on) => show.0 = on,
             Command::Appearance(next) => *look = next,
-            Command::Camera(arg) => {
+            Command::Camera(state) => {
                 if let Ok(mut cam) = cam_q.get_single_mut() {
-                    let n: Vec<f32> = arg.split(',').filter_map(|v| v.parse().ok()).collect();
-                    if n.len() == 5 {
-                        cam.focus = Vec3::new(n[0], 0.0, n[1]);
-                        cam.target_focus = cam.focus;
-                        cam.radius = n[2].clamp(2.5, 20000.0);
-                        cam.target_radius = cam.radius;
-                        cam.alpha = n[3];
-                        cam.beta = n[4].clamp(0.06, 1.52);
-                    }
+                    cam.apply_state(&state);
                 }
             }
             Command::Focus(i) => {

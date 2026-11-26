@@ -18,152 +18,167 @@ type edgeKey struct {
 	kind     string
 }
 
-// Three calls to `foo()` from one method of Vdbe give one edge Vdbe -> owner of
-// foo, weight 3.
-func BuildDependencies(raw *RawExtraction, st *SymbolTable, ownerOf map[string]string) []models.DependencyEdge {
+type calleeResolver struct {
+	st      *SymbolTable
+	ownerOf map[string]string
+	byName  map[string][]*RawFunction
 	// By (receiver, name) too, so `Camera::new` picks the right one of several
 	// same-named associated functions.
-	byName := make(map[string][]*RawFunction)
-	byRecv := make(map[string][]*RawFunction)
+	byRecv map[string][]*RawFunction
+}
+
+func newCalleeResolver(raw *RawExtraction, st *SymbolTable, ownerOf map[string]string) *calleeResolver {
+	r := &calleeResolver{
+		st:      st,
+		ownerOf: ownerOf,
+		byName:  make(map[string][]*RawFunction),
+		byRecv:  make(map[string][]*RawFunction),
+	}
 	for i := range raw.Functions {
 		f := &raw.Functions[i]
-		byName[f.Name] = append(byName[f.Name], f)
+		r.byName[f.Name] = append(r.byName[f.Name], f)
 		if f.Receiver != "" {
-			byRecv[f.Receiver+"::"+f.Name] = append(byRecv[f.Receiver+"::"+f.Name], f)
+			r.byRecv[f.Receiver+"::"+f.Name] = append(r.byRecv[f.Receiver+"::"+f.Name], f)
 		}
 	}
+	return r
+}
 
-	counts := make(map[edgeKey]int)
-
-	// In a module-scoped language an unimported symbol cannot be called, so
-	// zero visibility is no match at all. Accepting those invented edges that
-	// ran backwards through ripgrep's crate graph and fused a third of the
-	// city into one "cycle".
-	pick := func(defs []*RawFunction, fromFile string) string {
-		if len(defs) == 0 {
-			return ""
-		}
-		strict := st.scopes.IsModuleScoped(fromFile)
-		if len(defs) == 1 {
-			if strict && st.scopes.rank(fromFile, defs[0].Namespace) < visImported {
-				return ""
-			}
-			return ownerOf[funcKey(defs[0])]
-		}
-		best, bestRank := "", -1
-		ambiguous := 0
-		for _, d := range defs {
-			r := st.scopes.rank(fromFile, d.Namespace)
-			if d.SourceFile == fromFile {
-				r++
-			}
-			owner := ownerOf[funcKey(d)]
-			if r > bestRank {
-				best, bestRank, ambiguous = owner, r, 1
-			} else if r == bestRank {
-				ambiguous++
-				if owner < best {
-					best = owner
-				}
-			}
-		}
-		// Several equally invisible definitions carry no information, and a
-		// wrong edge is worse than a missing one.
-		if strict && bestRank < visImported {
-			return ""
-		}
-		if bestRank <= visAnywhere && ambiguous > 3 {
-			return ""
-		}
-		return best
-	}
-
-	scoped := func(name string, namespaces []string, fromFile string) string {
-		if len(namespaces) == 0 {
-			return ""
-		}
-		allowed := make(map[string]bool, len(namespaces))
-		for _, ns := range namespaces {
-			allowed[ns] = true
-		}
-		var defs []*RawFunction
-		for _, d := range byName[name] {
-			if allowed[d.Namespace] {
-				defs = append(defs, d)
-			}
-		}
-		return pick(defs, fromFile)
-	}
-
-	// A method call gives the name but never the receiver's type, so only an
-	// unambiguous resolution is honest. Linking `x.len()` to whichever
-	// definition ranked highest fused 126 of ripgrep's 355 buildings into one
-	// bogus component.
-	pickUnambiguous := func(name, fromFile string) string {
-		defs := byName[name]
-		if len(defs) == 0 {
-			return ""
-		}
-		if len(defs) == 1 {
-			return ownerOf[funcKey(defs[0])]
-		}
-		var local []*RawFunction
-		for _, d := range defs {
-			if d.SourceFile == fromFile || st.scopes.rank(fromFile, d.Namespace) >= visOwn {
-				local = append(local, d)
-			}
-		}
-		if len(local) == 1 {
-			return ownerOf[funcKey(local[0])]
-		}
+// In a module-scoped language an unimported symbol cannot be called, so
+// zero visibility is no match at all. Accepting those invented edges that
+// ran backwards through ripgrep's crate graph and fused a third of the
+// city into one "cycle".
+func (r *calleeResolver) pick(defs []*RawFunction, fromFile string) string {
+	if len(defs) == 0 {
 		return ""
 	}
-
-	resolveCallee := func(ref lang.Ref, fromFile string) string {
-		if ref.Method {
-			return pickUnambiguous(ref.Name, fromFile)
+	strict := r.st.scopes.IsModuleScoped(fromFile)
+	if len(defs) == 1 {
+		if strict && r.st.scopes.rank(fromFile, defs[0].Namespace) < visImported {
+			return ""
 		}
+		return r.ownerOf[funcKey(defs[0])]
+	}
+	best, bestRank := "", -1
+	tiedAtBest := 0
+	for _, d := range defs {
+		rank := r.st.scopes.rank(fromFile, d.Namespace)
+		if d.SourceFile == fromFile {
+			rank++
+		}
+		owner := r.ownerOf[funcKey(d)]
+		if rank > bestRank {
+			best, bestRank, tiedAtBest = owner, rank, 1
+		} else if rank == bestRank {
+			tiedAtBest++
+			if owner < best {
+				best = owner
+			}
+		}
+	}
+	// Several equally invisible definitions carry no information, and a
+	// wrong edge is worse than a missing one.
+	if strict && bestRank < visImported {
+		return ""
+	}
+	if bestRank <= visAnywhere && tiedAtBest > 3 {
+		return ""
+	}
+	return best
+}
 
-		// An unqualified call may still be a renamed import.
-		if ref.Qualifier == "" {
-			if real, namespaces := st.scopes.aliasTarget(ref.Name, fromFile); real != "" {
-				if owner := scoped(real, namespaces, fromFile); owner != "" {
+func (r *calleeResolver) scoped(name string, namespaces []string, fromFile string) string {
+	if len(namespaces) == 0 {
+		return ""
+	}
+	allowed := make(map[string]bool, len(namespaces))
+	for _, ns := range namespaces {
+		allowed[ns] = true
+	}
+	var defs []*RawFunction
+	for _, d := range r.byName[name] {
+		if allowed[d.Namespace] {
+			defs = append(defs, d)
+		}
+	}
+	return r.pick(defs, fromFile)
+}
+
+// A method call gives the name but never the receiver's type, so only an
+// unambiguous resolution is honest. Linking `x.len()` to whichever
+// definition ranked highest fused 126 of ripgrep's 355 buildings into one
+// bogus component.
+func (r *calleeResolver) pickUnambiguous(name, fromFile string) string {
+	defs := r.byName[name]
+	if len(defs) == 0 {
+		return ""
+	}
+	if len(defs) == 1 {
+		return r.ownerOf[funcKey(defs[0])]
+	}
+	var local []*RawFunction
+	for _, d := range defs {
+		if d.SourceFile == fromFile || r.st.scopes.rank(fromFile, d.Namespace) >= visOwn {
+			local = append(local, d)
+		}
+	}
+	if len(local) == 1 {
+		return r.ownerOf[funcKey(local[0])]
+	}
+	return ""
+}
+
+func (r *calleeResolver) resolve(ref lang.Ref, fromFile string) string {
+	if ref.Method {
+		return r.pickUnambiguous(ref.Name, fromFile)
+	}
+
+	// An unqualified call may still be a renamed import.
+	if ref.Qualifier == "" {
+		if real, namespaces := r.st.scopes.aliasTarget(ref.Name, fromFile); real != "" {
+			if owner := r.scoped(real, namespaces, fromFile); owner != "" {
+				return owner
+			}
+		}
+	}
+
+	if ref.Qualifier != "" {
+		// `Type::method` - the qualifier is the receiver.
+		if recvType := r.st.scopes.qualifierType(ref.Qualifier, fromFile); recvType != "" {
+			if defs := r.byRecv[recvType+"::"+ref.Name]; len(defs) > 0 {
+				if owner := r.pick(defs, fromFile); owner != "" {
 					return owner
 				}
 			}
 		}
-
-		if ref.Qualifier != "" {
-			// `Type::method` - the qualifier is the receiver.
-			if recvType := st.scopes.qualifierType(ref.Qualifier, fromFile); recvType != "" {
-				if defs := byRecv[recvType+"::"+ref.Name]; len(defs) > 0 {
-					if owner := pick(defs, fromFile); owner != "" {
-						return owner
-					}
-				}
-			}
-			// `module::func` - restrict candidates to that module.
-			if owner := scoped(ref.Name, st.scopes.expand(ref.Qualifier, fromFile), fromFile); owner != "" {
-				return owner
-			}
+		// `module::func` - restrict candidates to that module.
+		if owner := r.scoped(ref.Name, r.st.scopes.expand(ref.Qualifier, fromFile), fromFile); owner != "" {
+			return owner
 		}
-		// A bare name in a module-scoped language can only mean something
-		// declared here or explicitly imported.
-		if st.scopes.IsModuleScoped(fromFile) {
-			own := st.scopes.OwnNamespace(fromFile)
-			var local []*RawFunction
-			for _, d := range byName[ref.Name] {
-				if d.Namespace == own {
-					local = append(local, d)
-				}
-			}
-			if owner := pick(local, fromFile); owner != "" {
-				return owner
-			}
-			return ""
-		}
-		return pick(byName[ref.Name], fromFile)
 	}
+	// A bare name in a module-scoped language can only mean something
+	// declared here or explicitly imported.
+	if r.st.scopes.IsModuleScoped(fromFile) {
+		own := r.st.scopes.OwnNamespace(fromFile)
+		var local []*RawFunction
+		for _, d := range r.byName[ref.Name] {
+			if d.Namespace == own {
+				local = append(local, d)
+			}
+		}
+		if owner := r.pick(local, fromFile); owner != "" {
+			return owner
+		}
+		return ""
+	}
+	return r.pick(r.byName[ref.Name], fromFile)
+}
+
+// Three calls to `foo()` from one method of Vdbe give one edge Vdbe -> owner of
+// foo, weight 3.
+func BuildDependencies(raw *RawExtraction, st *SymbolTable, ownerOf map[string]string) []models.DependencyEdge {
+	callees := newCalleeResolver(raw, st, ownerOf)
+	counts := make(map[edgeKey]int)
 
 	for i := range raw.Functions {
 		fn := &raw.Functions[i]
@@ -172,7 +187,7 @@ func BuildDependencies(raw *RawExtraction, st *SymbolTable, ownerOf map[string]s
 			continue
 		}
 		for _, callee := range fn.Calls {
-			tgt := resolveCallee(callee, fn.SourceFile)
+			tgt := callees.resolve(callee, fn.SourceFile)
 			if tgt == "" || tgt == src {
 				continue
 			}
@@ -196,22 +211,25 @@ func BuildDependencies(raw *RawExtraction, st *SymbolTable, ownerOf map[string]s
 			Source: k.src, Target: k.tgt, Weight: w, Kind: k.kind,
 		})
 	}
+	return keepStrongest(all, maxOutPerBuilding)
+}
 
-	slices.SortFunc(all, func(a, b models.DependencyEdge) int {
+func keepStrongest(edges []models.DependencyEdge, perSource int) []models.DependencyEdge {
+	slices.SortFunc(edges, func(a, b models.DependencyEdge) int {
 		return cmp.Or(strings.Compare(a.Source, b.Source), cmp.Compare(b.Weight, a.Weight), strings.Compare(a.Target, b.Target))
 	})
 
-	out := make([]models.DependencyEdge, 0, len(all))
-	perSrc := 0
+	out := make([]models.DependencyEdge, 0, len(edges))
+	kept := 0
 	var lastSrc string
-	for _, e := range all {
+	for _, e := range edges {
 		if e.Source != lastSrc {
-			lastSrc, perSrc = e.Source, 0
+			lastSrc, kept = e.Source, 0
 		}
-		if perSrc >= maxOutPerBuilding {
+		if kept >= perSource {
 			continue
 		}
-		perSrc++
+		kept++
 		out = append(out, e)
 	}
 	return out

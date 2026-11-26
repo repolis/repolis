@@ -9,7 +9,14 @@ use crate::render::*;
 use crate::{CityElement, CityIndex, HighlightLinkLayer, LinkLayer};
 use crate::{BUILDING_BASE, DISTRICT_TOP, GROUND_Y, PAVEMENT_Y};
 
-fn slab(r: Rect, y0: f32, y1: f32) -> (Vec3, Vec3) {
+struct Slab<'a> {
+    rect: Rect,
+    bottom: f32,
+    top: f32,
+    material: &'a Handle<StandardMaterial>,
+}
+
+fn slab_corners(r: Rect, y0: f32, y1: f32) -> (Vec3, Vec3) {
     (
         Vec3::new(r.min.x, y0, r.min.y),
         Vec3::new(r.max.x, y1, r.max.y),
@@ -58,22 +65,24 @@ pub(crate) fn spawn_city(
         ..default()
     });
     // Lines start at the ground so one height serves avenues and streets.
-    let slabs = result
-        .blocks
-        .iter()
-        .map(|&r| (r, DISTRICT_TOP, PAVEMENT_Y, &pavement))
-        .chain(
-            result
-                .lane_lines
-                .iter()
-                .map(|&r| (r, GROUND_Y, DISTRICT_TOP + 0.02, &paint)),
-        );
-    for (r, y0, y1, material) in slabs {
+    let blocks = result.blocks.iter().map(|&rect| Slab {
+        rect,
+        bottom: DISTRICT_TOP,
+        top: PAVEMENT_Y,
+        material: &pavement,
+    });
+    let lane_lines = result.lane_lines.iter().map(|&rect| Slab {
+        rect,
+        bottom: GROUND_Y,
+        top: DISTRICT_TOP + 0.02,
+        material: &paint,
+    });
+    for slab in blocks.chain(lane_lines) {
         commands.spawn((
             PbrBundle {
                 mesh: cube.clone(),
-                material: material.clone(),
-                transform: box_transform(slab(r, y0, y1)),
+                material: slab.material.clone(),
+                transform: box_transform(slab_corners(slab.rect, slab.bottom, slab.top)),
                 ..default()
             },
             CityElement,
@@ -81,7 +90,7 @@ pub(crate) fn spawn_city(
     }
 
     for (i, &ground) in result.districts.iter().enumerate() {
-        let (min, max) = slab(ground, GROUND_Y + 0.02, DISTRICT_TOP);
+        let (min, max) = slab_corners(ground, GROUND_Y + 0.02, DISTRICT_TOP);
         commands.spawn((
             PbrBundle {
                 mesh: cube.clone(),
