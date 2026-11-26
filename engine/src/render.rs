@@ -1,13 +1,14 @@
+use bevy::asset::RenderAssetUsages;
+use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::pbr::{ExtendedMaterial, MaterialExtension};
 use bevy::prelude::*;
-use bevy::render::mesh::{Indices, PrimitiveTopology};
-use bevy::render::render_asset::RenderAssetUsages;
-use bevy::render::render_resource::{AsBindGroup, ShaderRef};
+use bevy::render::render_resource::AsBindGroup;
+use bevy::shader::ShaderRef;
 
 use crate::layout::{Direction, Link};
 
-pub const FACADE_SHADER: Handle<Shader> =
-    Handle::weak_from_u128(0x5e1f_a3ad_e000_4b1d_9c3a_7f02_b11d_0001);
+// Registered by `embedded_asset!` in lib.rs.
+const FACADE_SHADER: &str = "embedded://engine/shaders/facade.wesl";
 
 /// Floor height and window column width, in world units.
 const FACADE_GRID: Vec4 = Vec4::new(1.3, 1.5, 0.0, 0.0);

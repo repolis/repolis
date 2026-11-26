@@ -1,11 +1,11 @@
-#import bevy_pbr::{
+import bevy_pbr::render::{
     forward_io::{VertexOutput, FragmentOutput},
     pbr_fragment::pbr_input_from_standard_material,
     pbr_functions::{alpha_discard, apply_pbr_lighting, main_pass_post_lighting_processing},
-}
+};
 
 // x: floor height, y: window column width, in world units.
-@group(2) @binding(100) var<uniform> grid: vec4<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(100) var<uniform> grid: vec4<f32>;
 
 fn hash(p: vec2<f32>) -> f32 {
     return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.547);
@@ -19,7 +19,11 @@ fn band(x: f32, lo: f32, hi: f32, w: f32) -> f32 {
 @fragment
 fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> FragmentOutput {
     var pbr_input = pbr_input_from_standard_material(in, is_front);
-    pbr_input.material.base_color = alpha_discard(pbr_input.material, pbr_input.material.base_color);
+    pbr_input.material.base_color = alpha_discard(
+        pbr_input.material.flags,
+        pbr_input.material.alpha_cutoff,
+        pbr_input.material.base_color,
+    );
 
     let n = in.world_normal;
     let wall = 1.0 - step(0.5, abs(n.y));
@@ -57,7 +61,7 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     let facade = select(base * 0.82, base, wall > 0.5);
     pbr_input.material.base_color = vec4(mix(facade, pane, glass), pbr_input.material.base_color.a);
     pbr_input.material.perceptual_roughness = mix(pbr_input.material.perceptual_roughness, 0.12, glass);
-    pbr_input.material.reflectance = mix(pbr_input.material.reflectance, 0.9, glass);
+    pbr_input.material.reflectance = mix(pbr_input.material.reflectance, vec3(0.9), glass);
 
     var out: FragmentOutput;
     out.color = apply_pbr_lighting(pbr_input);

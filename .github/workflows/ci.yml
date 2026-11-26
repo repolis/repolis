@@ -104,8 +104,6 @@ jobs:
           path: frontend/src/wasm
       - run: npm ci
         working-directory: ./frontend
-      # Lint errors fail the build; the remaining warnings are the WebGPU shims
-      # in main.tsx, where `any` is the honest type for patching browser globals.
       - run: make check-frontend
       - run: npm run build
         working-directory: ./frontend

@@ -25,7 +25,7 @@ use appearance::{apply_appearance, Appearance, ShowLinks};
 use camera::camera_controls;
 use layout::Link;
 use picking::{picking_system, Hovered};
-use render::{BuildingMaterials, FACADE_SHADER};
+use render::BuildingMaterials;
 use scene::{process_city_data, setup_scene, SKY_COLOR};
 
 const GROUND_Y: f32 = 0.0;
@@ -60,10 +60,11 @@ pub fn add_city_systems(app: &mut App) {
         .init_resource::<Appearance>()
         .init_resource::<ShowLinks>()
         .insert_resource(ClearColor(SKY_COLOR))
-        .insert_resource(AmbientLight {
+        .insert_resource(GlobalAmbientLight {
             color: Color::srgb(0.80, 0.86, 0.96),
             // Low: shadows carry the depth cue, and more washes the massing flat.
             brightness: 260.0,
+            ..default()
         })
         .add_systems(Startup, setup_scene)
         .add_systems(
@@ -99,7 +100,7 @@ pub fn run_bevy_app() {
                 ..default()
             })
             .set(RenderPlugin {
-                render_creation: RenderCreation::Automatic(WgpuSettings {
+                render_creation: RenderCreation::from(WgpuSettings {
                     // WebGL2 too: WebGPU alone is a blank canvas in Firefox and older Safari.
                     backends: Some(Backends::BROWSER_WEBGPU | Backends::GL),
                     ..default()
@@ -107,7 +108,7 @@ pub fn run_bevy_app() {
                 ..default()
             }),
     );
-    bevy::asset::load_internal_asset!(app, FACADE_SHADER, "shaders/facade.wgsl", Shader::from_wgsl);
+    bevy::asset::embedded_asset!(app, "shaders/facade.wesl");
     app.add_plugins(MaterialPlugin::<FacadeMaterial>::default());
     add_city_systems(&mut app);
     app.run();

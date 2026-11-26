@@ -56,9 +56,9 @@ pub(crate) fn apply_appearance(
     mut index: ResMut<CityIndex>,
     look: Res<Appearance>,
     show: Res<ShowLinks>,
-    mut buildings: Query<(&Pickable, &mut Handle<FacadeMaterial>)>,
-    grounds: Query<(&Pickable, &Handle<StandardMaterial>)>,
-    highlight_q: Query<(&HighlightLinkLayer, &Handle<Mesh>)>,
+    mut buildings: Query<(&Pickable, &mut MeshMaterial3d<FacadeMaterial>)>,
+    grounds: Query<(&Pickable, &MeshMaterial3d<StandardMaterial>)>,
+    highlight_q: Query<(&HighlightLinkLayer, &Mesh3d)>,
     mut link_layers: Query<&mut Visibility, With<LinkLayer>>,
 ) {
     if show.is_changed() {
@@ -97,7 +97,7 @@ pub(crate) fn apply_appearance(
             continue;
         };
         let set = material_set(&mut facades, &mut index.materials, rgb);
-        *handle = match look.states.get(i).copied() {
+        handle.0 = match look.states.get(i).copied() {
             Some(DIM) => set.dim,
             Some(BRIGHT) => set.bright,
             Some(FADED) => faded.clone(),
@@ -107,7 +107,9 @@ pub(crate) fn apply_appearance(
     // Each ground owns its material, so the colour is set in place.
     for (p, handle) in &grounds {
         if let Target::District(i) = p.target {
-            if let (Some(rgb), Some(m)) = (rgb_at(&look.grounds, i), materials.get_mut(handle)) {
+            if let (Some(rgb), Some(mut m)) =
+                (rgb_at(&look.grounds, i), materials.get_mut(&handle.0))
+            {
                 m.base_color = Color::srgb(rgb[0], rgb[1], rgb[2]);
             }
         }
@@ -126,7 +128,7 @@ pub(crate) fn apply_appearance(
             .iter()
             .filter(|l| l.in_cycle == layer.cycles && pairs.contains(&(l.source, l.target)))
             .collect();
-        if let Some(mesh) = meshes.get_mut(mesh_handle) {
+        if let Some(mut mesh) = meshes.get_mut(&mesh_handle.0) {
             *mesh = if layer.cycles {
                 build_link_mesh(&chosen, 0.6, &CYCLE_LINKS)
             } else {

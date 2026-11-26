@@ -38,16 +38,13 @@ pub(crate) fn spawn_city(
     // Far past the city, so the fog swallows its edge.
     let ground_radius = result.radius * 8.0 + 400.0;
     commands.spawn((
-        PbrBundle {
-            mesh: meshes.add(Circle::new(ground_radius).mesh().resolution(96)),
-            material: materials.add(StandardMaterial {
-                base_color: Color::srgb(0.06, 0.065, 0.075),
-                perceptual_roughness: 1.0,
-                ..default()
-            }),
-            transform: Transform::from_rotation(Quat::from_rotation_x(-FRAC_PI_2)),
+        Mesh3d(meshes.add(Circle::new(ground_radius).mesh().resolution(96))),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: Color::srgb(0.06, 0.065, 0.075),
+            perceptual_roughness: 1.0,
             ..default()
-        },
+        })),
+        Transform::from_rotation(Quat::from_rotation_x(-FRAC_PI_2)),
         CityElement,
     ));
 
@@ -79,12 +76,9 @@ pub(crate) fn spawn_city(
     });
     for slab in blocks.chain(lane_lines) {
         commands.spawn((
-            PbrBundle {
-                mesh: cube.clone(),
-                material: slab.material.clone(),
-                transform: box_transform(slab_corners(slab.rect, slab.bottom, slab.top)),
-                ..default()
-            },
+            Mesh3d(cube.clone()),
+            MeshMaterial3d(slab.material.clone()),
+            box_transform(slab_corners(slab.rect, slab.bottom, slab.top)),
             CityElement,
         ));
     }
@@ -92,17 +86,14 @@ pub(crate) fn spawn_city(
     for (i, &ground) in result.districts.iter().enumerate() {
         let (min, max) = slab_corners(ground, GROUND_Y + 0.02, DISTRICT_TOP);
         commands.spawn((
-            PbrBundle {
-                mesh: cube.clone(),
-                // Own material: the ground colour is set in place.
-                material: materials.add(StandardMaterial {
-                    base_color: Color::srgb(0.2, 0.2, 0.21),
-                    perceptual_roughness: 0.95,
-                    ..default()
-                }),
-                transform: box_transform((min, max)),
+            Mesh3d(cube.clone()),
+            // Own material: the ground colour is set in place.
+            MeshMaterial3d(materials.add(StandardMaterial {
+                base_color: Color::srgb(0.2, 0.2, 0.21),
+                perceptual_roughness: 0.95,
                 ..default()
-            },
+            })),
+            box_transform((min, max)),
             Pickable {
                 target: Target::District(i),
                 min,
@@ -122,12 +113,9 @@ pub(crate) fn spawn_city(
         let half = Vec3::new(b.size.x, 0.0, b.size.z) * 0.5;
         let (min, max) = (base - half, base + half + Vec3::Y * b.size.y);
         commands.spawn((
-            MaterialMeshBundle {
-                mesh: building.clone(),
-                material: neutral.clone(),
-                transform: box_transform((min, max)),
-                ..default()
-            },
+            Mesh3d(building.clone()),
+            MeshMaterial3d(neutral.clone()),
+            box_transform((min, max)),
             Pickable {
                 target: Target::Building(b.order),
                 min,
@@ -141,12 +129,9 @@ pub(crate) fn spawn_city(
     let links = result.links;
     let all: Vec<&Link> = links.iter().collect();
     commands.spawn((
-        PbrBundle {
-            mesh: meshes.add(build_link_mesh(&all, 0.0, &ALL_LINKS)),
-            visibility: Visibility::Hidden,
-            material: link_material(materials, 0.30),
-            ..default()
-        },
+        Mesh3d(meshes.add(build_link_mesh(&all, 0.0, &ALL_LINKS))),
+        MeshMaterial3d(link_material(materials, 0.30)),
+        Visibility::Hidden,
         LinkLayer,
         CityElement,
     ));
@@ -154,23 +139,17 @@ pub(crate) fn spawn_city(
     // Cycles in red on top: the one thing a file tree cannot show.
     let cycle_links: Vec<&Link> = links.iter().filter(|l| l.in_cycle).collect();
     commands.spawn((
-        PbrBundle {
-            mesh: meshes.add(build_link_mesh(&cycle_links, 0.6, &CYCLE_LINKS)),
-            visibility: Visibility::Hidden,
-            material: link_material(materials, 1.0),
-            ..default()
-        },
+        Mesh3d(meshes.add(build_link_mesh(&cycle_links, 0.6, &CYCLE_LINKS))),
+        MeshMaterial3d(link_material(materials, 1.0)),
+        Visibility::Hidden,
         LinkLayer,
         CityElement,
     ));
 
     for cycles in [false, true] {
         commands.spawn((
-            PbrBundle {
-                mesh: meshes.add(build_link_mesh(&[], 0.0, &HIGHLIGHT_LINKS)),
-                material: link_material(materials, 1.0),
-                ..default()
-            },
+            Mesh3d(meshes.add(build_link_mesh(&[], 0.0, &HIGHLIGHT_LINKS))),
+            MeshMaterial3d(link_material(materials, 1.0)),
             HighlightLinkLayer { cycles },
             CityElement,
         ));

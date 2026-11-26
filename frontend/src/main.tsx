@@ -4,7 +4,6 @@ import { createRoot } from "react-dom/client";
 import { routeTree } from "./routeTree.gen";
 
 import "./index.css";
-import "./webgpu-shim";
 
 const router = createRouter({ routeTree, defaultPreload: "intent" });
 

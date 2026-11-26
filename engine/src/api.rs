@@ -117,10 +117,10 @@ pub(crate) fn publish_camera(
     mut last: Local<LastMove>,
     mut settled: Local<bool>,
 ) {
-    let Ok((_, cam)) = cam_q.get_single() else {
+    let Ok((_, cam)) = cam_q.single() else {
         return;
     };
-    let now = time.elapsed_seconds_f64();
+    let now = time.elapsed_secs_f64();
     let moved = (cam.focus - last.focus).length() > 0.01 || (cam.radius - last.radius).abs() > 0.01;
     if moved {
         *last = LastMove {
@@ -142,7 +142,7 @@ pub(crate) fn publish_labels(
     camera_q: Query<(&Camera, &GlobalTransform), With<CityCamera>>,
     index: Res<CityIndex>,
 ) {
-    let Ok((camera, cam_tf)) = camera_q.get_single() else {
+    let Ok((camera, cam_tf)) = camera_q.single() else {
         return;
     };
     let far = index.radius.max(1.0) * 6.0;
@@ -153,7 +153,7 @@ pub(crate) fn publish_labels(
             let dist = cam_tf.translation().distance(world);
             match camera.world_to_viewport(cam_tf, world) {
                 // Hidden where labels would overlap, and when zoomed into one building.
-                Some(p) if dist > 12.0 && dist < far => {
+                Ok(p) if dist > 12.0 && dist < far => {
                     [p.x, p.y, (1.0 - dist / far).clamp(0.25, 1.0)]
                 }
                 _ => [0.0; 3],
@@ -173,14 +173,14 @@ pub(crate) fn consume_commands(
     for cmd in cmds {
         match cmd {
             Command::Reset => {
-                if let Ok(mut cam) = cam_q.get_single_mut() {
+                if let Ok(mut cam) = cam_q.single_mut() {
                     cam.go_home();
                 }
             }
             Command::Links(on) => show.0 = on,
             Command::Appearance(next) => *look = next,
             Command::Camera(state) => {
-                if let Ok(mut cam) = cam_q.get_single_mut() {
+                if let Ok(mut cam) = cam_q.single_mut() {
                     cam.apply_state(&state);
                 }
             }
@@ -189,7 +189,7 @@ pub(crate) fn consume_commands(
                 let Some(p) = pickables.iter().find(|p| p.target == target) else {
                     continue;
                 };
-                if let Ok(mut cam) = cam_q.get_single_mut() {
+                if let Ok(mut cam) = cam_q.single_mut() {
                     frame(&mut cam, p);
                 }
                 dispatch_select(Some(target));

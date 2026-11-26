@@ -104,11 +104,11 @@ pub fn camera_controls(
     mut query: Query<(&mut Transform, &mut CityCamera)>,
     keys: Res<ButtonInput<KeyCode>>,
     buttons: Res<ButtonInput<MouseButton>>,
-    mut motion: EventReader<MouseMotion>,
-    mut wheel: EventReader<MouseWheel>,
+    mut motion: MessageReader<MouseMotion>,
+    mut wheel: MessageReader<MouseWheel>,
     time: Res<Time>,
 ) {
-    let dt = time.delta_seconds();
+    let dt = time.delta_secs();
 
     let mut drag = Vec2::ZERO;
     let dragging = buttons.pressed(MouseButton::Left) || buttons.pressed(MouseButton::Right);

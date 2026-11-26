@@ -1,6 +1,6 @@
 use bevy::asset::AssetPlugin;
+use bevy::mesh::MeshPlugin;
 use bevy::prelude::*;
-use bevy::render::mesh::MeshPlugin;
 use bevy::window::WindowPlugin;
 
 fn headless_app() -> App {
@@ -13,7 +13,6 @@ fn headless_app() -> App {
             ..default()
         },
         TransformPlugin,
-        HierarchyPlugin,
         bevy::input::InputPlugin,
         MeshPlugin,
     ));
@@ -24,7 +23,7 @@ fn headless_app() -> App {
     // Single-threaded like the wasm build: the city is handed over through a
     // thread_local, which a worker thread would never see.
     app.edit_schedule(Update, |s| {
-        s.set_executor_kind(bevy::ecs::schedule::ExecutorKind::SingleThreaded);
+        s.set_executor(bevy::ecs::schedule::SingleThreadedExecutor::default());
     });
     app
 }

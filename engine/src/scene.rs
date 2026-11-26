@@ -1,4 +1,4 @@
-use bevy::pbr::CascadeShadowConfigBuilder;
+use bevy::light::CascadeShadowConfigBuilder;
 use bevy::prelude::*;
 
 use crate::api::take_pending_city;
@@ -18,40 +18,37 @@ const FOG_COLOR: Color = Color::srgb(0.72, 0.85, 1.0);
 
 pub(crate) fn setup_scene(mut commands: Commands) {
     commands.spawn((
-        Camera3dBundle {
-            projection: Projection::Perspective(PerspectiveProjection {
-                fov: CAMERA_FOV,
-                near: 0.5,
-                far: 60000.0,
-                ..default()
-            }),
-            transform: Transform::from_xyz(60.0, 70.0, 100.0).looking_at(Vec3::ZERO, Vec3::Y),
+        Camera3d::default(),
+        Projection::Perspective(PerspectiveProjection {
+            fov: CAMERA_FOV,
+            near: 0.5,
+            far: 60000.0,
             ..default()
-        },
+        }),
+        Transform::from_xyz(60.0, 70.0, 100.0).looking_at(Vec3::ZERO, Vec3::Y),
         // The distances follow the city; see `city_fog`.
         city_fog(200.0),
         CityCamera::default(),
     ));
 
     // Without cast shadows the height-based massing reads flat.
-    commands.spawn(DirectionalLightBundle {
-        directional_light: DirectionalLight {
+    commands.spawn((
+        DirectionalLight {
             illuminance: 11000.0,
-            shadows_enabled: true,
+            shadow_maps_enabled: true,
             color: Color::srgb(1.0, 0.95, 0.87),
             ..default()
         },
         // Low afternoon sun: long shadows fall across the streets.
-        transform: Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, -0.6, 0.6, 0.0)),
-        cascade_shadow_config: CascadeShadowConfigBuilder {
+        Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, -0.6, 0.6, 0.0)),
+        CascadeShadowConfigBuilder {
             num_cascades: 2,
             maximum_distance: 1600.0,
             first_cascade_far_bound: 220.0,
             ..default()
         }
         .build(),
-        ..default()
-    });
+    ));
 }
 
 fn home_distance(radius: f32) -> f32 {
@@ -59,9 +56,9 @@ fn home_distance(radius: f32) -> f32 {
 }
 
 /// Starts past the city's near half and hides the ground's edge before the camera reaches it.
-fn city_fog(radius: f32) -> FogSettings {
+fn city_fog(radius: f32) -> DistanceFog {
     let home = home_distance(radius);
-    FogSettings {
+    DistanceFog {
         color: FOG_COLOR,
         directional_light_color: Color::srgba(1.0, 0.9, 0.7, 0.4),
         falloff: FogFalloff::Linear {
@@ -81,7 +78,7 @@ pub(crate) fn process_city_data(
     mut index: ResMut<CityIndex>,
     mut hovered: ResMut<Hovered>,
     mut look: ResMut<Appearance>,
-    mut camera_q: Query<(&mut Transform, &mut CityCamera, &mut FogSettings)>,
+    mut camera_q: Query<(&mut Transform, &mut CityCamera, &mut DistanceFog)>,
     existing: Query<Entity, With<CityElement>>,
 ) {
     let Some(city) = take_pending_city() else {
@@ -93,7 +90,7 @@ pub(crate) fn process_city_data(
     let had_city = index.radius > 0.0;
 
     for e in existing.iter() {
-        commands.entity(e).despawn_recursive();
+        commands.entity(e).despawn();
     }
     *hovered = Hovered::default();
     *index = CityIndex::default();

@@ -1,5 +1,5 @@
-use bevy::math::bounding::{Aabb3d, RayCast3d};
 use bevy::prelude::*;
+use bevy::shape::{Aabb3d, RayCast3d};
 
 use crate::camera::CityCamera;
 use crate::events::*;
@@ -31,13 +31,13 @@ pub(crate) fn picking_system(
     if keys.just_pressed(KeyCode::Escape) {
         dispatch_select(None);
     }
-    let (Ok(window), Ok((camera, cam_tf))) = (windows.get_single(), camera_q.get_single()) else {
+    let (Ok(window), Ok((camera, cam_tf))) = (windows.single(), camera_q.single()) else {
         return;
     };
 
     let cursor = window.cursor_position();
     let hit = cursor
-        .and_then(|cursor| camera.viewport_to_world(cam_tf, cursor))
+        .and_then(|cursor| camera.viewport_to_world(cam_tf, cursor).ok())
         .and_then(|ray| nearest(ray, &pickables));
     let target = hit.map(|p| p.target);
 
@@ -52,7 +52,7 @@ pub(crate) fn picking_system(
     let clicked = mouse.just_released(MouseButton::Left)
         && matches!((pressed_at.take(), cursor), (Some(down), Some(up)) if down.distance(up) < CLICK_SLOP_PX);
     if clicked {
-        if let (Some(p), Ok(mut cam)) = (hit, city_cam.get_single_mut()) {
+        if let (Some(p), Ok(mut cam)) = (hit, city_cam.single_mut()) {
             frame(&mut cam, p);
         }
         dispatch_select(target);
