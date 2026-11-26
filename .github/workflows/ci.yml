@@ -61,7 +61,7 @@ jobs:
       # Most pushes do not touch the engine, so the frontend reuses the last
       # wasm instead of waiting for a cold Bevy release build.
       - id: cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: frontend/src/wasm
           key: wasm-${{ hashFiles('engine/src/**', 'engine/Cargo.toml', 'engine/Cargo.lock', 'engine/build-wasm.sh') }}
